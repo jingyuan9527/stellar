@@ -11,6 +11,7 @@ backend/src/main/resources/application-prod.yml
 .env
 .env.*
 !.env.example
+!frontend/.env
 
 # 日志与 IDE
 *.log
