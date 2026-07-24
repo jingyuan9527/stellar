@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed, h, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NIcon, NDropdown, NAvatar, NBreadcrumb, NBreadcrumbItem } from 'naive-ui'
+import { NIcon, NDropdown, NAvatar, NBreadcrumb, NBreadcrumbItem, NModal, NForm, NFormItem, NInput, NButton, NSpace, useMessage } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import { useThemeStore } from '@/store/theme'
 import { useAuthStore } from '@/store/auth'
 import { useIsMobile } from '@/composables/useBreakpoint'
 import { iconMap } from '@/utils/icons'
+import { changePassword } from '@/api/user'
 
 const route = useRoute()
 const router = useRouter()
 const themeStore = useThemeStore()
 const authStore = useAuthStore()
 const isMobile = useIsMobile()
+const message = useMessage()
 
 const emit = defineEmits<{ 'open-theme': []; 'toggle-sider': [] }>()
 
@@ -30,6 +32,7 @@ function renderIcon(name: string) {
 
 const userOptions: DropdownOption[] = [
   { label: '用户资料', key: 'profile', icon: () => renderIcon('person') },
+  { label: '修改密码', key: 'change-password', icon: () => renderIcon('lock') },
   { type: 'divider', key: 'd1' },
   { label: '退出登录', key: 'logout', icon: () => renderIcon('logout') },
 ]
@@ -37,12 +40,50 @@ const userOptions: DropdownOption[] = [
 function handleUserSelect(key: string) {
   if (key === 'profile') {
     router.push('/system/user-profile')
+  } else if (key === 'change-password') {
+    openPasswordModal()
   } else if (key === 'logout') {
     authStore.logout()
   }
 }
 
 const avatarText = computed(() => authStore.userInfo?.nickname?.charAt(0) || 'U')
+
+// 修改密码弹窗
+const showPasswordModal = ref(false)
+const saving = ref(false)
+const passwordForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
+
+function openPasswordModal() {
+  passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+  showPasswordModal.value = true
+}
+
+async function handleSubmitPassword() {
+  const { oldPassword, newPassword, confirmPassword } = passwordForm.value
+  if (!oldPassword || !newPassword || !confirmPassword) {
+    message.warning('请填写完整')
+    return
+  }
+  if (newPassword !== confirmPassword) {
+    message.warning('两次输入的新密码不一致')
+    return
+  }
+  if (newPassword.length < 6 || newPassword.length > 32) {
+    message.warning('新密码长度需在 6-32 位之间')
+    return
+  }
+  saving.value = true
+  try {
+    await changePassword({ oldPassword, newPassword })
+    message.success('密码修改成功')
+    showPasswordModal.value = false
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    saving.value = false
+  }
+}
 </script>
 
 <template>
@@ -87,6 +128,40 @@ const avatarText = computed(() => authStore.userInfo?.nickname?.charAt(0) || 'U'
       </NDropdown>
       <NButton v-else type="primary" size="small" @click="router.push('/login')">登录</NButton>
     </div>
+
+    <NModal v-model:show="showPasswordModal" preset="card" title="修改密码" style="width: 420px; max-width: 90vw">
+      <NForm label-placement="top">
+        <NFormItem label="旧密码">
+          <NInput
+            v-model:value="passwordForm.oldPassword"
+            type="password"
+            show-password-on="click"
+            placeholder="请输入当前密码"
+          />
+        </NFormItem>
+        <NFormItem label="新密码">
+          <NInput
+            v-model:value="passwordForm.newPassword"
+            type="password"
+            show-password-on="click"
+            placeholder="6-32 位"
+          />
+        </NFormItem>
+        <NFormItem label="确认新密码">
+          <NInput
+            v-model:value="passwordForm.confirmPassword"
+            type="password"
+            show-password-on="click"
+            placeholder="再次输入新密码"
+            @keyup.enter="handleSubmitPassword"
+          />
+        </NFormItem>
+        <NSpace justify="end">
+          <NButton @click="showPasswordModal = false">取消</NButton>
+          <NButton type="primary" :loading="saving" @click="handleSubmitPassword">确认</NButton>
+        </NSpace>
+      </NForm>
+    </NModal>
   </div>
 </template>
 
