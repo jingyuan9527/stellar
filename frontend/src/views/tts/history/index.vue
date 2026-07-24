@@ -10,8 +10,10 @@ import { getTtsRecordPage, getTtsRecordAudio, deleteTtsRecord } from '@/api/tts'
 import type { TtsRecord, TtsRecordQuery } from '@/types/api'
 import { iconMap } from '@/utils/icons'
 import { getVoiceLabel, ttsVoiceOptions } from '@/constants/tts-voices'
+import { useAuthStore } from '@/store/auth'
 
 const message = useMessage()
+const authStore = useAuthStore()
 
 const query = reactive<TtsRecordQuery>({
   text: '',
@@ -68,17 +70,20 @@ const columns: DataTableColumns<TtsRecord> = [
   },
   {
     title: '操作', key: 'actions', width: 200, fixed: 'right',
-    render: (row) =>
-      h(NSpace, { size: 4 }, {
-        default: () => [
-          h(NButton, { size: 'small', text: true, type: 'primary', onClick: () => openAudio(row) },
-            { icon: () => h(NIcon, null, { default: () => h(iconMap.play) }), default: () => '试听' }),
-          h(NButton, { size: 'small', text: true, type: 'info', onClick: () => handleDownload(row) },
-            { icon: () => h(NIcon, null, { default: () => h(iconMap.download) }), default: () => '下载' }),
-          h(NButton, { size: 'small', text: true, type: 'error', onClick: () => handleDelete(row) },
-            { icon: () => h(NIcon, null, { default: () => h(iconMap.trash) }), default: () => '删除' }),
-        ],
-      }),
+    render: (row) => {
+      const actions = [
+        h(NButton, { size: 'small', text: true, type: 'primary', onClick: () => openAudio(row) },
+          { icon: () => h(NIcon, null, { default: () => h(iconMap.play) }), default: () => '试听' }),
+        h(NButton, { size: 'small', text: true, type: 'info', onClick: () => handleDownload(row) },
+          { icon: () => h(NIcon, null, { default: () => h(iconMap.download) }), default: () => '下载' }),
+      ]
+      // 删除仅登录用户可见（公共墙游客只读）
+      if (authStore.isLogin) {
+        actions.push(h(NButton, { size: 'small', text: true, type: 'error', onClick: () => handleDelete(row) },
+          { icon: () => h(NIcon, null, { default: () => h(iconMap.trash) }), default: () => '删除' }))
+      }
+      return h(NSpace, { size: 4 }, { default: () => actions })
+    },
   },
 ]
 

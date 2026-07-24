@@ -77,7 +77,7 @@ const avatarText = computed(() => authStore.userInfo?.nickname?.charAt(0) || 'U'
           </NIcon>
         </template>
       </NButton>
-      <NDropdown :options="userOptions" @select="handleUserSelect">
+      <NDropdown v-if="authStore.isLogin" :options="userOptions" @select="handleUserSelect">
         <div class="user-info">
           <NAvatar round size="small" :color="themeStore.primaryColor">
             {{ avatarText }}
@@ -85,6 +85,7 @@ const avatarText = computed(() => authStore.userInfo?.nickname?.charAt(0) || 'U'
           <span v-if="!isMobile" class="username">{{ authStore.userInfo?.nickname || '用户' }}</span>
         </div>
       </NDropdown>
+      <NButton v-else type="primary" size="small" @click="router.push('/login')">登录</NButton>
     </div>
   </div>
 </template>

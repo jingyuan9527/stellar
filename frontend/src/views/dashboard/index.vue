@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, h } from 'vue'
-import { NCard, NGrid, NGridItem, NIcon, NStatistic, NSpace, NButton } from 'naive-ui'
+import { computed, h, onMounted, ref } from 'vue'
+import { NCard, NGrid, NGridItem, NIcon, NStatistic, NEmpty } from 'naive-ui'
 import { useAuthStore } from '@/store/auth'
 import { iconMap } from '@/utils/icons'
+import { getAiUsageStats } from '@/api/ai'
+import type { AiUsageStats } from '@/types/api'
 
 const authStore = useAuthStore()
+const stats = ref<AiUsageStats | null>(null)
 
 const greeting = computed(() => {
   const hour = new Date().getHours()
@@ -15,18 +18,33 @@ const greeting = computed(() => {
   return '晚上好'
 })
 
-const stats = [
-  { label: '用户数', value: 1280, icon: 'person', color: '#18a058' },
-  { label: '访问量', value: 8846, icon: 'grid', color: '#2080f0' },
-  { label: '订单数', value: 326, icon: 'list', color: '#f0a020' },
-  { label: '消息数', value: 18, icon: 'info', color: '#d03050' },
-]
+const statCards = computed(() => [
+  { label: '总 Token 消耗', value: stats.value?.totalTokens ?? 0, icon: 'sparkles', color: '#18a058' },
+  { label: '今日 Token', value: stats.value?.todayTokens ?? 0, icon: 'info', color: '#2080f0' },
+  { label: '总调用次数', value: stats.value?.totalCalls ?? 0, icon: 'grid', color: '#f0a020' },
+  { label: '今日调用', value: stats.value?.todayCalls ?? 0, icon: 'list', color: '#d03050' },
+])
 
 function renderStatIcon(name: string, color: string) {
   const Icon = iconMap[name]
   if (!Icon) return null
   return h(NIcon, { size: 28, color }, { default: () => h(Icon) })
 }
+
+const maxTrendTokens = computed(() => {
+  if (!stats.value?.dailyTrend?.length) return 1
+  return Math.max(1, ...stats.value.dailyTrend.map((d) => d.tokens))
+})
+
+async function loadStats() {
+  try {
+    stats.value = await getAiUsageStats()
+  } catch {
+    // 错误已由拦截器提示
+  }
+}
+
+onMounted(loadStats)
 </script>
 
 <template>
@@ -35,7 +53,7 @@ function renderStatIcon(name: string, color: string) {
       <div class="welcome">
         <div class="welcome-text">
           <h2>{{ greeting }}，{{ authStore.userInfo?.nickname || '用户' }} 👋</h2>
-          <p>欢迎使用 Stellar Admin，一个清新优雅的后台管理框架。</p>
+          <p>Stellar 个人实验沉淀池 · AI token 消费看板</p>
         </div>
         <div class="welcome-icon">
           <NIcon size="64" color="#18a058">
@@ -47,7 +65,7 @@ function renderStatIcon(name: string, color: string) {
 
     <NGrid :x-gap="16" :y-gap="16" :cols="4" responsive="screen" item-responsive>
       <NGridItem
-        v-for="item in stats"
+        v-for="item in statCards"
         :key="item.label"
         span="4 m:2 l:1"
       >
@@ -62,22 +80,20 @@ function renderStatIcon(name: string, color: string) {
       </NGridItem>
     </NGrid>
 
-    <NCard title="项目说明" :bordered="false">
-      <NSpace vertical :size="12">
-        <p>本框架为纯脚手架壳，已集成以下能力：</p>
-        <ul class="feature-list">
-          <li>左侧多级菜单 + 右侧内容区布局</li>
-          <li>登录鉴权（Sa-Token + PostgreSQL）</li>
-          <li>多标签页 + 面包屑导航</li>
-          <li>暗黑模式 + 主题色配置</li>
-          <li>可折叠侧栏</li>
-        </ul>
-        <NSpace>
-          <NButton type="primary" @click="$router.push('/system/user-profile')">
-            查看用户资料
-          </NButton>
-        </NSpace>
-      </NSpace>
+    <NCard title="近 7 日 Token 消耗趋势" :bordered="false">
+      <div v-if="stats?.dailyTrend?.length" class="trend">
+        <div v-for="d in stats.dailyTrend" :key="d.date" class="trend-item">
+          <div class="trend-bar-wrap">
+            <div
+              class="trend-bar"
+              :style="{ height: (d.tokens / maxTrendTokens * 100) + '%' }"
+            ></div>
+          </div>
+          <div class="trend-label">{{ d.date.slice(5) }}</div>
+          <div class="trend-val">{{ d.tokens }}</div>
+        </div>
+      </div>
+      <NEmpty v-else description="暂无数据" />
     </NCard>
   </div>
 </template>
@@ -121,9 +137,58 @@ function renderStatIcon(name: string, color: string) {
   background: rgba(127, 127, 127, 0.1);
 }
 
-.feature-list {
-  margin: 0;
-  padding-left: 20px;
-  line-height: 1.9;
+.trend {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  height: 220px;
+  padding: 0 4px;
+}
+
+.trend-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+}
+
+.trend-bar-wrap {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.trend-bar {
+  width: 70%;
+  max-width: 48px;
+  background: var(--primary-color, #18a058);
+  border-radius: 6px 6px 0 0;
+  min-height: 2px;
+  transition: height 0.3s;
+}
+
+.trend-label {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.trend-val {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .trend {
+    height: 160px;
+    gap: 6px;
+  }
+  .trend-label,
+  .trend-val {
+    font-size: 10px;
+  }
 }
 </style>

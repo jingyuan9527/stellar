@@ -152,3 +152,100 @@ COMMENT ON COLUMN sys_ai_copy_result.create_time IS '创建时间';
 COMMENT ON COLUMN sys_ai_copy_result.update_time IS '更新时间';
 COMMENT ON COLUMN sys_ai_copy_result.deleted IS '逻辑删除: 0未删 1已删';
 CREATE INDEX IF NOT EXISTS idx_sys_ai_copy_result_creator ON sys_ai_copy_result (creator_id, create_time DESC);
+
+-- 菜单可见性配置表（控制哪些路由对游客公开）
+CREATE TABLE IF NOT EXISTS sys_menu_visibility (
+    id              BIGSERIAL PRIMARY KEY,
+    route_key       VARCHAR(100) NOT NULL UNIQUE,
+    route_name      VARCHAR(100),
+    parent_key      VARCHAR(100),
+    public_visible  SMALLINT DEFAULT 0,
+    sort_order      INT DEFAULT 0,
+    create_time     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_menu_visibility IS '菜单可见性配置表';
+COMMENT ON COLUMN sys_menu_visibility.id IS '主键';
+COMMENT ON COLUMN sys_menu_visibility.route_key IS '前端路由 key（与 useMenu 生成 key 一致，如 /tts/edge）';
+COMMENT ON COLUMN sys_menu_visibility.route_name IS '路由名称（展示用）';
+COMMENT ON COLUMN sys_menu_visibility.parent_key IS '父菜单 key（便于分组展示，如 /tts）';
+COMMENT ON COLUMN sys_menu_visibility.public_visible IS '是否对游客公开: 0否 1是';
+COMMENT ON COLUMN sys_menu_visibility.sort_order IS '排序';
+COMMENT ON COLUMN sys_menu_visibility.create_time IS '创建时间';
+COMMENT ON COLUMN sys_menu_visibility.update_time IS '更新时间';
+
+-- 作品橱窗表（游客可见的折腾成果）
+CREATE TABLE IF NOT EXISTS sys_showcase (
+    id           BIGSERIAL PRIMARY KEY,
+    type         VARCHAR(32) NOT NULL,
+    title        VARCHAR(200) NOT NULL,
+    summary      VARCHAR(500),
+    cover_url    VARCHAR(500),
+    content      TEXT,
+    media_url    VARCHAR(500),
+    link         VARCHAR(500),
+    tags         VARCHAR(200),
+    sort_order   INT DEFAULT 0,
+    visible      SMALLINT DEFAULT 1,
+    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_showcase IS '作品橱窗表';
+COMMENT ON COLUMN sys_showcase.id IS '主键';
+COMMENT ON COLUMN sys_showcase.type IS '类型: cover|text|audio|demo|project|link';
+COMMENT ON COLUMN sys_showcase.title IS '标题';
+COMMENT ON COLUMN sys_showcase.summary IS '摘要';
+COMMENT ON COLUMN sys_showcase.cover_url IS '封面图URL(/uploads/xxx)';
+COMMENT ON COLUMN sys_showcase.content IS '富文本或JSON正文';
+COMMENT ON COLUMN sys_showcase.media_url IS '音视频/媒体URL';
+COMMENT ON COLUMN sys_showcase.link IS '跳转链接';
+COMMENT ON COLUMN sys_showcase.tags IS '标签,逗号分隔';
+COMMENT ON COLUMN sys_showcase.sort_order IS '排序';
+COMMENT ON COLUMN sys_showcase.visible IS '是否公开展示: 0否 1是';
+COMMENT ON COLUMN sys_showcase.create_time IS '创建时间';
+COMMENT ON COLUMN sys_showcase.update_time IS '更新时间';
+CREATE INDEX IF NOT EXISTS idx_sys_showcase_visible ON sys_showcase (visible, sort_order);
+
+-- 个人介绍表（单条配置，落地页用）
+CREATE TABLE IF NOT EXISTS sys_profile (
+    id           BIGSERIAL PRIMARY KEY,
+    nickname     VARCHAR(64),
+    avatar       VARCHAR(500),
+    bio          TEXT,
+    skills       VARCHAR(500),
+    links        TEXT,
+    update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_profile IS '个人介绍表(单条)';
+COMMENT ON COLUMN sys_profile.id IS '主键(固定1)';
+COMMENT ON COLUMN sys_profile.nickname IS '昵称';
+COMMENT ON COLUMN sys_profile.avatar IS '头像URL';
+COMMENT ON COLUMN sys_profile.bio IS '简介';
+COMMENT ON COLUMN sys_profile.skills IS '技能标签,逗号分隔';
+COMMENT ON COLUMN sys_profile.links IS '外链JSON,如 {github,email,site}';
+COMMENT ON COLUMN sys_profile.update_time IS '更新时间';
+
+-- AI token 消费记录表（计费/统计用）
+CREATE TABLE IF NOT EXISTS sys_ai_usage (
+    id                BIGSERIAL PRIMARY KEY,
+    subject_type      VARCHAR(16) NOT NULL,
+    subject_id        VARCHAR(64) NOT NULL,
+    model             VARCHAR(100),
+    prompt_tokens     INT DEFAULT 0,
+    completion_tokens INT DEFAULT 0,
+    total_tokens      INT DEFAULT 0,
+    source            VARCHAR(16) DEFAULT 'usage',
+    create_time       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_ai_usage IS 'AI token 消费记录表';
+COMMENT ON COLUMN sys_ai_usage.id IS '主键';
+COMMENT ON COLUMN sys_ai_usage.subject_type IS '主体类型: account/ip';
+COMMENT ON COLUMN sys_ai_usage.subject_id IS '主体ID: userId 或 IP';
+COMMENT ON COLUMN sys_ai_usage.model IS 'LLM 模型名';
+COMMENT ON COLUMN sys_ai_usage.prompt_tokens IS '输入 token 数';
+COMMENT ON COLUMN sys_ai_usage.completion_tokens IS '输出 token 数';
+COMMENT ON COLUMN sys_ai_usage.total_tokens IS '总 token 数';
+COMMENT ON COLUMN sys_ai_usage.source IS 'token 来源: usage(LLM返回) / estimate(字符估算)';
+COMMENT ON COLUMN sys_ai_usage.create_time IS '调用时间';
+CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_subject ON sys_ai_usage (subject_type, subject_id, create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_create_time ON sys_ai_usage (create_time DESC);

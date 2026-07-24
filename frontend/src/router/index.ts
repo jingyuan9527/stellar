@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
 import { useTabStore } from '@/store/tab'
+import { useMenuStore } from '@/store/menu'
 
 const Layout = () => import('@/layouts/BasicLayout.vue')
 
@@ -15,14 +16,26 @@ export const routes: RouteRecordRaw[] = [
     path: '/',
     name: 'Root',
     component: Layout,
-    redirect: '/dashboard',
+    redirect: '/home',
     meta: { requiresAuth: true },
     children: [
+      {
+        path: 'home',
+        name: 'Home',
+        component: () => import('@/views/home/index.vue'),
+        meta: { title: '首页', icon: 'home', order: 0, requiresAuth: false },
+      },
       {
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/dashboard/index.vue'),
         meta: { title: '仪表盘', icon: 'grid', order: 1, affix: true },
+      },
+      {
+        path: 'showcase',
+        name: 'Showcase',
+        component: () => import('@/views/showcase/index.vue'),
+        meta: { title: '作品橱窗', icon: 'image', order: 2, requiresAuth: false },
       },
       {
         path: 'system',
@@ -53,6 +66,24 @@ export const routes: RouteRecordRaw[] = [
             name: 'SystemAiTemplate',
             component: () => import('@/views/system/ai-template/index.vue'),
             meta: { title: 'AI 模板管理', icon: 'palette', order: 4 },
+          },
+          {
+            path: 'menu-visibility',
+            name: 'SystemMenuVisibility',
+            component: () => import('@/views/system/menu-visibility/index.vue'),
+            meta: { title: '游客访问配置', icon: 'eye', order: 5 },
+          },
+          {
+            path: 'showcase',
+            name: 'SystemShowcase',
+            component: () => import('@/views/system/showcase/index.vue'),
+            meta: { title: '橱窗管理', icon: 'image', order: 6 },
+          },
+          {
+            path: 'profile',
+            name: 'SystemProfile',
+            component: () => import('@/views/system/profile/index.vue'),
+            meta: { title: '个人资料', icon: 'info', order: 7 },
           },
         ],
       },
@@ -122,6 +153,7 @@ const whiteList = ['/login']
 router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
   const tabStore = useTabStore()
+  const menuStore = useMenuStore()
 
   if (to.meta.title) {
     document.title = `${to.meta.title} - Stellar Admin`
@@ -136,12 +168,19 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
+  // 首页等天然公开路由：放行（不加多标签）
   if (to.meta.requiresAuth === false) {
     next()
     return
   }
 
+  // 未登录：加载游客可见菜单配置，命中公开的工具页则放行，否则跳登录
   if (!authStore.isLogin) {
+    await menuStore.loadPublicConfig()
+    if (menuStore.publicKeys.includes(to.path)) {
+      next()
+      return
+    }
     next({ path: '/login', query: { redirect: to.fullPath } })
     return
   }

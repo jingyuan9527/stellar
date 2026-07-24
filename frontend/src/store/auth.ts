@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { login as loginApi, logout as logoutApi } from '@/api/auth'
 import { getUserInfo as getUserInfoApi } from '@/api/user'
 import type { LoginRequest, SysUser } from '@/types/api'
+import { useMenuStore } from '@/store/menu'
 import router from '@/router'
 
 const TOKEN_KEY = 'stellar-token'
@@ -26,6 +27,7 @@ export const useAuthStore = defineStore('auth', () => {
     const res = await loginApi(data)
     setToken(res.token)
     userInfo.value = res.userInfo
+    useMenuStore().reset()
     return res
   }
 
@@ -41,6 +43,7 @@ export const useAuthStore = defineStore('auth', () => {
       await logoutApi()
     } finally {
       reset()
+      useMenuStore().reset()
       router.replace('/login')
     }
   }

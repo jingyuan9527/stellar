@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { NLayout, NLayoutContent, NBackTop, NDrawer, NDrawerContent, NIcon } from 'naive-ui'
 import { useIsMobile } from '@/composables/useBreakpoint'
 import { useThemeStore } from '@/store/theme'
+import { useAuthStore } from '@/store/auth'
 import { iconMap } from '@/utils/icons'
 import LayoutSider from './components/LayoutSider.vue'
 import LayoutHeader from './components/LayoutHeader.vue'
@@ -12,6 +13,7 @@ import ThemeDrawer from './components/ThemeDrawer.vue'
 
 const isMobile = useIsMobile()
 const themeStore = useThemeStore()
+const authStore = useAuthStore()
 
 const themeDrawerShow = ref(false)
 const refreshKey = ref(0)
@@ -54,7 +56,7 @@ watch(isMobile, (mobile) => {
 
     <NLayout class="layout-main">
       <LayoutHeader @open-theme="themeDrawerShow = true" @toggle-sider="handleToggleSider" />
-      <LayoutTabs @refresh="handleRefresh" />
+      <LayoutTabs v-if="authStore.isLogin" @refresh="handleRefresh" />
       <NLayoutContent
         class="layout-content"
         :content-style="isMobile ? 'padding: 12px;' : 'padding: 16px;'"

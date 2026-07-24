@@ -120,3 +120,71 @@ export interface CopyResultData {
   description: string
   tags: string[]
 }
+
+export interface MenuVisibility {
+  id: number
+  routeKey: string
+  routeName: string
+  parentKey: string | null
+  publicVisible: number
+  sortOrder: number
+  createTime: string
+  updateTime: string
+}
+
+export interface MenuVisibilityItem {
+  routeKey: string
+  routeName: string
+  parentKey: string | null
+  publicVisible: number
+  sortOrder: number
+}
+
+export type ShowcaseType = 'cover' | 'text' | 'audio' | 'demo' | 'project' | 'link'
+
+export interface Showcase {
+  id: number
+  type: ShowcaseType
+  title: string
+  summary: string | null
+  coverUrl: string | null
+  content: string | null
+  mediaUrl: string | null
+  link: string | null
+  tags: string | null
+  sortOrder: number
+  visible: number
+  createTime: string
+  updateTime: string
+}
+
+export interface ShowcaseQuery {
+  type?: string
+  title?: string
+  pageNum: number
+  pageSize: number
+}
+
+export interface Profile {
+  id: number
+  nickname: string
+  avatar: string | null
+  bio: string | null
+  skills: string | null
+  links: string | null
+  updateTime: string
+}
+
+export interface AiUsageDailyPoint {
+  date: string
+  tokens: number
+  calls: number
+}
+
+export interface AiUsageStats {
+  totalTokens: number
+  todayTokens: number
+  totalCalls: number
+  todayCalls: number
+  dailyTrend: AiUsageDailyPoint[]
+}

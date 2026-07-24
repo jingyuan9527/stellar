@@ -1,15 +1,19 @@
 package com.stellar.service;
 
+import cn.dev33.satoken.stp.StpUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.common.BusinessException;
+import com.stellar.dto.ChatRequest;
 import com.stellar.entity.SysAiConfig;
-import com.stellar.mapper.SysAiConfigMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.BufferedReader;
@@ -26,9 +30,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * AI 流式聊天服务，通过 SseEmitter 将 LLM 的 SSE 流转发给前端。
- * <p>
- * 后端代理调用 LLM 端点，API Key 不暴露给浏览器。
+ * AI 流式聊天服务，通过 SseEmitter 转发 LLM 的 SSE 流。
+ * <p>请求加 stream_options.include_usage 以获取 token 用量；LLM 不返回则字符估算兜底。
+ * 每次调用记录 token 消费（主体：登录按账号，游客按 IP）。
  */
 @Slf4j
 @Service
@@ -37,41 +41,62 @@ public class AiChatService {
 
     private final AiConfigService aiConfigService;
     private final ObjectMapper objectMapper;
+    private final SysAiUsageService sysAiUsageService;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 
-    /**
-     * 流式聊天，返回 SseEmitter。
-     * <p>
-     * 每个 LLM delta 以 {"content":"xxx"} 事件转发，结束时发 {"done":true}。
-     */
-    public SseEmitter streamChat(String prompt) {
-        SysAiConfig config = aiConfigService.getRawConfig();
-        if (!StringUtils.hasText(config.getEndpoint())) {
-            throw new BusinessException("AI 接口未配置");
-        }
-        if (!StringUtils.hasText(config.getApiKey())) {
-            throw new BusinessException("AI API Key 未配置");
-        }
-        if (!StringUtils.hasText(config.getModel())) {
-            throw new BusinessException("AI 模型未配置");
+    public SseEmitter streamChat(ChatRequest request) {
+        String prompt = request.getPrompt();
+        SysAiConfig config;
+        if (StringUtils.hasText(request.getEndpoint())
+                && StringUtils.hasText(request.getApiKey())
+                && StringUtils.hasText(request.getModel())) {
+            // 用户自带配置（前端 localStorage 临时传入，后端不持久化）
+            config = new SysAiConfig();
+            config.setEndpoint(request.getEndpoint());
+            config.setApiKey(request.getApiKey());
+            config.setModel(request.getModel());
+        } else {
+            config = aiConfigService.getRawConfig();
+            if (!StringUtils.hasText(config.getEndpoint())) {
+                throw new BusinessException("AI 接口未配置");
+            }
+            if (!StringUtils.hasText(config.getApiKey())) {
+                throw new BusinessException("AI API Key 未配置");
+            }
+            if (!StringUtils.hasText(config.getModel())) {
+                throw new BusinessException("AI 模型未配置");
+            }
         }
 
-        String endpoint = config.getEndpoint().replaceAll("/+$", "");
-        String url = endpoint + "/v1/chat/completions";
+        String url = config.getEndpoint().replaceAll("/+$", "") + "/v1/chat/completions";
+        String model = config.getModel();
+
+        // 主体判断（同步阶段，request 上下文可用）
+        String subjectType;
+        String subjectId;
+        if (StpUtil.isLogin()) {
+            subjectType = "account";
+            subjectId = StpUtil.getLoginIdAsString();
+        } else {
+            subjectType = "ip";
+            subjectId = getClientIp();
+        }
 
         SseEmitter emitter = new SseEmitter(120000L);
 
         try {
             Map<String, Object> body = new HashMap<>();
-            body.put("model", config.getModel());
+            body.put("model", model);
             body.put("messages", List.of(Map.of("role", "user", "content", prompt)));
             body.put("stream", true);
+            // 请求 LLM 在流式末帧返回 usage（OpenAI 兼容）
+            body.put("stream_options", Map.of("include_usage", true));
             String bodyJson = objectMapper.writeValueAsString(body);
 
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofMinutes(5))
                     .header("Content-Type", "application/json")
@@ -79,14 +104,20 @@ public class AiChatService {
                     .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
                     .build();
 
-            log.info("AI 流式请求: model={}, promptLen={}", config.getModel(), prompt.length());
+            log.info("AI 流式请求: model={}, promptLen={}, subject={}:{}", model, prompt.length(), subjectType, subjectId);
 
-            httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
+            final String finalSubjectType = subjectType;
+            final String finalSubjectId = subjectId;
+
+            httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
                     .thenAccept(response -> {
                         if (response.statusCode() != 200) {
                             sendError(emitter, "LLM 返回错误: HTTP " + response.statusCode());
                             return;
                         }
+                        StringBuilder completionBuf = new StringBuilder();
+                        int[] usage = {0, 0, 0};
+                        boolean[] hasUsage = {false};
                         try (InputStream is = response.body()) {
                             BufferedReader reader = new BufferedReader(
                                     new InputStreamReader(is, StandardCharsets.UTF_8));
@@ -101,18 +132,45 @@ public class AiChatService {
                                     String delta = json.path("choices").path(0)
                                             .path("delta").path("content").asText("");
                                     if (!delta.isEmpty()) {
+                                        completionBuf.append(delta);
                                         emitter.send(SseEmitter.event()
-                                                .data(Map.of("content", delta),
-                                                        MediaType.APPLICATION_JSON));
+                                                .data(Map.of("content", delta), MediaType.APPLICATION_JSON));
+                                    }
+                                    JsonNode usageNode = json.path("usage");
+                                    if (!usageNode.isMissingNode() && usageNode.has("total_tokens")) {
+                                        usage[0] = usageNode.path("prompt_tokens").asInt(0);
+                                        usage[1] = usageNode.path("completion_tokens").asInt(0);
+                                        usage[2] = usageNode.path("total_tokens").asInt(0);
+                                        hasUsage[0] = true;
                                     }
                                 } catch (Exception e) {
                                     log.debug("解析 LLM 响应分片失败: {}", data);
                                 }
                             }
+                            // 记录 token 消费
+                            int promptTokens;
+                            int completionTokens;
+                            int totalTokens;
+                            String source;
+                            if (hasUsage[0]) {
+                                promptTokens = usage[0];
+                                completionTokens = usage[1];
+                                totalTokens = usage[2];
+                                source = "usage";
+                            } else {
+                                promptTokens = estimateTokens(prompt);
+                                completionTokens = estimateTokens(completionBuf.toString());
+                                totalTokens = promptTokens + completionTokens;
+                                source = "estimate";
+                            }
+                            sysAiUsageService.record(finalSubjectType, finalSubjectId, model,
+                                    promptTokens, completionTokens, totalTokens, source);
+
                             emitter.send(SseEmitter.event()
                                     .data(Map.of("done", true), MediaType.APPLICATION_JSON));
                             emitter.complete();
-                            log.info("AI 流式响应完成");
+                            log.info("AI 流式响应完成 tokens={}/{}/{} source={}",
+                                    promptTokens, completionTokens, totalTokens, source);
                         } catch (Exception e) {
                             log.info("流式响应结束: {}", e.getMessage());
                             try {
@@ -131,6 +189,36 @@ public class AiChatService {
         }
 
         return emitter;
+    }
+
+    /**
+     * 字符估算 token：中文约 1 字符≈1 token，英文 4 字符≈1 token；
+     * 粗略取字符数作为保守估计（仅当 LLM 不返回 usage 时兜底）。
+     */
+    private int estimateTokens(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        return text.length();
+    }
+
+    private String getClientIp() {
+        try {
+            HttpServletRequest req = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
+            String ip = req.getHeader("X-Forwarded-For");
+            if (ip != null && !ip.isBlank()) {
+                ip = ip.split(",")[0].trim();
+            }
+            if (ip == null || ip.isBlank()) {
+                ip = req.getHeader("X-Real-IP");
+            }
+            if (ip == null || ip.isBlank()) {
+                ip = req.getRemoteAddr();
+            }
+            return ip;
+        } catch (Exception e) {
+            return "unknown";
+        }
     }
 
     private void sendError(SseEmitter emitter, String message) {

@@ -7,12 +7,14 @@ import {
 } from 'naive-ui'
 import type { SelectGroupOption, SelectOption } from 'naive-ui'
 import { iconMap } from '@/utils/icons'
+import { useAuthStore } from '@/store/auth'
 import { synthesizeEdgeTts, getTtsRecordPage, getTtsRecordAudio } from '@/api/tts'
 import type { TtsRecord } from '@/types/api'
 import { ttsVoiceOptions, getVoiceLabel } from '@/constants/tts-voices'
 
 const router = useRouter()
 const message = useMessage()
+const authStore = useAuthStore()
 
 const text = ref('欢迎使用 Edge 语音合成，输入文本后选择发音人即可生成高质量神经网络语音。')
 const voiceValue = ref('zh-CN-XiaoxiaoNeural')
@@ -77,7 +79,7 @@ async function handleSynthesize() {
     })
     audioUrl.value = URL.createObjectURL(blob)
     message.success('语音合成成功')
-    loadRecentRecords()
+    if (authStore.isLogin) loadRecentRecords()
   } catch {
     // 错误已由拦截器提示
   } finally {
@@ -139,7 +141,7 @@ function goToHistory() {
 }
 
 onMounted(() => {
-  loadRecentRecords()
+  if (authStore.isLogin) loadRecentRecords()
 })
 
 onBeforeUnmount(() => {
@@ -248,7 +250,7 @@ onBeforeUnmount(() => {
       </NEmpty>
     </NCard>
 
-    <NCard title="最近合成" :bordered="false">
+    <NCard v-if="authStore.isLogin" title="最近合成" :bordered="false">
       <template #header-extra>
         <NButton text type="primary" @click="goToHistory">
           查看全部

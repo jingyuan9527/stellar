@@ -1,6 +1,6 @@
 import service, { request } from './request'
 import { useAuthStore } from '@/store/auth'
-import type { AiConfig, AiTemplate, AiTemplateQuery, AiCopyResult, PageResult } from '@/types/api'
+import type { AiConfig, AiTemplate, AiTemplateQuery, AiCopyResult, AiUsageStats, PageResult } from '@/types/api'
 
 // ===== AI 配置 =====
 
@@ -52,16 +52,23 @@ export async function streamAiChat(
   prompt: string,
   onDelta: (full: string) => void,
   signal: AbortSignal,
+  userConfig?: { endpoint?: string; apiKey?: string; model?: string },
 ): Promise<string> {
   const authStore = useAuthStore()
   const base = import.meta.env.VITE_API_BASE_URL
+  const body: Record<string, string> = { prompt }
+  if (userConfig?.endpoint && userConfig?.apiKey && userConfig?.model) {
+    body.endpoint = userConfig.endpoint
+    body.apiKey = userConfig.apiKey
+    body.model = userConfig.model
+  }
   const res = await fetch(`${base}/ai/chat/stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${authStore.token}`,
     },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify(body),
     signal,
   })
 
@@ -116,4 +123,11 @@ export function deleteCopyResult(id: number) {
 
 export function clearCopyResults() {
   return request<void>({ url: '/ai/copy-result', method: 'delete' })
+}
+
+// ===== AI token 统计 =====
+
+/** token 消费统计（仪表盘，需登录） */
+export function getAiUsageStats() {
+  return request<AiUsageStats>({ url: '/ai/chat/usage/stats', method: 'get' })
 }

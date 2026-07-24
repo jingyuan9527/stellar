@@ -3,6 +3,8 @@ package com.stellar.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.stellar.annotation.Log;
 import com.stellar.common.Result;
+import com.stellar.common.annotation.PublicAccess;
+import com.stellar.common.annotation.RateLimit;
 import com.stellar.dto.TtsRecordQueryDTO;
 import com.stellar.dto.TtsRequest;
 import com.stellar.entity.TtsRecord;
@@ -40,7 +42,10 @@ public class TtsController {
 
     /**
      * Edge TTS 语音合成，返回 MP3 音频流，同时保存合成记录。
+     * <p>对游客开放（edge 免费），受 IP 单日限流保护；游客合成记录 operator=anonymous。
      */
+    @PublicAccess
+    @RateLimit(daily = 20)
     @PostMapping("/edge/synthesize")
     @Log(title = "语音合成", type = OperationType.OTHER)
     public ResponseEntity<byte[]> synthesize(@Valid @RequestBody TtsRequest request) {
@@ -70,8 +75,9 @@ public class TtsController {
     }
 
     /**
-     * 分页查询合成历史。
+     * 分页查询合成历史（公共墙，游客可读）。
      */
+    @PublicAccess
     @GetMapping("/record/page")
     @Log(title = "合成历史", type = OperationType.QUERY)
     public Result<Page<TtsRecord>> recordPage(@ModelAttribute TtsRecordQueryDTO query) {
@@ -79,8 +85,9 @@ public class TtsController {
     }
 
     /**
-     * 按记录 ID 获取音频数据（用于试听与下载）。
+     * 按记录 ID 获取音频数据（公共墙，游客可试听/下载）。
      */
+    @PublicAccess
     @GetMapping("/record/{id}/audio")
     public ResponseEntity<byte[]> recordAudio(@PathVariable Long id) {
         byte[] audio = ttsRecordService.getAudio(id);

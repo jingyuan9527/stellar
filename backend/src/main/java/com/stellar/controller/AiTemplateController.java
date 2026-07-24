@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.stellar.annotation.Log;
 import com.stellar.common.Result;
+import com.stellar.common.annotation.PublicAccess;
 import com.stellar.dto.AiTemplateDTO;
 import com.stellar.dto.AiTemplateQueryDTO;
 import com.stellar.entity.SysAiTemplate;
@@ -30,6 +31,7 @@ public class AiTemplateController {
 
     private final AiTemplateService aiTemplateService;
 
+    @PublicAccess
     @GetMapping("/page")
     @Log(title = "AI模板", type = OperationType.QUERY)
     public Result<Page<SysAiTemplate>> page(@ModelAttribute AiTemplateQueryDTO query) {

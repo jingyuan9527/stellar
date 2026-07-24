@@ -7,16 +7,24 @@ import {
   NPopconfirm, NEmpty, NAlert, useMessage,
 } from 'naive-ui'
 import { useCoverStore } from '../store/cover'
+import { useApiConfigStore } from '../store/apiConfig'
+import { useUIStore } from '../store/ui'
+import ApiSettingsModal from '../components/ApiSettingsModal.vue'
 import { buildPrompt, parseCopyResult } from '../lib/llm'
 import {
   getAiConfig, getAiTemplatePage, streamAiChat,
   saveCopyResult, getCopyResultPage, deleteCopyResult, clearCopyResults,
 } from '@/api/ai'
+import { createShowcase } from '@/api/showcase'
+import { useAuthStore } from '@/store/auth'
 import type { AiTemplate, AiCopyResult, CopyResultData } from '@/types/api'
 
 const router = useRouter()
 const message = useMessage()
 const coverStore = useCoverStore()
+const authStore = useAuthStore()
+const apiConfigStore = useApiConfigStore()
+const uiStore = useUIStore()
 
 // ===== 模板 =====
 const templates = ref<AiTemplate[]>([])
@@ -110,17 +118,34 @@ async function generate() {
       buildPrompt(tpl.prompt, topic.value.trim()),
       (text) => { raw.value = text },
       ac.signal,
+      apiConfigStore.state,
     )
     const parsed = parseCopyResult(full)
     if (parsed) {
-      await saveCopyResult({
-        topic: topic.value.trim(),
-        templateId: tpl.id,
-        result: JSON.stringify(parsed),
-      })
-      await loadHistory()
-      const latest = history.value[0]
-      if (latest) activeId.value = latest.id
+      if (authStore.isLogin) {
+        await saveCopyResult({
+          topic: topic.value.trim(),
+          templateId: tpl.id,
+          result: JSON.stringify(parsed),
+        })
+        await loadHistory()
+        const latest = history.value[0]
+        if (latest) activeId.value = latest.id
+      } else {
+        // 游客不持久化，本地虚拟一项用于展示生成结果
+        const tempId = Date.now()
+        history.value.unshift({
+          id: tempId,
+          topic: topic.value.trim(),
+          templateId: tpl.id,
+          result: JSON.stringify(parsed),
+          generatedAt: Date.now(),
+          creatorId: 0,
+          createTime: new Date().toISOString(),
+          updateTime: new Date().toISOString(),
+        } as AiCopyResult)
+        activeId.value = tempId
+      }
     } else {
       message.error('未能解析为 JSON，已展示原始文本')
     }
@@ -179,10 +204,30 @@ function formatTag(t: string) {
   return t.startsWith('#') ? t : `#${t}`
 }
 
+async function saveToShowcase() {
+  if (!activeResult.value || !display.value) return
+  try {
+    await createShowcase({
+      type: 'text',
+      title: activeResult.value.topic,
+      content: activeResult.value.result,
+      tags: display.value.tags.map(formatTag).join(','),
+      visible: 1,
+    })
+    message.success('已存入橱窗，可在 /showcase 查看')
+  } catch {
+    // 错误已由拦截器提示
+  }
+}
+
 onMounted(() => {
-  loadConfig()
+  if (authStore.isLogin) {
+    loadConfig()
+    loadHistory()
+  } else {
+    configured.value = true
+  }
   loadTemplates()
-  loadHistory()
 })
 </script>
 
@@ -232,6 +277,7 @@ onMounted(() => {
             {{ configured ? '生成文案' : '未配置 API' }}
           </NButton>
           <NButton v-if="streaming" type="error" @click="stop">停止</NButton>
+          <NButton @click="uiStore.openModal('api')">自己的 AI</NButton>
         </NSpace>
       </NSpace>
     </NCard>
@@ -245,6 +291,9 @@ onMounted(() => {
       :title="`生成结果 · ${formatTime(activeResult.generatedAt)}`"
       :bordered="false"
     >
+      <template v-if="authStore.isLogin" #header-extra>
+        <NButton size="small" @click="saveToShowcase">存入橱窗</NButton>
+      </template>
       <div class="result-section">
         <div class="section-header">
           <span class="section-label">标题</span>
@@ -298,7 +347,7 @@ onMounted(() => {
       </div>
     </NCard>
 
-    <NCollapse v-if="history.length > 0">
+    <NCollapse v-if="authStore.isLogin && history.length > 0">
       <NCollapseItem :title="`历史记录 (${history.length})`" name="history">
         <NList hoverable>
           <NListItem v-for="h in history" :key="h.id">
@@ -329,6 +378,8 @@ onMounted(() => {
         </NList>
       </NCollapseItem>
     </NCollapse>
+
+    <ApiSettingsModal />
   </div>
 </template>
 

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { MenuOption } from 'naive-ui'
 import { generateMenus } from '@/composables/useMenu'
+import { useAuthStore } from '@/store/auth'
+import { useMenuStore } from '@/store/menu'
 
 const props = withDefaults(defineProps<{ collapsed?: boolean }>(), {
   collapsed: false,
@@ -12,8 +14,16 @@ const emit = defineEmits<{ select: [key: string] }>()
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
+const menuStore = useMenuStore()
 
-const menuOptions = computed<MenuOption[]>(() => generateMenus() as MenuOption[])
+const menuOptions = computed<MenuOption[]>(() =>
+  generateMenus(authStore.isLogin, menuStore.publicKeys) as MenuOption[],
+)
+
+onMounted(() => {
+  if (!authStore.isLogin) menuStore.loadPublicConfig()
+})
 const activeKey = computed(() => route.path)
 const openKeys = ref<string[]>([])
 
