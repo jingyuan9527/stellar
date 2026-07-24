@@ -40,9 +40,8 @@ WORKDIR /app
 COPY --from=backend-build /app/target/*.jar /app/app.jar
 # 拷前端静态产物到 Nginx 目录
 COPY --from=frontend-build /app/dist /usr/share/nginx/html
-# Nginx 配置（覆盖默认 server 块）
-COPY frontend/nginx.conf /etc/nginx/http.d/stellar.conf
-RUN rm -f /etc/nginx/http.d/default.conf
+# Nginx 配置（直接覆盖主配置，不依赖 http.d include，确保反代生效）
+COPY frontend/nginx.conf /etc/nginx/nginx.conf
 # supervisord 配置
 COPY supervisord.conf /etc/supervisord.conf
 # 时区东八区
