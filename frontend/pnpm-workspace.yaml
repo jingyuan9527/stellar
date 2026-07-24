@@ -1,0 +1,8 @@
+# pnpm 11 构建脚本审批配置
+# 未列出的包默认报错（strictDepBuilds=true），需显式审批
+# 这里全部设 false：不运行构建脚本，避免 @parcel/watcher 在 alpine 缺编译工具失败
+# esbuild 二进制由 @esbuild/<platform> optional dependency 提供，无需 postinstall
+allowBuilds:
+  '@parcel/watcher': false
+  esbuild: false
+  vue-demi: false
