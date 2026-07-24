@@ -14,8 +14,8 @@
 FROM node:22-alpine AS frontend-build
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
-# 先拷锁文件利用层缓存恢复依赖
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+# 先拷锁文件与 pnpm 配置利用层缓存恢复依赖（pnpm-workspace.yaml 含 allowBuilds 审批，必须同时拷入）
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 # 再拷源码构建（VITE_API_BASE_URL 默认 /api，生产由 Nginx 反代）
 COPY frontend/ .
