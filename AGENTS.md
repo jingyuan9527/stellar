@@ -14,6 +14,7 @@ Stellar 是**个人知识/实验沉淀池**，不是纯后台管理工具。游�
 - **公开接口放行**：自定义 `@PublicAccess` 注解标注游客可调方法；Sa-Token 拦截器识别注解跳过 `checkLogin`（默认仍全拦截，仅标注方法放行），方法内用 `StpUtil.isLogin()` 区分游客/登录。
 - **IP 限流**：纯 JDK 内存实现（无 Redis/Caffeine 依赖），按 IP 单日计数，超限返回 `Result` 429；阈值配置化。单机够用，多实例需换 Redis。
 - **计费/统计**：AI token 消费记录（`sys_ai_usage`，主体 account/ip）+ IP 日调用次数限制（`@RateLimit`）。`AiChatService` 请求 LLM `stream_options.include_usage` 获取精确 token，不返回则字符估算兜底；首页仪表盘展示总/今日 token、调用次数、近 7 日趋势。AI 文案对游客开放（IP 日限 5 次）。
+- **游戏模块**：一级菜单 `Game`（`/game`）下挂数学游戏等子菜单，对游客公开（`requiresAuth: false` 天然公开）。数学游戏 `/game/math` 完整还原"十以内加减法记忆游戏"：30 题、每 3 秒闪现、第 6 题起滞后 5 题凭记忆作答、计分/正确率/用时/逐题复盘；成绩存 `sys_game_score` 表，`GameController` `@PublicAccess` 开放提交（`@RateLimit(daily=30)` 防刷）与排行榜查询（前 100）。
 
 ## 规划中的改造（Roadmap）
 
@@ -26,6 +27,7 @@ Stellar 是**个人知识/实验沉淀池**，不是纯后台管理工具。游�
   - 2a `sys_profile` 扩展 `title/about/location` 字段，新增简历式 `/about` 页（Hero + 富文本"关于我" + 技能 + 联系方式）；`/home` 精简门户 + "关于我"入口。后台 `system/profile` 编辑。
 - **阶段 3** IP 单日限流：`@PublicAccess` 方法按 IP 计数，超限 `Result` 429，阈值配置化。
 - **阶段 4（已实现）** AI token 统计 + IP 日限：`sys_ai_usage` + `AiChatService` usage 解析/估算兜底 + `AiChatController` `@PublicAccess+@RateLimit(daily=5)` 对游客开放 + `dashboard` 统计看板（总/今日 token、调用次数、近 7 日趋势）。
+- **阶段 5（已实现）** 游戏模块：`Game` 一级菜单 + 数学游戏子菜单（`/game/math`，天然公开），记忆型十以内加减法游戏；`sys_game_score` 表 + `GameController`（`@PublicAccess` 提交 `@RateLimit(daily=30)` / 排行榜查询）。
 
 ## Repo shape
 
@@ -75,6 +77,7 @@ Verify before committing: `pnpm typecheck` (frontend) + `mvn -q compile -DskipTe
 - **Icons are string keys.** `meta.icon` is a string (e.g. `"grid"`) mapped to a `@vicons/ionicons5` component in `src/utils/icons.ts`. Add new icons to that map.
 - **Mobile**: below 768px the persistent sidebar is replaced by a drawer (`src/composables/useBreakpoint.ts`). The header's menu button opens the drawer on mobile, toggles collapse on desktop.
 - **落地页 `/home` + 关于我 `/about`**：均公开（`meta.requiresAuth: false`）。`/home` 精简门户，读 `/public/profile` + `menuStore.publicKeys` 渲染 hero + 公开工具卡片导航 + "关于我"入口；`/about` 简历式个人主页，读 `/public/profile`，Hero + 富文本"关于我"(`v-html`) + 技能 + 联系方式。管理页 `system/profile` 用 `NUpload` custom-request + `/file/upload` 上传头像，额外编辑头衔 / 富文本 about（textarea + 实时预览）/ 所在地。`vite.config` 代理 `/uploads` → 8080。
+- **游戏页 `/game/math`**：公开（`meta.requiresAuth: false`），一级菜单 `Game`（`icon: game`，order 6）+ 子菜单数学游戏（`icon: calculator`）。记忆型十以内加减法：30 题、每 3 秒闪现、第 6 题起滞后 5 题作答（题面隐藏）、计分/正确率/用时/逐题复盘；成绩提交 `POST /game/scores`、排行榜 `GET /game/scores/top`（`api/game.ts`）。登录用户默认填昵称。纯前端计时（`setInterval` 100ms 节拍驱动倒计时），无后端游戏逻辑。
 
 ## Backend conventions
 
@@ -87,6 +90,7 @@ Verify before committing: `pnpm typecheck` (frontend) + `mvn -q compile -DskipTe
 - **AI 计费/统计**: 每次 LLM 调用记录 token 消费到 `sys_ai_usage`（subject_type=account/ip，subject_id=userId/IP，prompt/completion/total_tokens，source=usage/estimate）。`AiChatService` 请求加 `stream_options.include_usage`，LLM 返回则记精确值，否则字符估算兜底（source=estimate）。`AiChatController#/stream` `@PublicAccess + @RateLimit(daily=5)` 对游客开放（IP 日限 5 次）；`GET /ai/chat/usage/stats` 返回统计（总/今日 token、调用次数、近 7 日趋势），首页 `dashboard` 展示。文案工具 `/video/copy` 游客态：`/ai/template/page` `@PublicAccess` 加载模板，跳过配置/历史（私有），生成结果本地虚拟展示（不调 `/ai/copy-result` 保存），历史区隐藏（登录可见）。用户可自带 AI 配置：文案工具"自己的 AI"按钮（复用 `ApiSettingsModal`，存 localStorage `apiConfigStore`），`streamAiChat` 调用时传 endpoint/apiKey/model 给 `/ai/chat/stream`，`AiChatService.streamChat(ChatRequest)` 优先用传入配置（后端不持久化 key），无则回退项目 `sys_ai_config`。自带 key 仍受 `@RateLimit` 限制。
 - **本地文件上传**: `FileController` `POST /file/upload`（需登录，仅图片，UUID 存名）存 `${file.upload-dir}` 磁盘目录，返回 `/uploads/xxx`；`SaTokenConfig.addResourceHandlers` 把 `/uploads/**` 映射到磁盘（游客可读，拦截器已 excludePathPatterns 放行）。`application.yml` `file.upload-dir` + `spring.servlet.multipart` 限 10MB。个人介绍 `sys_profile`（单条 id=1，字段 nickname/avatar/bio/skills/links/title/about/location，`ProfileController` 管理 + `/public/profile` 游客读取）。
 - **IP 单日限流**: `@RateLimit(daily=N)`（`common/annotation`）标在耗资源接口，由 `RateLimitInterceptor`（`com.stellar.interceptor`，注册在 `AuthInterceptor` 之后）按 IP+当日 计数，超限抛 `BusinessException(TOO_MANY_REQUESTS=429)`，经 `GlobalExceptionHandler` 转 429 envelope。`RateLimitService` 纯 JDK `ConcurrentHashMap` 内存计数（无 Redis 依赖，单机够用，多实例需换 Redis）。阈值 `rate-limit.default-daily`（yml，默认 50）。对游客开放的耗资源接口（如 `TtsController#/edge/synthesize` `@PublicAccess + @RateLimit(daily=20)`）才限流；纯展示类公开接口（关于我/菜单配置）无限流。AI 文案 `/ai/chat/stream` 阶段4 已开放（`@PublicAccess+@RateLimit(daily=5)`，token 统计见下）。TTS 合成历史 `/tts/record/page` + `/tts/record/{id}/audio` `@PublicAccess` 作公共墙只读（游客可看全部合成、试听下载，删除仍需登录）。
+- **游戏模块**: `GameController`（`/game/**`，`@PublicAccess`）对游客开放数学游戏成绩提交与排行榜。`sys_game_score` 表存 player_name/score/total_time(秒)/accuracy(%)/user_id(可空)/ip/create_time。`POST /game/scores` `@PublicAccess + @RateLimit(daily=30)` 提交成绩（`GameScoreSubmitDTO` 校验分数 0-30/正确率 0-100，游客填姓名、登录记 userId 兜底昵称）；`GET /game/scores/top` `@PublicAccess` 返回前 100（分数降序→用时升序→时间升序）。`GameScoreService` 用 `StpUtil.isLogin()` 区分游客/登录。IP 获取逻辑与 `RateLimitInterceptor` 一致（穿透 X-Forwarded-For/X-Real-IP）。
 
 ## DBX MCP
 

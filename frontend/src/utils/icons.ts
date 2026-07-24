@@ -29,6 +29,12 @@ import {
   FilmOutline,
   ImageOutline,
   PersonCircleOutline,
+  GameControllerOutline,
+  CalculatorOutline,
+  TrophyOutline,
+  TimerOutline,
+  CheckmarkCircleOutline,
+  CloseCircleOutline,
 } from '@vicons/ionicons5'
 
 export const iconMap: Record<string, Component> = {
@@ -61,4 +67,10 @@ export const iconMap: Record<string, Component> = {
   film: FilmOutline,
   image: ImageOutline,
   about: PersonCircleOutline,
+  game: GameControllerOutline,
+  calculator: CalculatorOutline,
+  trophy: TrophyOutline,
+  timer: TimerOutline,
+  checkmark: CheckmarkCircleOutline,
+  closeCircle: CloseCircleOutline,
 }

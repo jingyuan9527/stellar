@@ -225,3 +225,25 @@ COMMENT ON COLUMN sys_ai_usage.source IS 'token 来源: usage(LLM返回) / estim
 COMMENT ON COLUMN sys_ai_usage.create_time IS '调用时间';
 CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_subject ON sys_ai_usage (subject_type, subject_id, create_time DESC);
 CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_create_time ON sys_ai_usage (create_time DESC);
+
+-- 游戏成绩排行榜表（数学游戏等，游客可提交、登录可跨设备）
+CREATE TABLE IF NOT EXISTS sys_game_score (
+    id           BIGSERIAL PRIMARY KEY,
+    player_name  VARCHAR(64) NOT NULL,
+    score        INT NOT NULL,
+    total_time   INT NOT NULL,
+    accuracy     DOUBLE PRECISION NOT NULL,
+    user_id      BIGINT,
+    ip           VARCHAR(64),
+    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_game_score IS '游戏成绩排行榜表';
+COMMENT ON COLUMN sys_game_score.id IS '主键';
+COMMENT ON COLUMN sys_game_score.player_name IS '玩家名称(游客填/登录取昵称)';
+COMMENT ON COLUMN sys_game_score.score IS '得分(答对题数)';
+COMMENT ON COLUMN sys_game_score.total_time IS '用时(秒)';
+COMMENT ON COLUMN sys_game_score.accuracy IS '正确率(%)';
+COMMENT ON COLUMN sys_game_score.user_id IS '登录用户ID(可空,游客为NULL)';
+COMMENT ON COLUMN sys_game_score.ip IS '提交IP(反作弊/统计)';
+COMMENT ON COLUMN sys_game_score.create_time IS '提交时间';
+CREATE INDEX IF NOT EXISTS idx_sys_game_score_rank ON sys_game_score (score DESC, total_time ASC);

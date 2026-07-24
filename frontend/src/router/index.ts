@@ -127,6 +127,20 @@ export const routes: RouteRecordRaw[] = [
           },
         ],
       },
+      {
+        path: 'game',
+        name: 'Game',
+        redirect: '/game/math',
+        meta: { title: 'Game', icon: 'game', order: 6 },
+        children: [
+          {
+            path: 'math',
+            name: 'GameMath',
+            component: () => import('@/views/game/math/index.vue'),
+            meta: { title: '数学游戏', icon: 'calculator', order: 1, requiresAuth: false },
+          },
+        ],
+      },
     ],
   },
   {

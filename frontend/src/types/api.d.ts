@@ -166,3 +166,19 @@ export interface AiUsageStats {
   todayCalls: number
   dailyTrend: AiUsageDailyPoint[]
 }
+
+export interface GameScore {
+  id: number
+  playerName: string
+  score: number
+  totalTime: number
+  accuracy: number
+  createTime: string
+}
+
+export interface GameScoreSubmit {
+  playerName: string
+  score: number
+  totalTime: number
+  accuracy: number
+}
