@@ -36,7 +36,8 @@ public class FileController {
     private final SysFileMapper fileMapper;
 
     private static final Set<String> ALLOWED_EXT = Set.of(
-            "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico");
+            "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico",
+            "mp3", "wav", "m4a", "aac", "ogg");
 
     @PostMapping("/upload")
     @Log(title = "文件上传", type = OperationType.OTHER)
@@ -50,7 +51,7 @@ public class FileController {
             ext = original.substring(original.lastIndexOf('.') + 1).toLowerCase();
         }
         if (!ALLOWED_EXT.contains(ext)) {
-            throw new BusinessException("不支持的文件类型，仅允许图片");
+            throw new BusinessException("不支持的文件类型，仅允许图片或音频");
         }
         SysFile entity = new SysFile();
         entity.setOriginalName(original);

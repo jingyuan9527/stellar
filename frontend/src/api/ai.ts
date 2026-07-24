@@ -8,16 +8,16 @@ export function getAiConfig() {
   return request<AiConfig>({ url: '/ai/config', method: 'get' })
 }
 
-export function updateAiConfig(data: { endpoint: string; apiKey: string; model: string }) {
+export function updateAiConfig(data: { endpoint?: string; apiKey?: string; model?: string; conchAiEnabled?: number }) {
   return request<void>({ url: '/ai/config', method: 'put', data })
 }
 
-export function fetchAiModels() {
-  return request<string[]>({ url: '/ai/config/models', method: 'get' })
+export function fetchAiModels(data?: { endpoint?: string; apiKey?: string }) {
+  return request<string[]>({ url: '/ai/config/models', method: 'get', params: data })
 }
 
-export function testAiConnection() {
-  return request<void>({ url: '/ai/config/test', method: 'get' })
+export function testAiConnection(data?: { endpoint?: string; apiKey?: string; model?: string }) {
+  return request<void>({ url: '/ai/config/test', method: 'get', params: data })
 }
 
 // ===== AI 模板 =====

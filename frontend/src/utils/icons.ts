@@ -36,6 +36,7 @@ import {
   CheckmarkCircleOutline,
   CloseCircleOutline,
   LockClosedOutline,
+  HelpCircleOutline,
 } from '@vicons/ionicons5'
 
 export const iconMap: Record<string, Component> = {
@@ -75,4 +76,5 @@ export const iconMap: Record<string, Component> = {
   checkmark: CheckmarkCircleOutline,
   closeCircle: CloseCircleOutline,
   lock: LockClosedOutline,
+  conch: HelpCircleOutline,
 }

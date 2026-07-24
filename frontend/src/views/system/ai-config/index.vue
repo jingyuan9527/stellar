@@ -30,7 +30,10 @@ async function handleFetchModels() {
   }
   fetching.value = true
   try {
-    const models = await fetchAiModels()
+    const models = await fetchAiModels({
+      endpoint: formData.value.endpoint,
+      apiKey: formData.value.apiKey || undefined,
+    })
     if (models.length === 0) {
       message.info('未获取到模型列表')
     } else {
@@ -47,7 +50,11 @@ async function handleFetchModels() {
 async function handleTest() {
   testing.value = true
   try {
-    await testAiConnection()
+    await testAiConnection({
+      endpoint: formData.value.endpoint,
+      apiKey: formData.value.apiKey || undefined,
+      model: formData.value.model || undefined,
+    })
     message.success('连通正常，可正常调用')
   } catch {
     // 错误已由拦截器提示
@@ -57,10 +64,6 @@ async function handleTest() {
 }
 
 async function handleSave() {
-  if (!formData.value.model?.trim()) {
-    message.warning('请输入或拉取模型')
-    return
-  }
   saving.value = true
   try {
     await updateAiConfig(formData.value)

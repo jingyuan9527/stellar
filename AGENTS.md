@@ -15,6 +15,7 @@ Stellar 是**个人知识/实验沉淀池**，不是纯后台管理工具。游�
 - **IP 限流**：纯 JDK 内存实现（无 Redis/Caffeine 依赖），按 IP 单日计数，超限返回 `Result` 429；阈值配置化。单机够用，多实例需换 Redis。
 - **计费/统计**：AI token 消费记录（`sys_ai_usage`，主体 account/ip）+ IP 日调用次数限制（`@RateLimit`）。`AiChatService` 请求 LLM `stream_options.include_usage` 获取精确 token，不返回则字符估算兜底；首页仪表盘展示总/今日 token、调用次数、近 7 日趋势。AI 文案对游客开放（IP 日限 5 次）。
 - **游戏模块**：一级菜单 `Game`（`/game`）下挂数学游戏等子菜单，对游客公开（`requiresAuth: false` 天然公开）。数学游戏 `/game/math` 完整还原"十以内加减法记忆游戏"：30 题、每 3 秒闪现、第 6 题起滞后 5 题凭记忆作答、计分/正确率/用时/逐题复盘；成绩存 `sys_game_score` 表，`GameController` `@PublicAccess` 开放提交（`@RateLimit(daily=30)` 防刷）与排行榜查询（前 100）。
+- **神奇海螺**：Game 下子菜单 `/game/conch`（天然公开），海绵宝宝占卜道具玩法——用户提问，AI 从管理员预设的回答库（文本+音频）里语义匹配 top-3 随机选 1 条回答，自动播放音频并展示文本；失败兜底全库随机。预设存 `conch_answer` 表（answer_text/match_description/file_id 引用 sys_file），提问历史存 `conch_record` 表（不记 IP）。`ConchController` `@PublicAccess + @RateLimit(daily=10)` 开放提问与音频读取；`AiChatService.chatCompletion` 非流式调 LLM 拿完整结果；后台 `system/conch` 管理预设与查看提问历史。
 
 ## 规划中的改造（Roadmap）
 
@@ -28,6 +29,7 @@ Stellar 是**个人知识/实验沉淀池**，不是纯后台管理工具。游�
 - **阶段 3** IP 单日限流：`@PublicAccess` 方法按 IP 计数，超限 `Result` 429，阈值配置化。
 - **阶段 4（已实现）** AI token 统计 + IP 日限：`sys_ai_usage` + `AiChatService` usage 解析/估算兜底 + `AiChatController` `@PublicAccess+@RateLimit(daily=5)` 对游客开放 + `dashboard` 统计看板（总/今日 token、调用次数、近 7 日趋势）。
 - **阶段 5（已实现）** 游戏模块：`Game` 一级菜单 + 数学游戏子菜单（`/game/math`，天然公开），记忆型十以内加减法游戏；`sys_game_score` 表 + `GameController`（`@PublicAccess` 提交 `@RateLimit(daily=30)` / 排行榜查询）。
+- **阶段 6（已实现）** 神奇海螺：Game 下子菜单 `/game/conch`（天然公开），海绵宝宝占卜道具。`conch_answer` 表（answer_text/match_description/file_id 引用 sys_file/enabled）+ `conch_record` 表（question_text/answer_id/user_id，不记 IP）。`ConchController` `@PublicAccess + @RateLimit(daily=10)` 开放提问（`POST /tts/conch/ask`）与音频读取（`GET /tts/conch/answer/{id}/audio`）；`ConchService.ask` 取启用预设 → `AiChatService.chatCompletion`（新增非流式方法）让 LLM 返回 top-3 id → 随机选 1，失败/格式错全库随机兜底；预设管理 `system/conch`（增删改查 + `NUpload` 上传音频，复用扩展后的 `FileController` 音频白名单）。
 
 ## Repo shape
 
@@ -78,6 +80,7 @@ Verify before committing: `pnpm typecheck` (frontend) + `mvn -q compile -DskipTe
 - **Mobile**: below 768px the persistent sidebar is replaced by a drawer (`src/composables/useBreakpoint.ts`). The header's menu button opens the drawer on mobile, toggles collapse on desktop.
 - **落地页 `/home` + 关于我 `/about`**：均公开（`meta.requiresAuth: false`）。`/home` 精简门户，读 `/public/profile` + `menuStore.publicKeys` 渲染 hero + 公开工具卡片导航 + "关于我"入口；`/about` 简历式个人主页，读 `/public/profile`，Hero + 富文本"关于我"(`v-html`) + 技能 + 联系方式。管理页 `system/profile` 用 `NUpload` custom-request + `/file/upload` 上传头像，额外编辑头衔 / 富文本 about（textarea + 实时预览）/ 所在地。`vite.config` 代理 `/file` → 8080。
 - **游戏页 `/game/math`**：公开（`meta.requiresAuth: false`），一级菜单 `Game`（`icon: game`，order 6）+ 子菜单数学游戏（`icon: calculator`）。记忆型十以内加减法：30 题、每 3 秒闪现、第 6 题起滞后 5 题作答（题面隐藏）、计分/正确率/用时/逐题复盘；成绩提交 `POST /game/scores`、排行榜 `GET /game/scores/top`（`api/game.ts`）。登录用户默认填昵称。纯前端计时（`setInterval` 100ms 节拍驱动倒计时），无后端游戏逻辑。
+- **神奇海螺页 `/game/conch`**：公开（`meta.requiresAuth: false`），Game 下子菜单（`icon: conch`，order 2）。海绵宝宝占卜道具玩法：输入框 + "拉绳"按钮 → `POST /tts/conch/ask` 返回 `{answerId, answerText, audioUrl}` → 展示回答文本（大号文字淡入）+ `getConchAnswerAudio` 拉音频 blob 自动播放（用户点击属手势，浏览器允许自动播放）+ 海螺 🐚 抖动动画（`asking` 时 `shaking` class）。后台 `system/conch`（`icon: conch`，order 8）用 `NTabs` 切"预设管理"（列表 + `NSwitch` 启停 + 试听 + `NModal` 增删改，`NUpload` custom-request 调 `uploadFile` 上传音频存 `sys_file` 拿 fileId）与"提问历史"两个 tab。`api/conch.ts` 封装全部接口。
 
 ## Backend conventions
 
@@ -91,6 +94,7 @@ Verify before committing: `pnpm typecheck` (frontend) + `mvn -q compile -DskipTe
 - **文件上传**: `FileController` `POST /file/upload`（需登录，仅图片）将二进制存数据库 `sys_file` 表（BYTEA，`@TableField(select=false)` 列表不加载，按需 `selectFullById` 查询），返回 `/file/{id}`；`GET /file/{id}` 标 `@PublicAccess` 游客可读（头像等公开图片），命中即跳过登录校验，响应可长期缓存。无磁盘卷依赖。`spring.servlet.multipart` 限 10MB。个人介绍 `sys_profile`（单条 id=1，字段 nickname/avatar/bio/skills/links/title/about/location，`ProfileController` 管理 + `/public/profile` 游客读取）。
 - **IP 单日限流**: `@RateLimit(daily=N)`（`common/annotation`）标在耗资源接口，由 `RateLimitInterceptor`（`com.stellar.interceptor`，注册在 `AuthInterceptor` 之后）按 IP+当日 计数，超限抛 `BusinessException(TOO_MANY_REQUESTS=429)`，经 `GlobalExceptionHandler` 转 429 envelope。`RateLimitService` 纯 JDK `ConcurrentHashMap` 内存计数（无 Redis 依赖，单机够用，多实例需换 Redis）。阈值 `rate-limit.default-daily`（yml，默认 50）。对游客开放的耗资源接口（如 `TtsController#/edge/synthesize` `@PublicAccess + @RateLimit(daily=20)`）才限流；纯展示类公开接口（关于我/菜单配置）无限流。AI 文案 `/ai/chat/stream` 阶段4 已开放（`@PublicAccess+@RateLimit(daily=5)`，token 统计见下）。TTS 合成历史 `/tts/record/page` + `/tts/record/{id}/audio` `@PublicAccess` 作公共墙只读（游客可看全部合成、试听下载，删除仍需登录）。
 - **游戏模块**: `GameController`（`/game/**`，`@PublicAccess`）对游客开放数学游戏成绩提交与排行榜。`sys_game_score` 表存 player_name/score/total_time(秒)/accuracy(%)/user_id(可空)/ip/create_time。`POST /game/scores` `@PublicAccess + @RateLimit(daily=30)` 提交成绩（`GameScoreSubmitDTO` 校验分数 0-30/正确率 0-100，游客填姓名、登录记 userId 兜底昵称）；`GET /game/scores/top` `@PublicAccess` 返回前 100（分数降序→用时升序→时间升序）。`GameScoreService` 用 `StpUtil.isLogin()` 区分游客/登录。IP 获取逻辑与 `RateLimitInterceptor` 一致（穿透 X-Forwarded-For/X-Real-IP）。
+- **神奇海螺模块**: `ConchController`（`/tts/conch/**`）对游客开放提问与音频读取。`conch_answer` 表存 answer_text/match_description/file_id(引用 sys_file)/enabled/sort_order；`conch_record` 表存 question_text/answer_id/user_id(可空)/create_time（**不记 IP**）。`POST /tts/conch/ask` `@PublicAccess + @RateLimit(daily=10)` 提问：`ConchService.ask` 取启用预设 → `AiChatService.chatCompletion`（新增非流式同步方法，用项目 `sys_ai_config`，记录 token）让 LLM 返回 `{"ids":[top1,top2,top3]}` → 随机选 1，失败/格式错全库随机兜底 → 存 `conch_record` → 返回 `{answerId, answerText, audioUrl}`。`GET /tts/conch/answer/{id}/audio` `@PublicAccess` 取音频（按 `conch_answer.file_id` 查 `sys_file.data`，可长期缓存）。预设管理 `POST/PUT/DELETE /tts/conch/answer`、`PUT /tts/conch/answer/{id}/enabled`、`GET /tts/conch/answer/page` 需登录；`GET /tts/conch/record/page` 提问历史分页（关联查 answerText）。`FileController` 白名单已扩展支持音频（mp3/wav/m4a/aac/ogg）。
 
 ## DBX MCP
 

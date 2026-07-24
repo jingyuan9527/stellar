@@ -46,6 +46,7 @@ public class AiConfigService {
         vo.setEndpoint(config.getEndpoint());
         vo.setApiKey(maskApiKey(config.getApiKey()));
         vo.setModel(config.getModel());
+        vo.setConchAiEnabled(config.getConchAiEnabled() == null ? 1 : config.getConchAiEnabled());
         vo.setConfigured(StringUtils.hasText(config.getEndpoint())
                 && StringUtils.hasText(config.getApiKey())
                 && StringUtils.hasText(config.getModel()));
@@ -57,30 +58,42 @@ public class AiConfigService {
      */
     public void updateConfig(AiConfigDTO dto) {
         SysAiConfig config = getRawConfig();
-        config.setEndpoint(dto.getEndpoint());
+        if (StringUtils.hasText(dto.getEndpoint())) {
+            config.setEndpoint(dto.getEndpoint());
+        }
         if (StringUtils.hasText(dto.getApiKey())) {
             config.setApiKey(dto.getApiKey());
         }
-        config.setModel(dto.getModel());
+        if (StringUtils.hasText(dto.getModel())) {
+            config.setModel(dto.getModel());
+        }
+        if (dto.getConchAiEnabled() != null) {
+            config.setConchAiEnabled(dto.getConchAiEnabled());
+        }
         config.setUpdateTime(LocalDateTime.now());
         configMapper.updateById(config);
     }
 
     /**
-     * 拉取 LLM 端点支持的模型列表。
+     * 拉取 LLM 端点支持的模型列表。优先用前端传入配置，未传则回退数据库已保存配置。
      */
-    public List<String> fetchModels() {
-        SysAiConfig config = getRawConfig();
-        if (!StringUtils.hasText(config.getEndpoint()) || !StringUtils.hasText(config.getApiKey())) {
+    public List<String> fetchModels(String endpoint, String apiKey) {
+        String ep = StringUtils.hasText(endpoint) ? endpoint : null;
+        String key = StringUtils.hasText(apiKey) ? apiKey : null;
+        if (ep == null || key == null) {
+            SysAiConfig config = getRawConfig();
+            if (ep == null) ep = config.getEndpoint();
+            if (key == null) key = config.getApiKey();
+        }
+        if (!StringUtils.hasText(ep) || !StringUtils.hasText(key)) {
             throw new BusinessException("请先配置接口地址和 API Key");
         }
-        String endpoint = config.getEndpoint().replaceAll("/+$", "");
-        String url = endpoint + "/v1/models";
+        String url = ep.replaceAll("/+$", "") + "/v1/models";
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(15))
-                .header("Authorization", "Bearer " + config.getApiKey())
+                .header("Authorization", "Bearer " + key)
                 .GET()
                 .build();
 
@@ -109,20 +122,26 @@ public class AiConfigService {
     }
 
     /**
-     * 测试 LLM 端点连通性（发一条 max_tokens=1 的请求）。
+     * 测试 LLM 端点连通性（发一条 max_tokens=1 的请求）。优先用前端传入配置。
      */
-    public void testConnection() {
-        SysAiConfig config = getRawConfig();
-        if (!StringUtils.hasText(config.getEndpoint()) || !StringUtils.hasText(config.getApiKey())
-                || !StringUtils.hasText(config.getModel())) {
+    public void testConnection(String endpoint, String apiKey, String model) {
+        String ep = StringUtils.hasText(endpoint) ? endpoint : null;
+        String key = StringUtils.hasText(apiKey) ? apiKey : null;
+        String mdl = StringUtils.hasText(model) ? model : null;
+        if (ep == null || key == null || mdl == null) {
+            SysAiConfig config = getRawConfig();
+            if (ep == null) ep = config.getEndpoint();
+            if (key == null) key = config.getApiKey();
+            if (mdl == null) mdl = config.getModel();
+        }
+        if (!StringUtils.hasText(ep) || !StringUtils.hasText(key) || !StringUtils.hasText(mdl)) {
             throw new BusinessException("请先配置接口地址、API Key 和模型名称");
         }
-        String endpoint = config.getEndpoint().replaceAll("/+$", "");
-        String url = endpoint + "/v1/chat/completions";
+        String url = ep.replaceAll("/+$", "") + "/v1/chat/completions";
 
         try {
             Map<String, Object> body = new HashMap<>();
-            body.put("model", config.getModel());
+            body.put("model", mdl);
             body.put("messages", List.of(Map.of("role", "user", "content", "hi")));
             body.put("max_tokens", 1);
             body.put("stream", false);
@@ -132,7 +151,7 @@ public class AiConfigService {
                     .uri(URI.create(url))
                     .timeout(Duration.ofSeconds(15))
                     .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + config.getApiKey())
+                    .header("Authorization", "Bearer " + key)
                     .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
                     .build();
 

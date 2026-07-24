@@ -83,6 +83,7 @@ export interface AiConfig {
   endpoint: string
   apiKey: string
   model: string
+  conchAiEnabled: number
   configured: boolean
 }
 
@@ -181,4 +182,36 @@ export interface GameScoreSubmit {
   score: number
   totalTime: number
   accuracy: number
+}
+
+export interface ConchAnswer {
+  id: number
+  answerText: string
+  matchDescription: string | null
+  fileId: number
+  enabled: number
+  sortOrder: number
+  createTime: string
+}
+
+export interface ConchAnswerQuery {
+  answerText?: string
+  enabled?: number | null
+  pageNum: number
+  pageSize: number
+}
+
+export interface ConchAskResult {
+  answerId: number
+  answerText: string
+  audioUrl: string
+}
+
+export interface ConchRecord {
+  id: number
+  questionText: string
+  answerId: number | null
+  answerText: string | null
+  userId: number | null
+  createTime: string
 }

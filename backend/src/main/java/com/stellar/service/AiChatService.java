@@ -192,6 +192,97 @@ public class AiChatService {
     }
 
     /**
+     * 非流式聊天（同步），返回完整文本。用于神奇海螺等需一次性拿到完整结果的场景。
+     * <p>仅使用项目 sys_ai_config 配置（不支持用户自带 key）；每次调用记录 token 消费。
+     */
+    public String chatCompletion(String prompt) {
+        SysAiConfig config = aiConfigService.getRawConfig();
+        if (!StringUtils.hasText(config.getEndpoint())) {
+            throw new BusinessException("AI 接口未配置");
+        }
+        if (!StringUtils.hasText(config.getApiKey())) {
+            throw new BusinessException("AI API Key 未配置");
+        }
+        if (!StringUtils.hasText(config.getModel())) {
+            throw new BusinessException("AI 模型未配置");
+        }
+
+        String url = config.getEndpoint().replaceAll("/+$", "") + "/v1/chat/completions";
+        String model = config.getModel();
+
+        // 主体判断（同步阶段，request 上下文可用）
+        String subjectType;
+        String subjectId;
+        if (StpUtil.isLogin()) {
+            subjectType = "account";
+            subjectId = StpUtil.getLoginIdAsString();
+        } else {
+            subjectType = "ip";
+            subjectId = getClientIp();
+        }
+
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("model", model);
+            body.put("messages", List.of(Map.of("role", "user", "content", prompt)));
+            body.put("stream", false);
+            // 海螺只需短 JSON（top-3 id），限制输出加速生成；低温更确定
+            body.put("max_tokens", 100);
+            body.put("temperature", 0.3);
+            String bodyJson = objectMapper.writeValueAsString(body);
+
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofMinutes(2))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + config.getApiKey())
+                    .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
+                    .build();
+
+            log.info("AI 非流式请求: model={}, promptLen={}, subject={}:{}", model, prompt.length(), subjectType, subjectId);
+
+            HttpResponse<String> response = httpClient.send(httpRequest,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() != 200) {
+                throw new BusinessException("LLM 返回错误: HTTP " + response.statusCode());
+            }
+
+            JsonNode json = objectMapper.readTree(response.body());
+            String content = json.path("choices").path(0)
+                    .path("message").path("content").asText("");
+
+            // token 记录：LLM 返回 usage 用精确值，否则字符估算兜底
+            JsonNode usageNode = json.path("usage");
+            int promptTokens;
+            int completionTokens;
+            int totalTokens;
+            String source;
+            if (!usageNode.isMissingNode() && usageNode.has("total_tokens")) {
+                promptTokens = usageNode.path("prompt_tokens").asInt(0);
+                completionTokens = usageNode.path("completion_tokens").asInt(0);
+                totalTokens = usageNode.path("total_tokens").asInt(0);
+                source = "usage";
+            } else {
+                promptTokens = estimateTokens(prompt);
+                completionTokens = estimateTokens(content);
+                totalTokens = promptTokens + completionTokens;
+                source = "estimate";
+            }
+            sysAiUsageService.record(subjectType, subjectId, model,
+                    promptTokens, completionTokens, totalTokens, source);
+
+            log.info("AI 非流式响应完成 tokens={}/{}/{} source={}",
+                    promptTokens, completionTokens, totalTokens, source);
+            return content;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("AI 非流式调用失败: {}", e.getMessage(), e);
+            throw new BusinessException("AI 调用失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 字符估算 token：中文约 1 字符≈1 token，英文 4 字符≈1 token；
      * 粗略取字符数作为保守估计（仅当 LLM 不返回 usage 时兜底）。
      */

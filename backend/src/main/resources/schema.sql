@@ -105,6 +105,10 @@ COMMENT ON COLUMN sys_ai_config.model IS '默认模型名称';
 COMMENT ON COLUMN sys_ai_config.create_time IS '创建时间';
 COMMENT ON COLUMN sys_ai_config.update_time IS '更新时间';
 
+-- 神奇海螺 AI 匹配开关（关闭后纯随机，不调 LLM）
+ALTER TABLE sys_ai_config ADD COLUMN IF NOT EXISTS conch_ai_enabled SMALLINT DEFAULT 1;
+COMMENT ON COLUMN sys_ai_config.conch_ai_enabled IS '神奇海螺AI匹配开关: 0关闭(纯随机) 1开启(AI语义匹配)';
+
 -- AI 提示词模板表
 CREATE TABLE IF NOT EXISTS sys_ai_template (
     id          BIGSERIAL PRIMARY KEY,
@@ -266,3 +270,43 @@ COMMENT ON COLUMN sys_file.content_type IS 'MIME类型';
 COMMENT ON COLUMN sys_file.size IS '文件大小(字节)';
 COMMENT ON COLUMN sys_file.data IS '文件二进制数据';
 COMMENT ON COLUMN sys_file.create_time IS '上传时间';
+
+-- 神奇海螺预设回答表（管理员上传音频+文本，AI 按问题语义匹配）
+CREATE TABLE IF NOT EXISTS conch_answer (
+    id                BIGSERIAL PRIMARY KEY,
+    answer_text       VARCHAR(200) NOT NULL,
+    match_description VARCHAR(500),
+    file_id           BIGINT NOT NULL,
+    enabled           SMALLINT DEFAULT 1,
+    sort_order        INT DEFAULT 0,
+    create_time       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted           SMALLINT DEFAULT 0
+);
+COMMENT ON TABLE  conch_answer IS '神奇海螺预设回答表';
+COMMENT ON COLUMN conch_answer.id IS '主键';
+COMMENT ON COLUMN conch_answer.answer_text IS '回答文本(如 确实如此)';
+COMMENT ON COLUMN conch_answer.match_description IS '匹配描述(辅助 LLM 语义匹配)';
+COMMENT ON COLUMN conch_answer.file_id IS '音频文件ID(引用 sys_file.id)';
+COMMENT ON COLUMN conch_answer.enabled IS '是否启用: 0禁用 1启用';
+COMMENT ON COLUMN conch_answer.sort_order IS '排序';
+COMMENT ON COLUMN conch_answer.create_time IS '创建时间';
+COMMENT ON COLUMN conch_answer.deleted IS '逻辑删除: 0未删 1已删';
+CREATE INDEX IF NOT EXISTS idx_conch_answer_enabled ON conch_answer (enabled, sort_order);
+
+-- 神奇海螺提问历史表（记录用户问题与命中的预设，不记 IP）
+CREATE TABLE IF NOT EXISTS conch_record (
+    id           BIGSERIAL PRIMARY KEY,
+    question_text VARCHAR(500) NOT NULL,
+    answer_id    BIGINT,
+    user_id      BIGINT,
+    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted      SMALLINT DEFAULT 0
+);
+COMMENT ON TABLE  conch_record IS '神奇海螺提问历史表';
+COMMENT ON COLUMN conch_record.id IS '主键';
+COMMENT ON COLUMN conch_record.question_text IS '用户提问文本';
+COMMENT ON COLUMN conch_record.answer_id IS '命中的预设回答ID';
+COMMENT ON COLUMN conch_record.user_id IS '登录用户ID(可空,游客为NULL)';
+COMMENT ON COLUMN conch_record.create_time IS '提问时间';
+COMMENT ON COLUMN conch_record.deleted IS '逻辑删除: 0未删 1已删';
+CREATE INDEX IF NOT EXISTS idx_conch_record_create_time ON conch_record (create_time DESC);

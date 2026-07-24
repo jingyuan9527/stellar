@@ -20,6 +20,9 @@ public class SysAiConfig {
 
     private String model;
 
+    /** 神奇海螺 AI 匹配开关: 0关闭(纯随机) 1开启(AI语义匹配) */
+    private Integer conchAiEnabled;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;

@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -39,14 +40,19 @@ public class AiConfigController {
 
     @GetMapping("/models")
     @Log(title = "AI配置", type = OperationType.QUERY)
-    public Result<List<String>> fetchModels() {
-        return Result.success(aiConfigService.fetchModels());
+    public Result<List<String>> fetchModels(
+            @RequestParam(required = false) String endpoint,
+            @RequestParam(required = false) String apiKey) {
+        return Result.success(aiConfigService.fetchModels(endpoint, apiKey));
     }
 
     @GetMapping("/test")
     @Log(title = "AI配置", type = OperationType.OTHER)
-    public Result<Void> test() {
-        aiConfigService.testConnection();
+    public Result<Void> test(
+            @RequestParam(required = false) String endpoint,
+            @RequestParam(required = false) String apiKey,
+            @RequestParam(required = false) String model) {
+        aiConfigService.testConnection(endpoint, apiKey, model);
         return Result.success();
     }
 }

@@ -79,6 +79,12 @@ export const routes: RouteRecordRaw[] = [
             component: () => import('@/views/system/profile/index.vue'),
             meta: { title: '个人资料', icon: 'info', order: 7 },
           },
+          {
+            path: 'conch',
+            name: 'SystemConch',
+            component: () => import('@/views/system/conch/index.vue'),
+            meta: { title: '海螺预设', icon: 'conch', order: 8 },
+          },
         ],
       },
       {
@@ -138,6 +144,12 @@ export const routes: RouteRecordRaw[] = [
             name: 'GameMath',
             component: () => import('@/views/game/math/index.vue'),
             meta: { title: '数学游戏', icon: 'calculator', order: 1, requiresAuth: false },
+          },
+          {
+            path: 'conch',
+            name: 'GameConch',
+            component: () => import('@/views/game/conch/index.vue'),
+            meta: { title: '神奇海螺', icon: 'conch', order: 2, requiresAuth: false },
           },
         ],
       },
