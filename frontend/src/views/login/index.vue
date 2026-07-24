@@ -15,8 +15,8 @@ const formRef = ref<FormInst | null>(null)
 const loading = ref(false)
 
 const form = reactive({
-  username: 'admin',
-  password: '123456',
+  username: '',
+  password: '',
 })
 
 const rules: FormRules = {
@@ -93,7 +93,6 @@ async function handleLogin(e: Event) {
           登 录
         </NButton>
       </NForm>
-      <div class="login-tip">默认账号：admin / 123456</div>
     </NCard>
   </div>
 </template>
@@ -164,13 +163,6 @@ async function handleLogin(e: Event) {
 .login-subtitle {
   margin: 0;
   font-size: 13px;
-  color: #999;
-}
-
-.login-tip {
-  margin-top: 16px;
-  text-align: center;
-  font-size: 12px;
   color: #999;
 }
 </style>
