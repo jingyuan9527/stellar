@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+.env.local
+.env.*.local
+run-frontend.log
+run-frontend.err
+.idea/
+.vscode/
+Dockerfile
+.dockerignore
