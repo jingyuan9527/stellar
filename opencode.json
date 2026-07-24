@@ -4,7 +4,7 @@
   "mcp": {
     "dbx": {
       "type": "local",
-      "command": ["dbx-mcp-server"],
+      "command": ["npx", "@dbx-app/mcp-server"],
       "enabled": true
     }
   }
