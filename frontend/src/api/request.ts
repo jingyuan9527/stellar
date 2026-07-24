@@ -38,7 +38,19 @@ service.interceptors.response.use(
       const authStore = useAuthStore()
       authStore.handleUnauthorized()
     } else {
-      window.$message?.error(error?.response?.data?.message || error.message || '网络异常')
+      const data = error?.response?.data
+      if (data instanceof Blob) {
+        data.text().then((text: string) => {
+          try {
+            const json = JSON.parse(text)
+            window.$message?.error(json.message || '请求失败')
+          } catch {
+            window.$message?.error(error.message || '网络异常')
+          }
+        })
+      } else {
+        window.$message?.error(data?.message || error.message || '网络异常')
+      }
     }
     return Promise.reject(error)
   },

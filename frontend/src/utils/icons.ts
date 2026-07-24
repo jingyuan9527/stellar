@@ -18,6 +18,14 @@ import {
   SearchOutline,
   DownloadOutline,
   EyeOutline,
+  VolumeHighOutline,
+  MegaphoneOutline,
+  SparklesOutline,
+  PlayOutline,
+  PauseOutline,
+  StopOutline,
+  TrashOutline,
+  CopyOutline,
 } from '@vicons/ionicons5'
 
 export const iconMap: Record<string, Component> = {
@@ -39,4 +47,12 @@ export const iconMap: Record<string, Component> = {
   search: SearchOutline,
   download: DownloadOutline,
   eye: EyeOutline,
+  volume: VolumeHighOutline,
+  megaphone: MegaphoneOutline,
+  sparkles: SparklesOutline,
+  play: PlayOutline,
+  pause: PauseOutline,
+  stop: StopOutline,
+  trash: TrashOutline,
+  copy: CopyOutline,
 }

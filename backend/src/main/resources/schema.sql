@@ -57,3 +57,33 @@ CREATE INDEX IF NOT EXISTS idx_sys_log_operator ON sys_log (operator);
 CREATE INDEX IF NOT EXISTS idx_sys_log_module ON sys_log (module);
 CREATE INDEX IF NOT EXISTS idx_sys_log_status ON sys_log (status);
 CREATE INDEX IF NOT EXISTS idx_sys_log_op_time ON sys_log (operator, create_time DESC);
+
+CREATE TABLE IF NOT EXISTS tts_record (
+    id          BIGSERIAL PRIMARY KEY,
+    text        VARCHAR(2000) NOT NULL,
+    voice       VARCHAR(100) NOT NULL,
+    rate        DOUBLE PRECISION DEFAULT 1.0,
+    pitch       DOUBLE PRECISION DEFAULT 1.0,
+    volume      DOUBLE PRECISION DEFAULT 1.0,
+    audio_data  BYTEA,
+    file_size   BIGINT,
+    operator    VARCHAR(64),
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted     SMALLINT DEFAULT 0
+);
+
+COMMENT ON TABLE  tts_record IS '语音合成记录表';
+COMMENT ON COLUMN tts_record.id IS '主键';
+COMMENT ON COLUMN tts_record.text IS '合成文本';
+COMMENT ON COLUMN tts_record.voice IS '发音人名称';
+COMMENT ON COLUMN tts_record.rate IS '语速 0.5~2.0';
+COMMENT ON COLUMN tts_record.pitch IS '音调 0~2.0';
+COMMENT ON COLUMN tts_record.volume IS '音量 0~1.0';
+COMMENT ON COLUMN tts_record.audio_data IS 'MP3音频数据';
+COMMENT ON COLUMN tts_record.file_size IS '音频文件大小(字节)';
+COMMENT ON COLUMN tts_record.operator IS '操作人用户名';
+COMMENT ON COLUMN tts_record.create_time IS '创建时间';
+COMMENT ON COLUMN tts_record.deleted IS '逻辑删除: 0未删 1已删';
+
+CREATE INDEX IF NOT EXISTS idx_tts_record_create_time ON tts_record (create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_tts_record_operator ON tts_record (operator);

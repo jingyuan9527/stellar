@@ -44,6 +44,32 @@ export const routes: RouteRecordRaw[] = [
           },
         ],
       },
+      {
+        path: 'tts',
+        name: 'TTS',
+        redirect: '/tts/edge',
+        meta: { title: 'TTS语音合成', icon: 'volume', order: 3 },
+        children: [
+          {
+            path: 'edge',
+            name: 'TTSEdge',
+            component: () => import('@/views/tts/edge/index.vue'),
+            meta: { title: 'Edge语音合成', icon: 'megaphone', order: 1 },
+          },
+          {
+            path: 'ai',
+            name: 'TTSAI',
+            component: () => import('@/views/tts/ai/index.vue'),
+            meta: { title: 'AI语音合成', icon: 'sparkles', order: 2 },
+          },
+          {
+            path: 'history',
+            name: 'TTSHistory',
+            component: () => import('@/views/tts/history/index.vue'),
+            meta: { title: '合成历史', icon: 'list', order: 3 },
+          },
+        ],
+      },
     ],
   },
   {

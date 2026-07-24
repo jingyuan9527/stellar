@@ -57,3 +57,24 @@ export interface PageResult<T> {
   current: number
   pages: number
 }
+
+export interface TtsRecord {
+  id: number
+  text: string
+  voice: string
+  rate: number
+  pitch: number
+  volume: number
+  fileSize: number
+  operator: string
+  createTime: string
+}
+
+export interface TtsRecordQuery {
+  text?: string
+  voice?: string
+  startTime?: string | null
+  endTime?: string | null
+  pageNum: number
+  pageSize: number
+}
