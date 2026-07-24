@@ -4,27 +4,19 @@ import com.stellar.interceptor.AuthInterceptor;
 import com.stellar.interceptor.RateLimitInterceptor;
 import com.stellar.service.RateLimitService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
-import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
-
-import java.nio.file.Path;
-import java.nio.file.Paths;
 
 @Configuration
 @RequiredArgsConstructor
 public class SaTokenConfig implements WebMvcConfigurer {
 
     private final RateLimitService rateLimitService;
-
-    @Value("${file.upload-dir:./uploads}")
-    private String uploadDir;
 
     /**
      * 鉴权拦截器：默认所有接口要求登录，仅标注 {@link com.stellar.common.annotation.PublicAccess}
@@ -39,21 +31,11 @@ public class SaTokenConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/auth/login",
                         "/auth/register",
-                        "/error",
-                        "/uploads/**"
+                        "/error"
                 );
         // 限流：识别 @RateLimit 按 IP 单日计数，超限 429（注册在鉴权之后）
         registry.addInterceptor(new RateLimitInterceptor(rateLimitService))
                 .addPathPatterns("/**");
-    }
-
-    @Override
-    public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // 本地上传文件静态映射：/uploads/** → 磁盘目录；游客可读（拦截器已 excludePathPatterns 放行）
-        String dir = Paths.get(uploadDir).toAbsolutePath().normalize()
-                .toString().replace("\\", "/");
-        registry.addResourceHandler("/uploads/**")
-                .addResourceLocations("file:" + dir + "/");
     }
 
     @Bean

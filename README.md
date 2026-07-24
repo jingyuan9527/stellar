@@ -31,24 +31,24 @@ Stellar 是一个前后端分离的个人作品站。游客可浏览落地页与
 ```
 stellar/
 ├─ frontend/            # Vue3 前端（pnpm）
-│  ├─ Dockerfile        # 多阶段构建：pnpm build -> nginx
-│  ├─ nginx.conf        # SPA 托管 + /api /uploads 反代后端
+│  ├─ nginx.conf        # SPA 托管 + /api /file 反代后端
 │  └─ src/
 ├─ backend/             # Spring Boot 后端（Maven）
-│  ├─ Dockerfile        # 多阶段构建：mvn package -> JRE
 │  ├─ src/main/resources/
 │  │  ├─ application.yml        # 主配置（环境变量占位）
 │  │  ├─ schema.sql            # 全量建表（幂等 IF NOT EXISTS）
 │  │  └─ db/init.sql           # 最小初始化脚本
 │  └─ pom.xml
-├─ docker-compose.yml   # 前后端编排（PostgreSQL 外置）
+├─ Dockerfile           # 单镜像多阶段构建：前端 dist + 后端 jar -> alpine(nginx+supervisor)
+├─ supervisord.conf     # 双进程管理：nginx + java
+├─ docker-compose.yml   # 单容器编排（PostgreSQL 外置）
 ├─ .env.example         # 环境变量模板
 └─ LICENSE              # Apache-2.0
 ```
 
 ## 快速部署（Docker Compose）
 
-从源码构建镜像并一键启动前后端，PostgreSQL 使用外部实例。
+从源码构建单镜像（Nginx + Spring Boot 双进程）并一键启动，PostgreSQL 使用外部实例。
 
 ### 1. 准备环境变量
 
@@ -79,8 +79,7 @@ psql -h <host> -U <user> -d soybean -f backend/src/main/resources/schema.sql
 docker compose up -d --build
 ```
 
-- 前端访问：`http://localhost:${FRONTEND_PORT:-80}`
-- 后端默认仅容器内网可达（经前端 Nginx 代理）；如需直连调试，在 `docker-compose.yml` 的 `backend` 服务中取消注释 `ports`。
+- 访问：`http://localhost:${FRONTEND_PORT:-80}`（Nginx 托管前端 + 反代后端，单容器内双进程）
 
 ### 4. 默认账号
 
@@ -92,7 +91,7 @@ docker compose up -d --build
 
 ## 环境变量
 
-`backend` 容器通过 `env_file: .env` 加载下列变量（定义见 `.env.example`）：
+`stellar` 容器通过 `env_file: .env` 加载下列变量（定义见 `.env.example`）：
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -101,8 +100,7 @@ docker compose up -d --build
 | `DB_PASSWORD` | `postgres` | 数据库密码 |
 | `SPRING_PROFILES_ACTIVE` | `default` | Spring profile（默认不自动执行建表脚本） |
 | `RATE_LIMIT_DAILY` | `50` | IP 单日限流阈值 |
-| `FRONTEND_PORT` | `80` | 前端 Nginx 宿主机端口 |
-| `UPLOAD_DIR` | `/app/uploads` | 上传目录（由 compose 固定为卷挂载路径） |
+| `FRONTEND_PORT` | `80` | 容器对外端口（Nginx） |
 
 ## 本地开发
 
@@ -128,7 +126,7 @@ pnpm build        # 生产构建（typecheck 门禁）
 
 ## 持久化
 
-- `uploads` 命名卷：后端上传文件持久化，位于容器内 `/app/uploads`，Nginx 经 `/uploads/` 反代读取。
+- 上传文件：二进制存数据库 `sys_file` 表（BYTEA），无磁盘卷依赖；Nginx 经 `/file/` 反代到后端 `GET /file/{id}` 读取。
 - 数据库：由外部 PostgreSQL 管理，本仓库不负责其持久化。
 
 ## 开源协议

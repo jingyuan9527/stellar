@@ -1,0 +1,30 @@
+# 依赖与构建产物（多阶段构建内部生成，无需拷入上下文）
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+backend/target/
+*.tsbuildinfo
+
+# 本地配置与密钥（绝不入镜像）
+backend/src/main/resources/application-local.yml
+backend/src/main/resources/application-prod.yml
+.env
+.env.*
+!.env.example
+
+# 日志与 IDE
+*.log
+*.err
+run-frontend.log
+run-frontend.err
+.idea/
+.vscode/
+*.iml
+
+# Git
+.git/
+.gitignore
+
+# 子目录遗留的 .dockerignore（根级构建不再使用，避免拷入）
+frontend/.dockerignore
+backend/.dockerignore

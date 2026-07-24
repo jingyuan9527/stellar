@@ -45,9 +45,6 @@ sa-token:
   is-log: false
   token-prefix: Bearer
 
-file:
-  upload-dir: ${UPLOAD_DIR:./uploads}
-
 rate-limit:
   default-daily: ${RATE_LIMIT_DAILY:50}
 

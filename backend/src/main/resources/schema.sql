@@ -247,3 +247,22 @@ COMMENT ON COLUMN sys_game_score.user_id IS '登录用户ID(可空,游客为NULL
 COMMENT ON COLUMN sys_game_score.ip IS '提交IP(反作弊/统计)';
 COMMENT ON COLUMN sys_game_score.create_time IS '提交时间';
 CREATE INDEX IF NOT EXISTS idx_sys_game_score_rank ON sys_game_score (score DESC, total_time ASC);
+
+-- 文件表（图片等，二进制存数据库，无磁盘依赖）
+CREATE TABLE IF NOT EXISTS sys_file (
+    id            BIGSERIAL PRIMARY KEY,
+    original_name VARCHAR(255),
+    ext           VARCHAR(32),
+    content_type  VARCHAR(100),
+    size          BIGINT,
+    data          BYTEA,
+    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_file IS '文件表(图片等,二进制存数据库)';
+COMMENT ON COLUMN sys_file.id IS '主键';
+COMMENT ON COLUMN sys_file.original_name IS '原始文件名';
+COMMENT ON COLUMN sys_file.ext IS '扩展名(小写)';
+COMMENT ON COLUMN sys_file.content_type IS 'MIME类型';
+COMMENT ON COLUMN sys_file.size IS '文件大小(字节)';
+COMMENT ON COLUMN sys_file.data IS '文件二进制数据';
+COMMENT ON COLUMN sys_file.create_time IS '上传时间';
