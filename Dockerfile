@@ -10,7 +10,8 @@
 # =============================================================================
 
 # ---------- 前端构建阶段 ----------
-FROM node:20-alpine AS frontend-build
+# Node 22+：corepack 拉取的 pnpm 11 要求 Node v22.13+（用到 node:sqlite 内置模块）
+FROM node:22-alpine AS frontend-build
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 # 先拷锁文件利用层缓存恢复依赖
