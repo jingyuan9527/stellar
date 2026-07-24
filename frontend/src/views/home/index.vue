@@ -92,9 +92,9 @@ onMounted(async () => {
       <p v-else class="empty-tip">暂未公开工具。登录后可在"游客访问配置"中开放。</p>
     </div>
 
-    <div class="section">
-      <NButton size="large" type="primary" @click="router.push('/showcase')">
-        浏览作品橱窗 →
+    <div class="section section-entries">
+      <NButton size="large" type="primary" @click="router.push('/about')">
+        关于我 →
       </NButton>
     </div>
   </div>
@@ -167,6 +167,12 @@ onMounted(async () => {
 .empty-tip {
   font-size: 13px;
   opacity: 0.6;
+}
+
+.section-entries {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 768px) {

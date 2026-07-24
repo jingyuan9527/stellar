@@ -3,10 +3,8 @@ package com.stellar.controller;
 import com.stellar.common.annotation.PublicAccess;
 import com.stellar.common.Result;
 import com.stellar.entity.SysProfile;
-import com.stellar.entity.SysShowcase;
 import com.stellar.service.MenuVisibilityService;
 import com.stellar.service.ProfileService;
-import com.stellar.service.ShowcaseService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,7 +23,6 @@ import java.util.List;
 public class PublicController {
 
     private final MenuVisibilityService menuVisibilityService;
-    private final ShowcaseService showcaseService;
     private final ProfileService profileService;
 
     /** 游客可见菜单的 route key 列表，前端据此过滤侧边栏与路由守卫。 */
@@ -35,14 +32,7 @@ public class PublicController {
         return Result.success(menuVisibilityService.listPublicRouteKeys());
     }
 
-    /** 公开作品橱窗列表（visible=1）。 */
-    @PublicAccess
-    @GetMapping("/showcase")
-    public Result<List<SysShowcase>> showcase() {
-        return Result.success(showcaseService.listPublic());
-    }
-
-    /** 个人介绍（落地页展示）。 */
+    /** 个人介绍（关于我 /about 展示）。 */
     @PublicAccess
     @GetMapping("/profile")
     public Result<SysProfile> profile() {

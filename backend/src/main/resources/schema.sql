@@ -174,38 +174,6 @@ COMMENT ON COLUMN sys_menu_visibility.sort_order IS '排序';
 COMMENT ON COLUMN sys_menu_visibility.create_time IS '创建时间';
 COMMENT ON COLUMN sys_menu_visibility.update_time IS '更新时间';
 
--- 作品橱窗表（游客可见的折腾成果）
-CREATE TABLE IF NOT EXISTS sys_showcase (
-    id           BIGSERIAL PRIMARY KEY,
-    type         VARCHAR(32) NOT NULL,
-    title        VARCHAR(200) NOT NULL,
-    summary      VARCHAR(500),
-    cover_url    VARCHAR(500),
-    content      TEXT,
-    media_url    VARCHAR(500),
-    link         VARCHAR(500),
-    tags         VARCHAR(200),
-    sort_order   INT DEFAULT 0,
-    visible      SMALLINT DEFAULT 1,
-    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-COMMENT ON TABLE  sys_showcase IS '作品橱窗表';
-COMMENT ON COLUMN sys_showcase.id IS '主键';
-COMMENT ON COLUMN sys_showcase.type IS '类型: cover|text|audio|demo|project|link';
-COMMENT ON COLUMN sys_showcase.title IS '标题';
-COMMENT ON COLUMN sys_showcase.summary IS '摘要';
-COMMENT ON COLUMN sys_showcase.cover_url IS '封面图URL(/uploads/xxx)';
-COMMENT ON COLUMN sys_showcase.content IS '富文本或JSON正文';
-COMMENT ON COLUMN sys_showcase.media_url IS '音视频/媒体URL';
-COMMENT ON COLUMN sys_showcase.link IS '跳转链接';
-COMMENT ON COLUMN sys_showcase.tags IS '标签,逗号分隔';
-COMMENT ON COLUMN sys_showcase.sort_order IS '排序';
-COMMENT ON COLUMN sys_showcase.visible IS '是否公开展示: 0否 1是';
-COMMENT ON COLUMN sys_showcase.create_time IS '创建时间';
-COMMENT ON COLUMN sys_showcase.update_time IS '更新时间';
-CREATE INDEX IF NOT EXISTS idx_sys_showcase_visible ON sys_showcase (visible, sort_order);
-
 -- 个人介绍表（单条配置，落地页用）
 CREATE TABLE IF NOT EXISTS sys_profile (
     id           BIGSERIAL PRIMARY KEY,
@@ -224,6 +192,14 @@ COMMENT ON COLUMN sys_profile.bio IS '简介';
 COMMENT ON COLUMN sys_profile.skills IS '技能标签,逗号分隔';
 COMMENT ON COLUMN sys_profile.links IS '外链JSON,如 {github,email,site}';
 COMMENT ON COLUMN sys_profile.update_time IS '更新时间';
+
+-- sys_profile 扩展字段（简历式 about 页用）。idempotent，已存在则跳过。
+ALTER TABLE sys_profile ADD COLUMN IF NOT EXISTS title    VARCHAR(100);
+ALTER TABLE sys_profile ADD COLUMN IF NOT EXISTS about    TEXT;
+ALTER TABLE sys_profile ADD COLUMN IF NOT EXISTS location VARCHAR(100);
+COMMENT ON COLUMN sys_profile.title IS '头衔(如 全栈开发 / 运维)';
+COMMENT ON COLUMN sys_profile.about IS '关于我富文本(HTML,前端 v-html 渲染)';
+COMMENT ON COLUMN sys_profile.location IS '所在地';
 
 -- AI token 消费记录表（计费/统计用）
 CREATE TABLE IF NOT EXISTS sys_ai_usage (

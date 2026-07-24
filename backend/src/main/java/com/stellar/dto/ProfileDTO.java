@@ -17,4 +17,10 @@ public class ProfileDTO {
     private String skills;
 
     private String links;
+
+    private String title;
+
+    private String about;
+
+    private String location;
 }

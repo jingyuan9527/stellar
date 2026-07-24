@@ -43,7 +43,7 @@ public class ProfileService {
             p.setUpdateTime(LocalDateTime.now());
             profileMapper.updateById(p);
         }
-        log.info("[个人介绍] 已更新 nickname={}", dto.getNickname());
+        log.info("[个人介绍] 已更新 nickname={}, title={}", dto.getNickname(), dto.getTitle());
     }
 
     private void applyDto(SysProfile p, ProfileDTO dto) {
@@ -52,5 +52,8 @@ public class ProfileService {
         p.setBio(dto.getBio());
         p.setSkills(dto.getSkills());
         p.setLinks(dto.getLinks());
+        p.setTitle(dto.getTitle());
+        p.setAbout(dto.getAbout());
+        p.setLocation(dto.getLocation());
     }
 }

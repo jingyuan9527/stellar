@@ -7,9 +7,6 @@ import { ratios, ratioList } from '../../lib/ratios'
 import { presets, getPreset } from '../../lib/presets'
 import type { Ratio } from '../../types'
 import { useThemeStore } from '@/store/theme'
-import { useAuthStore } from '@/store/auth'
-import { createShowcase } from '@/api/showcase'
-import { uploadFile } from '@/api/file'
 
 const props = defineProps<{
   getCanvasEl: () => HTMLElement | null
@@ -19,7 +16,6 @@ const coverStore = useCoverStore()
 const s = computed(() => coverStore.state)
 const message = useMessage()
 const themeStore = useThemeStore()
-const authStore = useAuthStore()
 const busy = ref(false)
 
 function update(patch: Partial<typeof s.value>) {
@@ -51,29 +47,6 @@ async function download() {
     message.success('PNG 已生成并开始下载')
   } catch {
     message.error('导出失败，请重试')
-  } finally {
-    busy.value = false
-  }
-}
-
-async function saveToShowcase() {
-  const el = props.getCanvasEl()
-  if (!el) return
-  busy.value = true
-  try {
-    const dataUrl = await toPng(el, { pixelRatio: 2, cacheBust: true })
-    const blob = await (await fetch(dataUrl)).blob()
-    const file = new File([blob], 'cover.png', { type: 'image/png' })
-    const url = await uploadFile(file)
-    await createShowcase({
-      type: 'cover',
-      title: s.value.title.trim() || '未命名封面',
-      coverUrl: url,
-      visible: 1,
-    })
-    message.success('已存入橱窗，可在 /showcase 查看')
-  } catch {
-    message.error('存入橱窗失败')
   } finally {
     busy.value = false
   }
@@ -112,7 +85,6 @@ const activePresets = computed(() => presets[s.value.ratio])
 
     <NSpace>
       <NButton type="primary" :loading="busy" @click="download">下载 PNG</NButton>
-      <NButton v-if="authStore.isLogin" :loading="busy" @click="saveToShowcase">存入橱窗</NButton>
     </NSpace>
   </div>
 </template>

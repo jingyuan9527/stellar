@@ -15,7 +15,6 @@ import {
   getAiConfig, getAiTemplatePage, streamAiChat,
   saveCopyResult, getCopyResultPage, deleteCopyResult, clearCopyResults,
 } from '@/api/ai'
-import { createShowcase } from '@/api/showcase'
 import { useAuthStore } from '@/store/auth'
 import type { AiTemplate, AiCopyResult, CopyResultData } from '@/types/api'
 
@@ -204,22 +203,6 @@ function formatTag(t: string) {
   return t.startsWith('#') ? t : `#${t}`
 }
 
-async function saveToShowcase() {
-  if (!activeResult.value || !display.value) return
-  try {
-    await createShowcase({
-      type: 'text',
-      title: activeResult.value.topic,
-      content: activeResult.value.result,
-      tags: display.value.tags.map(formatTag).join(','),
-      visible: 1,
-    })
-    message.success('已存入橱窗，可在 /showcase 查看')
-  } catch {
-    // 错误已由拦截器提示
-  }
-}
-
 onMounted(() => {
   if (authStore.isLogin) {
     loadConfig()
@@ -291,9 +274,6 @@ onMounted(() => {
       :title="`生成结果 · ${formatTime(activeResult.generatedAt)}`"
       :bordered="false"
     >
-      <template v-if="authStore.isLogin" #header-extra>
-        <NButton size="small" @click="saveToShowcase">存入橱窗</NButton>
-      </template>
       <div class="result-section">
         <div class="section-header">
           <span class="section-label">标题</span>

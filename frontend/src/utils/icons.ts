@@ -28,6 +28,7 @@ import {
   CopyOutline,
   FilmOutline,
   ImageOutline,
+  PersonCircleOutline,
 } from '@vicons/ionicons5'
 
 export const iconMap: Record<string, Component> = {
@@ -59,4 +60,5 @@ export const iconMap: Record<string, Component> = {
   copy: CopyOutline,
   film: FilmOutline,
   image: ImageOutline,
+  about: PersonCircleOutline,
 }

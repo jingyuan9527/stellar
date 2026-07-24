@@ -140,31 +140,6 @@ export interface MenuVisibilityItem {
   sortOrder: number
 }
 
-export type ShowcaseType = 'cover' | 'text' | 'audio' | 'demo' | 'project' | 'link'
-
-export interface Showcase {
-  id: number
-  type: ShowcaseType
-  title: string
-  summary: string | null
-  coverUrl: string | null
-  content: string | null
-  mediaUrl: string | null
-  link: string | null
-  tags: string | null
-  sortOrder: number
-  visible: number
-  createTime: string
-  updateTime: string
-}
-
-export interface ShowcaseQuery {
-  type?: string
-  title?: string
-  pageNum: number
-  pageSize: number
-}
-
 export interface Profile {
   id: number
   nickname: string
@@ -172,6 +147,9 @@ export interface Profile {
   bio: string | null
   skills: string | null
   links: string | null
+  title: string | null
+  about: string | null
+  location: string | null
   updateTime: string
 }
 

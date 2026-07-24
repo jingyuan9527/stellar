@@ -8,7 +8,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 个人介绍（单条配置，id 固定为 1）。落地页 /home 展示。
+ * 个人介绍（单条配置，id 固定为 1）。落地页 /home + 关于我 /about 展示。
  */
 @Data
 @TableName("sys_profile")
@@ -29,6 +29,15 @@ public class SysProfile {
 
     /** 外链 JSON，如 {github, email, site} */
     private String links;
+
+    /** 头衔，如"全栈开发 / 运维" */
+    private String title;
+
+    /** 关于我富文本（HTML），about 页渲染 */
+    private String about;
+
+    /** 所在地 */
+    private String location;
 
     private LocalDateTime updateTime;
 }

@@ -26,16 +26,16 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: '首页', icon: 'home', order: 0, requiresAuth: false },
       },
       {
+        path: 'about',
+        name: 'About',
+        component: () => import('@/views/about/index.vue'),
+        meta: { title: '关于我', icon: 'about', order: 100, requiresAuth: false },
+      },
+      {
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/dashboard/index.vue'),
-        meta: { title: '仪表盘', icon: 'grid', order: 1, affix: true },
-      },
-      {
-        path: 'showcase',
-        name: 'Showcase',
-        component: () => import('@/views/showcase/index.vue'),
-        meta: { title: '作品橱窗', icon: 'image', order: 2, requiresAuth: false },
+        meta: { title: '仪表盘', icon: 'grid', order: 3, affix: true },
       },
       {
         path: 'system',
@@ -74,12 +74,6 @@ export const routes: RouteRecordRaw[] = [
             meta: { title: '游客访问配置', icon: 'eye', order: 5 },
           },
           {
-            path: 'showcase',
-            name: 'SystemShowcase',
-            component: () => import('@/views/system/showcase/index.vue'),
-            meta: { title: '橱窗管理', icon: 'image', order: 6 },
-          },
-          {
             path: 'profile',
             name: 'SystemProfile',
             component: () => import('@/views/system/profile/index.vue'),
@@ -91,7 +85,7 @@ export const routes: RouteRecordRaw[] = [
         path: 'tts',
         name: 'TTS',
         redirect: '/tts/edge',
-        meta: { title: 'TTS语音合成', icon: 'volume', order: 3 },
+        meta: { title: 'TTS语音合成', icon: 'volume', order: 4 },
         children: [
           {
             path: 'edge',
@@ -117,7 +111,7 @@ export const routes: RouteRecordRaw[] = [
         path: 'video',
         name: 'Video',
         redirect: '/video/cover',
-        meta: { title: '视频工具箱', icon: 'film', order: 4 },
+        meta: { title: '视频工具箱', icon: 'film', order: 5 },
         children: [
           {
             path: 'cover',

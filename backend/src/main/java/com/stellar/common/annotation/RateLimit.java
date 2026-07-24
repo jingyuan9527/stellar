@@ -11,7 +11,7 @@ import java.lang.annotation.Target;
  * 按客户端 IP 单日累计计数，超限抛 {@code BusinessException(429)}。
  *
  * <p>通常与 {@link PublicAccess} 叠加用于对游客开放的耗资源接口（如语音合成）；
- * 纯展示类公开接口（如橱窗列表）无需标注。
+ * 纯展示类公开接口（如关于我）无需标注。
  *
  * @author stellar
  */
