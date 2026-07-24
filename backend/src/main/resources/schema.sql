@@ -87,3 +87,68 @@ COMMENT ON COLUMN tts_record.deleted IS '逻辑删除: 0未删 1已删';
 
 CREATE INDEX IF NOT EXISTS idx_tts_record_create_time ON tts_record (create_time DESC);
 CREATE INDEX IF NOT EXISTS idx_tts_record_operator ON tts_record (operator);
+
+-- AI 配置表（项目级单一配置）
+CREATE TABLE IF NOT EXISTS sys_ai_config (
+    id          BIGSERIAL PRIMARY KEY,
+    endpoint    VARCHAR(500) DEFAULT '',
+    api_key     VARCHAR(500) DEFAULT '',
+    model       VARCHAR(200) DEFAULT '',
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_ai_config IS 'AI 配置表';
+COMMENT ON COLUMN sys_ai_config.id IS '主键';
+COMMENT ON COLUMN sys_ai_config.endpoint IS 'LLM 接口基础地址';
+COMMENT ON COLUMN sys_ai_config.api_key IS 'API Key';
+COMMENT ON COLUMN sys_ai_config.model IS '默认模型名称';
+COMMENT ON COLUMN sys_ai_config.create_time IS '创建时间';
+COMMENT ON COLUMN sys_ai_config.update_time IS '更新时间';
+
+-- AI 提示词模板表
+CREATE TABLE IF NOT EXISTS sys_ai_template (
+    id          BIGSERIAL PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL,
+    platform    VARCHAR(50) NOT NULL DEFAULT 'custom',
+    prompt      TEXT NOT NULL,
+    built_in    SMALLINT DEFAULT 0,
+    creator_id  BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted     SMALLINT DEFAULT 0
+);
+COMMENT ON TABLE  sys_ai_template IS 'AI 提示词模板表';
+COMMENT ON COLUMN sys_ai_template.id IS '主键';
+COMMENT ON COLUMN sys_ai_template.name IS '模板名称';
+COMMENT ON COLUMN sys_ai_template.platform IS '适用平台: bilibili/douyin/xiaohongshu/custom';
+COMMENT ON COLUMN sys_ai_template.prompt IS '提示词内容,含 {{topic}} 占位符';
+COMMENT ON COLUMN sys_ai_template.built_in IS '是否内置: 0否 1是';
+COMMENT ON COLUMN sys_ai_template.creator_id IS '创建人ID';
+COMMENT ON COLUMN sys_ai_template.create_time IS '创建时间';
+COMMENT ON COLUMN sys_ai_template.update_time IS '更新时间';
+COMMENT ON COLUMN sys_ai_template.deleted IS '逻辑删除: 0未删 1已删';
+CREATE INDEX IF NOT EXISTS idx_sys_ai_template_platform ON sys_ai_template (platform);
+
+-- AI 文案生成历史表
+CREATE TABLE IF NOT EXISTS sys_ai_copy_result (
+    id           BIGSERIAL PRIMARY KEY,
+    topic        VARCHAR(500) NOT NULL,
+    template_id  BIGINT,
+    result       TEXT NOT NULL,
+    generated_at BIGINT,
+    creator_id   BIGINT,
+    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted      SMALLINT DEFAULT 0
+);
+COMMENT ON TABLE  sys_ai_copy_result IS 'AI 文案生成历史表';
+COMMENT ON COLUMN sys_ai_copy_result.id IS '主键';
+COMMENT ON COLUMN sys_ai_copy_result.topic IS '视频主题';
+COMMENT ON COLUMN sys_ai_copy_result.template_id IS '使用的模板ID';
+COMMENT ON COLUMN sys_ai_copy_result.result IS '生成结果JSON: {titles,description,tags}';
+COMMENT ON COLUMN sys_ai_copy_result.generated_at IS '生成时间戳(ms)';
+COMMENT ON COLUMN sys_ai_copy_result.creator_id IS '创建人ID';
+COMMENT ON COLUMN sys_ai_copy_result.create_time IS '创建时间';
+COMMENT ON COLUMN sys_ai_copy_result.update_time IS '更新时间';
+COMMENT ON COLUMN sys_ai_copy_result.deleted IS '逻辑删除: 0未删 1已删';
+CREATE INDEX IF NOT EXISTS idx_sys_ai_copy_result_creator ON sys_ai_copy_result (creator_id, create_time DESC);

@@ -78,3 +78,45 @@ export interface TtsRecordQuery {
   pageNum: number
   pageSize: number
 }
+
+export interface AiConfig {
+  endpoint: string
+  apiKey: string
+  model: string
+  configured: boolean
+}
+
+export interface AiTemplate {
+  id: number
+  name: string
+  platform: string
+  prompt: string
+  builtIn: number
+  creatorId: number | null
+  createTime: string
+  updateTime: string
+}
+
+export interface AiTemplateQuery {
+  name?: string
+  platform?: string
+  pageNum: number
+  pageSize: number
+}
+
+export interface AiCopyResult {
+  id: number
+  topic: string
+  templateId: number | null
+  result: string
+  generatedAt: number
+  creatorId: number
+  createTime: string
+  updateTime: string
+}
+
+export interface CopyResultData {
+  titles: string[]
+  description: string
+  tags: string[]
+}

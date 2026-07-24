@@ -59,6 +59,7 @@ Verify before committing: `pnpm typecheck` (frontend) + `mvn -q compile -DskipTe
 - **Response envelope**: all controllers return `Result<T>` (`{ code, message, data }`); `code === 200` means success. `GlobalExceptionHandler` maps `BusinessException`, validation errors, and Sa-Token `NotLoginException` to this envelope.
 - **MyBatis-Plus**: `sys_user` uses logic delete on the `deleted` column (0/1). The PG pagination dialect is configured in `MyBatisPlusConfig`.
 - **操作日志 = AOP + 注解**: Controller 方法标注 `@Log(title="模块", type=OperationType.X)`，由 `LogAspect`（`@Around`）统一采集模块/类型/操作人/请求方法+URL/Java方法/参数(脱敏)/状态/异常/IP/耗时，异步（`@Async("logTaskExecutor")`）写入 `sys_log` 表。操作人解析：LOGIN 取请求体 username，其余取 `StpUtil` 登录态。脱敏硬编码 `password/oldPassword/confirmPassword/token/secretKey` → `******`。日志查询/详情/导出(xlsx, EasyExcel) 在 `SysLogController`，前端页在 `系统管理 → 日志管理`。新增可记录的操作时，给对应 Controller 方法加 `@Log` 即可。
+- **AI 模块**: `com.stellar.ai` 含内置模板种子数据。LLM 配置（endpoint/apiKey/model）存于 `sys_ai_config` 表，apiKey 脱敏返回前端。流式对话通过 `SseEmitter` + JDK `HttpClient` 代理转发 LLM 的 SSE 流，前端用 `fetch`+`ReadableStream` 读取（可带 Authorization header，绕过 `EventSource` 限制）。模板（`sys_ai_template`）和文案历史（`sys_ai_copy_result`）存于 DB。`AiDataInitializer` 启动时播种 3 套内置模板（B站/抖音/小红书，`built_in=1` 不可删，可"恢复默认"）。前端页面：系统管理 → AI 配置 / AI 模板管理；视频工具箱 → 文案工具调用后端流式接口。封面工具（画布编辑、草稿）仍为纯前端 LocalStorage。
 
 ## DBX MCP
 

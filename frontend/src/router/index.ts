@@ -28,7 +28,7 @@ export const routes: RouteRecordRaw[] = [
         path: 'system',
         name: 'System',
         redirect: '/system/user-profile',
-        meta: { title: '系统管理', icon: 'settings', order: 2 },
+        meta: { title: '系统管理', icon: 'settings', order: 99 },
         children: [
           {
             path: 'user-profile',
@@ -41,6 +41,18 @@ export const routes: RouteRecordRaw[] = [
             name: 'SystemLog',
             component: () => import('@/views/system/log/index.vue'),
             meta: { title: '日志管理', icon: 'log', order: 2 },
+          },
+          {
+            path: 'ai-config',
+            name: 'SystemAiConfig',
+            component: () => import('@/views/system/ai-config/index.vue'),
+            meta: { title: 'AI 配置', icon: 'sparkles', order: 3 },
+          },
+          {
+            path: 'ai-template',
+            name: 'SystemAiTemplate',
+            component: () => import('@/views/system/ai-template/index.vue'),
+            meta: { title: 'AI 模板管理', icon: 'palette', order: 4 },
           },
         ],
       },
@@ -67,6 +79,26 @@ export const routes: RouteRecordRaw[] = [
             name: 'TTSHistory',
             component: () => import('@/views/tts/history/index.vue'),
             meta: { title: '合成历史', icon: 'list', order: 3 },
+          },
+        ],
+      },
+      {
+        path: 'video',
+        name: 'Video',
+        redirect: '/video/cover',
+        meta: { title: '视频工具箱', icon: 'film', order: 4 },
+        children: [
+          {
+            path: 'cover',
+            name: 'VideoCover',
+            component: () => import('@/views/video/cover/index.vue'),
+            meta: { title: '封面工具', icon: 'image', order: 1 },
+          },
+          {
+            path: 'copy',
+            name: 'VideoCopy',
+            component: () => import('@/views/video/copy/index.vue'),
+            meta: { title: '文案工具', icon: 'log', order: 2 },
           },
         ],
       },

@@ -1,0 +1,73 @@
+import type { FontPreset } from '../types'
+
+export const fontPresets: FontPreset[] = [
+  {
+    id: 'emphasis',
+    name: '强调型',
+    desc: '黑体压强明显，适合重点观点',
+    titleFont: '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+    subtitleFont: '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+    titleWeight: 900,
+    subtitleWeight: 700,
+    titleSpacingOffset: '-0.015em',
+    subtitleSpacingOffset: '0em',
+    titleScale: 1.02,
+    subtitleScale: 1,
+  },
+  {
+    id: 'tech',
+    name: '科技型',
+    desc: '更理性、更锋利，适合工具与评测',
+    titleFont: '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+    subtitleFont: '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+    titleWeight: 800,
+    subtitleWeight: 500,
+    titleSpacingOffset: '0.02em',
+    subtitleSpacingOffset: '0.03em',
+    titleScale: 0.96,
+    subtitleScale: 0.94,
+  },
+  {
+    id: 'gentle',
+    name: '温柔型',
+    desc: '更柔和的衬线感，适合故事与治愈向',
+    titleFont: '"ZCOOL XiaoWei", "Noto Serif SC", serif',
+    subtitleFont: '"Noto Serif SC", serif',
+    titleWeight: 700,
+    subtitleWeight: 600,
+    titleSpacingOffset: '0.01em',
+    subtitleSpacingOffset: '0.01em',
+    titleScale: 0.96,
+    subtitleScale: 0.98,
+  },
+  {
+    id: 'news',
+    name: '新闻感',
+    desc: '克制稳重，适合资讯与解读类封面',
+    titleFont: '"Noto Serif SC", serif',
+    subtitleFont: '"Noto Sans SC", sans-serif',
+    titleWeight: 900,
+    subtitleWeight: 500,
+    titleSpacingOffset: '0em',
+    subtitleSpacingOffset: '0.02em',
+    titleScale: 0.94,
+    subtitleScale: 0.92,
+  },
+  {
+    id: 'show',
+    name: '综艺冲击型',
+    desc: '更有舞台感，适合高情绪短视频封面',
+    titleFont: '"ZCOOL KuaiLe", "Noto Sans SC", cursive',
+    subtitleFont: '"Noto Sans SC", sans-serif',
+    titleWeight: 700,
+    subtitleWeight: 700,
+    titleSpacingOffset: '0.01em',
+    subtitleSpacingOffset: '0.04em',
+    titleScale: 0.92,
+    subtitleScale: 0.92,
+  },
+]
+
+export function getFontPreset(id: string): FontPreset {
+  return fontPresets.find((f) => f.id === id) ?? fontPresets[0]
+}
