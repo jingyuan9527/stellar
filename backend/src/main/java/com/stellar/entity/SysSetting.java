@@ -7,24 +7,22 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
+/**
+ * 系统设置：全局开关/单值配置（如 conch_ai_enabled）。
+ */
 @Data
-@TableName("sys_ai_config")
-public class SysAiConfig {
+@TableName("sys_setting")
+public class SysSetting {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private String endpoint;
+    /** 设置键，唯一，如 conch_ai_enabled */
+    private String settingKey;
 
-    private String apiKey;
+    private String settingValue;
 
-    private String model;
-
-    /** 最近拉取到的可用模型列表，逗号分隔，重新拉取时覆盖 */
-    private String availableModels;
-
-    /** 神奇海螺 AI 匹配开关: 0关闭(纯随机) 1开启(AI语义匹配) */
-    private Integer conchAiEnabled;
+    private String description;
 
     private LocalDateTime createTime;
 

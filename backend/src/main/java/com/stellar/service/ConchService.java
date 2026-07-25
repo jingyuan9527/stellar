@@ -11,7 +11,6 @@ import com.stellar.dto.ConchAnswerQueryDTO;
 import com.stellar.dto.ConchAskDTO;
 import com.stellar.entity.ConchAnswer;
 import com.stellar.entity.ConchRecord;
-import com.stellar.entity.SysAiConfig;
 import com.stellar.entity.SysFile;
 import com.stellar.mapper.ConchAnswerMapper;
 import com.stellar.mapper.ConchRecordMapper;
@@ -48,7 +47,7 @@ public class ConchService {
     private final ConchRecordMapper recordMapper;
     private final SysFileMapper fileMapper;
     private final AiChatService aiChatService;
-    private final AiConfigService aiConfigService;
+    private final SysSettingService sysSettingService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -71,13 +70,7 @@ public class ConchService {
         String matchSource = "random";
 
         // AI 语义匹配开关：关闭则纯随机，不调 LLM（省 token）
-        boolean aiEnabled = true;
-        try {
-            SysAiConfig cfg = aiConfigService.getRawConfig();
-            aiEnabled = cfg.getConchAiEnabled() == null || cfg.getConchAiEnabled() == 1;
-        } catch (Exception e) {
-            log.debug("[神奇海螺] 读取 AI 开关失败，默认开启: {}", e.getMessage());
-        }
+        boolean aiEnabled = sysSettingService.getAsBoolean("conch_ai_enabled", true);
 
         if (aiEnabled) {
             // AI 语义匹配（失败不影响主流程，兜底随机）

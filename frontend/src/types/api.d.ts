@@ -79,13 +79,40 @@ export interface TtsRecordQuery {
   pageSize: number
 }
 
-export interface AiConfig {
+export interface AiProvider {
+  id: number
+  name: string
   endpoint: string
   apiKey: string
-  model: string
   availableModels: string[]
-  conchAiEnabled: number
-  configured: boolean
+  enabled: number
+  sortOrder: number
+  createTime: string
+  updateTime: string
+}
+
+export interface AiModel {
+  id: number
+  providerId: number
+  providerName: string | null
+  model: string
+  modelType: string
+  enabled: number
+  isDefault: number
+  sortOrder: number
+  createTime: string
+  updateTime: string
+}
+
+export interface AiImageResult {
+  fileId: number
+  url: string
+}
+
+export interface DictData {
+  value: string
+  label: string
+  sortOrder: number
 }
 
 export interface AiTemplate {

@@ -25,13 +25,15 @@ public class SysAiUsageService {
     private final SysAiUsageMapper usageMapper;
 
     /** 记录一次 AI 调用的 token 消耗（失败不影响主流程） */
-    public void record(String subjectType, String subjectId, String model,
+    public void record(String subjectType, String subjectId, Long providerId, String model, String modelType,
                        Integer promptTokens, Integer completionTokens, Integer totalTokens, String source) {
         try {
             SysAiUsage u = new SysAiUsage();
             u.setSubjectType(subjectType);
             u.setSubjectId(subjectId);
+            u.setProviderId(providerId);
             u.setModel(model);
+            u.setModelType(modelType);
             u.setPromptTokens(promptTokens == null ? 0 : promptTokens);
             u.setCompletionTokens(completionTokens == null ? 0 : completionTokens);
             u.setTotalTokens(totalTokens == null ? 0 : totalTokens);

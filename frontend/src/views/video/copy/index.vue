@@ -12,11 +12,11 @@ import { useUIStore } from '../store/ui'
 import ApiSettingsModal from '../components/ApiSettingsModal.vue'
 import { buildPrompt, parseCopyResult } from '../lib/llm'
 import {
-  getAiConfig, getAiTemplatePage, streamAiChat,
+  getAiModelsByType, getAiTemplatePage, streamAiChat,
   saveCopyResult, getCopyResultPage, deleteCopyResult, clearCopyResults,
 } from '@/api/ai'
 import { useAuthStore } from '@/store/auth'
-import type { AiTemplate, AiCopyResult, CopyResultData } from '@/types/api'
+import type { AiModel, AiTemplate, AiCopyResult, CopyResultData } from '@/types/api'
 
 const router = useRouter()
 const message = useMessage()
@@ -31,6 +31,16 @@ const templateId = ref<number | null>(null)
 
 const templateOptions = computed(() =>
   templates.value.map((t) => ({ value: t.id, label: t.name })),
+)
+
+// ===== 模型选择 =====
+const textModels = ref<AiModel[]>([])
+const selectedModelId = ref<number | null>(null)
+const modelOptions = computed(() =>
+  textModels.value.map((m) => ({
+    value: m.id,
+    label: m.providerName ? `${m.model} (${m.providerName})` : m.model,
+  })),
 )
 
 // ===== 配置状态 =====
@@ -75,8 +85,12 @@ async function loadTemplates() {
 
 async function loadConfig() {
   try {
-    const config = await getAiConfig()
-    configured.value = config.configured
+    textModels.value = await getAiModelsByType('TEXT')
+    if (selectedModelId.value === null && textModels.value.length > 0) {
+      const def = textModels.value.find((m) => m.isDefault === 1)
+      selectedModelId.value = def?.id ?? textModels.value[0].id
+    }
+    configured.value = textModels.value.length > 0 || !!apiConfigStore.state.endpoint
   } catch {
     // 错误已由拦截器提示
   }
@@ -117,7 +131,11 @@ async function generate() {
       buildPrompt(tpl.prompt, topic.value.trim()),
       (text) => { raw.value = text },
       ac.signal,
-      apiConfigStore.state,
+      selectedModelId.value
+        ? { modelId: selectedModelId.value }
+        : apiConfigStore.state.endpoint
+          ? apiConfigStore.state
+          : {},
     )
     const parsed = parseCopyResult(full)
     if (parsed) {
@@ -247,6 +265,16 @@ onMounted(() => {
             v-model:value="templateId"
             :options="templateOptions"
             placeholder="选择模板"
+          />
+        </div>
+
+        <div v-if="authStore.isLogin && modelOptions.length > 0">
+          <div class="field-label">模型</div>
+          <NSelect
+            v-model:value="selectedModelId"
+            :options="modelOptions"
+            placeholder="留空则用自带 AI 或默认模型"
+            clearable
           />
         </div>
 

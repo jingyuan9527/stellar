@@ -11,7 +11,7 @@ import {
   getConchAnswerAudio,
 } from '@/api/conch'
 import { uploadFile } from '@/api/file'
-import { getAiConfig, updateAiConfig } from '@/api/ai'
+import { getSetting, setSetting } from '@/api/ai'
 import type { ConchAnswer, ConchAnswerQuery, ConchRecord } from '@/types/api'
 
 const message = useMessage()
@@ -22,8 +22,8 @@ const aiSwitchLoading = ref(false)
 
 async function loadAiConfig() {
   try {
-    const cfg = await getAiConfig()
-    conchAiEnabled.value = cfg.conchAiEnabled ?? 1
+    const v = await getSetting('conch_ai_enabled')
+    conchAiEnabled.value = v === '0' ? 0 : 1
   } catch {
     // 静默
   }
@@ -32,7 +32,7 @@ async function loadAiConfig() {
 async function handleToggleAi(v: number) {
   aiSwitchLoading.value = true
   try {
-    await updateAiConfig({ conchAiEnabled: v })
+    await setSetting('conch_ai_enabled', String(v))
     message.success(v === 1 ? '已开启 AI 匹配' : '已关闭 AI 匹配（纯随机）')
   } catch {
     conchAiEnabled.value = v === 1 ? 0 : 1

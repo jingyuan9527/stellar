@@ -1,23 +1,81 @@
 import service, { request } from './request'
 import { useAuthStore } from '@/store/auth'
-import type { AiConfig, AiTemplate, AiTemplateQuery, AiCopyResult, AiUsageStats, PageResult } from '@/types/api'
+import type { AiModel, AiProvider, AiTemplate, AiTemplateQuery, AiCopyResult, AiImageResult, AiUsageStats, PageResult } from '@/types/api'
 
-// ===== AI 配置 =====
+// ===== AI 供应商 =====
 
-export function getAiConfig() {
-  return request<AiConfig>({ url: '/ai/config', method: 'get' })
+export function getAiProviderList() {
+  return request<AiProvider[]>({ url: '/ai/provider', method: 'get' })
 }
 
-export function updateAiConfig(data: { endpoint?: string; apiKey?: string; model?: string; conchAiEnabled?: number }) {
-  return request<void>({ url: '/ai/config', method: 'put', data })
+export function createAiProvider(data: { name: string; endpoint: string; apiKey?: string; enabled?: number; sortOrder?: number }) {
+  return request<void>({ url: '/ai/provider', method: 'post', data })
 }
 
-export function fetchAiModels(data?: { endpoint?: string; apiKey?: string }) {
-  return request<string[]>({ url: '/ai/config/models', method: 'get', params: data })
+export function updateAiProvider(data: { id: number; name: string; endpoint: string; apiKey?: string; enabled?: number; sortOrder?: number }) {
+  return request<void>({ url: '/ai/provider', method: 'put', data })
 }
 
-export function testAiConnection(data?: { endpoint?: string; apiKey?: string; model?: string }) {
-  return request<void>({ url: '/ai/config/test', method: 'get', params: data })
+export function deleteAiProvider(id: number) {
+  return request<void>({ url: `/ai/provider/${id}`, method: 'delete' })
+}
+
+export function toggleAiProviderEnabled(id: number, enabled: number) {
+  return request<void>({ url: `/ai/provider/${id}/enabled`, method: 'put', params: { enabled } })
+}
+
+export function fetchAiProviderModels(id: number) {
+  return request<string[]>({ url: `/ai/provider/${id}/models`, method: 'get' })
+}
+
+export function testAiProviderConnection(id: number, model?: string) {
+  return request<void>({ url: `/ai/provider/${id}/test`, method: 'get', params: model ? { model } : undefined })
+}
+
+// ===== AI 模型 =====
+
+export function getAiModelList(providerId?: number) {
+  return request<AiModel[]>({ url: '/ai/model', method: 'get', params: providerId ? { providerId } : undefined })
+}
+
+export function getAiModelsByType(modelType: string) {
+  return request<AiModel[]>({ url: `/ai/model/type/${modelType}`, method: 'get' })
+}
+
+export function createAiModel(data: { providerId: number; model: string; modelType: string; enabled?: number; isDefault?: number; sortOrder?: number }) {
+  return request<void>({ url: '/ai/model', method: 'post', data })
+}
+
+export function updateAiModel(data: { id: number; providerId?: number; model: string; modelType: string; enabled?: number; isDefault?: number; sortOrder?: number }) {
+  return request<void>({ url: '/ai/model', method: 'put', data })
+}
+
+export function deleteAiModel(id: number) {
+  return request<void>({ url: `/ai/model/${id}`, method: 'delete' })
+}
+
+export function toggleAiModelEnabled(id: number, enabled: number) {
+  return request<void>({ url: `/ai/model/${id}/enabled`, method: 'put', params: { enabled } })
+}
+
+export function setAiModelDefault(id: number) {
+  return request<void>({ url: `/ai/model/${id}/default`, method: 'put' })
+}
+
+// ===== AI 图片生成 =====
+
+export function generateAiImage(data: { modelId: number; prompt: string; size?: string }) {
+  return request<AiImageResult>({ url: '/ai/image/generate', method: 'post', data })
+}
+
+// ===== 系统设置 =====
+
+export function getSetting(key: string) {
+  return request<string>({ url: `/setting/${key}`, method: 'get' })
+}
+
+export function setSetting(key: string, value: string) {
+  return request<void>({ url: `/setting/${key}`, method: 'put', params: { value } })
 }
 
 // ===== AI 模板 =====
@@ -47,20 +105,23 @@ export function resetAiTemplate(id: number) {
 /**
  * 流式聊天，通过 fetch + ReadableStream 读取后端 SSE。
  * 后端代理调用 LLM，API Key 不暴露给浏览器。
+ * <p>opts.modelId 选项目模型；opts.endpoint+apiKey+model 用自带 key；都未传用 TEXT 默认模型。
  */
 export async function streamAiChat(
   prompt: string,
   onDelta: (full: string) => void,
   signal: AbortSignal,
-  userConfig?: { endpoint?: string; apiKey?: string; model?: string },
+  opts?: { modelId?: number; endpoint?: string; apiKey?: string; model?: string },
 ): Promise<string> {
   const authStore = useAuthStore()
   const base = import.meta.env.VITE_API_BASE_URL
-  const body: Record<string, string> = { prompt }
-  if (userConfig?.endpoint && userConfig?.apiKey && userConfig?.model) {
-    body.endpoint = userConfig.endpoint
-    body.apiKey = userConfig.apiKey
-    body.model = userConfig.model
+  const body: Record<string, string | number> = { prompt }
+  if (opts?.modelId) {
+    body.modelId = opts.modelId
+  } else if (opts?.endpoint && opts?.apiKey && opts?.model) {
+    body.endpoint = opts.endpoint
+    body.apiKey = opts.apiKey
+    body.model = opts.model
   }
   const res = await fetch(`${base}/ai/chat/stream`, {
     method: 'POST',

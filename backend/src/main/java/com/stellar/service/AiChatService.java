@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.common.BusinessException;
 import com.stellar.dto.ChatRequest;
-import com.stellar.entity.SysAiConfig;
+import com.stellar.vo.AiResolvedConfig;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,8 +30,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * AI 流式聊天服务，通过 SseEmitter 转发 LLM 的 SSE 流。
- * <p>请求加 stream_options.include_usage 以获取 token 用量；LLM 不返回则字符估算兜底。
+ * AI 聊天服务：流式（SseEmitter）+ 非流式，按 modelId 解析供应商配置发起请求。
+ * <p>配置解析优先级：用户自带 key（endpoint+apiKey+model）> modelId > TEXT 默认模型。
+ * 请求加 stream_options.include_usage 以获取 token 用量；LLM 不返回则字符估算兜底。
  * 每次调用记录 token 消费（主体：登录按账号，游客按 IP）。
  */
 @Slf4j
@@ -39,7 +40,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AiChatService {
 
-    private final AiConfigService aiConfigService;
+    private final AiModelService aiModelService;
     private final ObjectMapper objectMapper;
     private final SysAiUsageService sysAiUsageService;
 
@@ -47,32 +48,56 @@ public class AiChatService {
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 
+    /**
+     * 流式聊天（按 ChatRequest 解析配置）。
+     * <p>自带 key 齐全用临时配置；否则按 modelId；都未传用 TEXT 默认模型。
+     */
     public SseEmitter streamChat(ChatRequest request) {
-        String prompt = request.getPrompt();
-        SysAiConfig config;
+        return doStreamChat(resolveConfig(request), request.getPrompt());
+    }
+
+    /**
+     * 流式聊天（按 modelId 解析配置）。
+     */
+    public SseEmitter streamChat(Long modelId, String prompt) {
+        return doStreamChat(aiModelService.resolveConfig(modelId), prompt);
+    }
+
+    /**
+     * 非流式聊天（同步），返回完整文本。用 TEXT 默认模型。
+     * <p>用于神奇海螺等需一次性拿到完整结果且不显式选模型的场景。
+     */
+    public String chatCompletion(String prompt) {
+        return doChatCompletion(aiModelService.resolveDefaultConfig("TEXT"), prompt);
+    }
+
+    /**
+     * 非流式聊天（按 modelId 解析配置）。
+     */
+    public String chatCompletion(Long modelId, String prompt) {
+        return doChatCompletion(aiModelService.resolveConfig(modelId), prompt);
+    }
+
+    /**
+     * 解析配置：自带 key 齐全 → 临时配置；否则 modelId；否则 TEXT 默认。
+     */
+    private AiResolvedConfig resolveConfig(ChatRequest request) {
         if (StringUtils.hasText(request.getEndpoint())
                 && StringUtils.hasText(request.getApiKey())
                 && StringUtils.hasText(request.getModel())) {
             // 用户自带配置（前端 localStorage 临时传入，后端不持久化）
-            config = new SysAiConfig();
-            config.setEndpoint(request.getEndpoint());
-            config.setApiKey(request.getApiKey());
-            config.setModel(request.getModel());
-        } else {
-            config = aiConfigService.getRawConfig();
-            if (!StringUtils.hasText(config.getEndpoint())) {
-                throw new BusinessException("AI 接口未配置");
-            }
-            if (!StringUtils.hasText(config.getApiKey())) {
-                throw new BusinessException("AI API Key 未配置");
-            }
-            if (!StringUtils.hasText(config.getModel())) {
-                throw new BusinessException("AI 模型未配置");
-            }
+            return new AiResolvedConfig(null, null,
+                    request.getEndpoint(), request.getApiKey(), request.getModel(), "TEXT");
         }
+        if (request.getModelId() != null) {
+            return aiModelService.resolveConfig(request.getModelId());
+        }
+        return aiModelService.resolveDefaultConfig("TEXT");
+    }
 
-        String url = config.getEndpoint().replaceAll("/+$", "") + "/v1/chat/completions";
-        String model = config.getModel();
+    private SseEmitter doStreamChat(AiResolvedConfig cfg, String prompt) {
+        String url = cfg.endpoint().replaceAll("/+$", "") + "/v1/chat/completions";
+        String model = cfg.model();
 
         // 主体判断（同步阶段，request 上下文可用）
         String subjectType;
@@ -100,11 +125,12 @@ public class AiChatService {
                     .uri(URI.create(url))
                     .timeout(Duration.ofMinutes(5))
                     .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + config.getApiKey())
+                    .header("Authorization", "Bearer " + cfg.apiKey())
                     .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
                     .build();
 
-            log.info("AI 流式请求: model={}, promptLen={}, subject={}:{}", model, prompt.length(), subjectType, subjectId);
+            log.info("AI 流式请求: model={}, type={}, providerId={}, promptLen={}, subject={}:{}",
+                    model, cfg.modelType(), cfg.providerId(), prompt.length(), subjectType, subjectId);
 
             final String finalSubjectType = subjectType;
             final String finalSubjectId = subjectId;
@@ -163,7 +189,8 @@ public class AiChatService {
                                 totalTokens = promptTokens + completionTokens;
                                 source = "estimate";
                             }
-                            sysAiUsageService.record(finalSubjectType, finalSubjectId, model,
+                            sysAiUsageService.record(finalSubjectType, finalSubjectId,
+                                    cfg.providerId(), model, cfg.modelType(),
                                     promptTokens, completionTokens, totalTokens, source);
 
                             emitter.send(SseEmitter.event()
@@ -191,24 +218,9 @@ public class AiChatService {
         return emitter;
     }
 
-    /**
-     * 非流式聊天（同步），返回完整文本。用于神奇海螺等需一次性拿到完整结果的场景。
-     * <p>仅使用项目 sys_ai_config 配置（不支持用户自带 key）；每次调用记录 token 消费。
-     */
-    public String chatCompletion(String prompt) {
-        SysAiConfig config = aiConfigService.getRawConfig();
-        if (!StringUtils.hasText(config.getEndpoint())) {
-            throw new BusinessException("AI 接口未配置");
-        }
-        if (!StringUtils.hasText(config.getApiKey())) {
-            throw new BusinessException("AI API Key 未配置");
-        }
-        if (!StringUtils.hasText(config.getModel())) {
-            throw new BusinessException("AI 模型未配置");
-        }
-
-        String url = config.getEndpoint().replaceAll("/+$", "") + "/v1/chat/completions";
-        String model = config.getModel();
+    private String doChatCompletion(AiResolvedConfig cfg, String prompt) {
+        String url = cfg.endpoint().replaceAll("/+$", "") + "/v1/chat/completions";
+        String model = cfg.model();
 
         // 主体判断（同步阶段，request 上下文可用）
         String subjectType;
@@ -235,11 +247,12 @@ public class AiChatService {
                     .uri(URI.create(url))
                     .timeout(Duration.ofMinutes(2))
                     .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + config.getApiKey())
+                    .header("Authorization", "Bearer " + cfg.apiKey())
                     .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
                     .build();
 
-            log.info("AI 非流式请求: model={}, promptLen={}, subject={}:{}", model, prompt.length(), subjectType, subjectId);
+            log.info("AI 非流式请求: model={}, type={}, providerId={}, promptLen={}, subject={}:{}",
+                    model, cfg.modelType(), cfg.providerId(), prompt.length(), subjectType, subjectId);
 
             HttpResponse<String> response = httpClient.send(httpRequest,
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -268,7 +281,8 @@ public class AiChatService {
                 totalTokens = promptTokens + completionTokens;
                 source = "estimate";
             }
-            sysAiUsageService.record(subjectType, subjectId, model,
+            sysAiUsageService.record(subjectType, subjectId,
+                    cfg.providerId(), model, cfg.modelType(),
                     promptTokens, completionTokens, totalTokens, source);
 
             log.info("AI 非流式响应完成 tokens={}/{}/{} source={}",

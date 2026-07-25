@@ -314,3 +314,169 @@ COMMENT ON COLUMN conch_record.user_id IS '登录用户ID(可空,游客为NULL)'
 COMMENT ON COLUMN conch_record.create_time IS '提问时间';
 COMMENT ON COLUMN conch_record.deleted IS '逻辑删除: 0未删 1已删';
 CREATE INDEX IF NOT EXISTS idx_conch_record_create_time ON conch_record (create_time DESC);
+
+-- AI 供应商表（多供应商，每组 endpoint+apiKey 对应多个模型）
+CREATE TABLE IF NOT EXISTS sys_ai_provider (
+    id               BIGSERIAL PRIMARY KEY,
+    name             VARCHAR(100) NOT NULL,
+    endpoint         VARCHAR(500) NOT NULL DEFAULT '',
+    api_key          VARCHAR(500) NOT NULL DEFAULT '',
+    available_models TEXT,
+    enabled          SMALLINT NOT NULL DEFAULT 1,
+    sort_order       INT NOT NULL DEFAULT 0,
+    create_time      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_ai_provider IS 'AI 供应商表(多供应商,每组 endpoint+apiKey)';
+COMMENT ON COLUMN sys_ai_provider.id IS '主键';
+COMMENT ON COLUMN sys_ai_provider.name IS '供应商显示名(如 OpenAI/通义)';
+COMMENT ON COLUMN sys_ai_provider.endpoint IS 'LLM 接口基础地址';
+COMMENT ON COLUMN sys_ai_provider.api_key IS 'API Key(返回前端时脱敏)';
+COMMENT ON COLUMN sys_ai_provider.available_models IS '最近拉取到的可用模型列表(逗号分隔),重新拉取时覆盖';
+COMMENT ON COLUMN sys_ai_provider.enabled IS '是否启用: 0禁用 1启用';
+COMMENT ON COLUMN sys_ai_provider.sort_order IS '排序';
+COMMENT ON COLUMN sys_ai_provider.create_time IS '创建时间';
+COMMENT ON COLUMN sys_ai_provider.update_time IS '更新时间';
+
+-- AI 模型表（供应商下多个模型，带类型标签，按类型设默认）
+CREATE TABLE IF NOT EXISTS sys_ai_model (
+    id           BIGSERIAL PRIMARY KEY,
+    provider_id  BIGINT NOT NULL,
+    model        VARCHAR(200) NOT NULL,
+    model_type   VARCHAR(32) NOT NULL DEFAULT 'TEXT',
+    enabled      SMALLINT NOT NULL DEFAULT 1,
+    is_default   SMALLINT NOT NULL DEFAULT 0,
+    sort_order   INT NOT NULL DEFAULT 0,
+    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_ai_model IS 'AI 模型表(供应商下多模型,带类型标签)';
+COMMENT ON COLUMN sys_ai_model.id IS '主键';
+COMMENT ON COLUMN sys_ai_model.provider_id IS '供应商ID(引用 sys_ai_provider.id)';
+COMMENT ON COLUMN sys_ai_model.model IS '模型名称';
+COMMENT ON COLUMN sys_ai_model.model_type IS '模型类型: TEXT/IMAGE/AUDIO/EMBEDDING/VIDEO(字典 model_type)';
+COMMENT ON COLUMN sys_ai_model.enabled IS '是否启用: 0禁用 1启用';
+COMMENT ON COLUMN sys_ai_model.is_default IS '该类型下默认: 0否 1是(同类型互斥)';
+COMMENT ON COLUMN sys_ai_model.sort_order IS '排序';
+COMMENT ON COLUMN sys_ai_model.create_time IS '创建时间';
+COMMENT ON COLUMN sys_ai_model.update_time IS '更新时间';
+CREATE INDEX IF NOT EXISTS idx_sys_ai_model_provider ON sys_ai_model (provider_id);
+CREATE INDEX IF NOT EXISTS idx_sys_ai_model_type_default ON sys_ai_model (model_type, is_default);
+
+-- 字典类型表（管理枚举值集合，如 model_type 的可选值）
+CREATE TABLE IF NOT EXISTS sys_dict_type (
+    id           BIGSERIAL PRIMARY KEY,
+    dict_code    VARCHAR(64) NOT NULL UNIQUE,
+    dict_name    VARCHAR(100) NOT NULL,
+    enabled      SMALLINT NOT NULL DEFAULT 1,
+    sort_order   INT NOT NULL DEFAULT 0,
+    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_dict_type IS '字典类型表(管理枚举值集合)';
+COMMENT ON COLUMN sys_dict_type.id IS '主键';
+COMMENT ON COLUMN sys_dict_type.dict_code IS '字典编码(唯一,如 model_type)';
+COMMENT ON COLUMN sys_dict_type.dict_name IS '字典中文名';
+COMMENT ON COLUMN sys_dict_type.enabled IS '是否启用: 0禁用 1启用';
+COMMENT ON COLUMN sys_dict_type.sort_order IS '排序';
+COMMENT ON COLUMN sys_dict_type.create_time IS '创建时间';
+COMMENT ON COLUMN sys_dict_type.update_time IS '更新时间';
+
+-- 字典数据表（某字典类型下的具体可选值）
+CREATE TABLE IF NOT EXISTS sys_dict_data (
+    id           BIGSERIAL PRIMARY KEY,
+    dict_code    VARCHAR(64) NOT NULL,
+    value        VARCHAR(64) NOT NULL,
+    label        VARCHAR(100) NOT NULL,
+    sort_order   INT NOT NULL DEFAULT 0,
+    enabled      SMALLINT NOT NULL DEFAULT 1,
+    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_dict_data IS '字典数据表(某字典类型下的可选值)';
+COMMENT ON COLUMN sys_dict_data.id IS '主键';
+COMMENT ON COLUMN sys_dict_data.dict_code IS '所属字典编码(引用 sys_dict_type.dict_code)';
+COMMENT ON COLUMN sys_dict_data.value IS '字典值(如 TEXT/IMAGE)';
+COMMENT ON COLUMN sys_dict_data.label IS '显示标签(如 文本对话/图片生成)';
+COMMENT ON COLUMN sys_dict_data.sort_order IS '排序';
+COMMENT ON COLUMN sys_dict_data.enabled IS '是否启用: 0禁用 1启用';
+COMMENT ON COLUMN sys_dict_data.create_time IS '创建时间';
+COMMENT ON COLUMN sys_dict_data.update_time IS '更新时间';
+CREATE INDEX IF NOT EXISTS idx_sys_dict_data_code ON sys_dict_data (dict_code, enabled, sort_order);
+
+-- 系统设置表（全局开关/单值配置，如 conch_ai_enabled）
+CREATE TABLE IF NOT EXISTS sys_setting (
+    id            BIGSERIAL PRIMARY KEY,
+    setting_key   VARCHAR(100) NOT NULL UNIQUE,
+    setting_value VARCHAR(500),
+    description   VARCHAR(255),
+    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_setting IS '系统设置表(全局开关/单值配置)';
+COMMENT ON COLUMN sys_setting.id IS '主键';
+COMMENT ON COLUMN sys_setting.setting_key IS '设置键(唯一,如 conch_ai_enabled)';
+COMMENT ON COLUMN sys_setting.setting_value IS '设置值';
+COMMENT ON COLUMN sys_setting.description IS '说明';
+COMMENT ON COLUMN sys_setting.create_time IS '创建时间';
+COMMENT ON COLUMN sys_setting.update_time IS '更新时间';
+
+-- 字典种子：model_type（AI 模型类型，预留多种）
+INSERT INTO sys_dict_type (dict_code, dict_name, enabled, sort_order)
+SELECT 'model_type', 'AI模型类型', 1, 0
+WHERE NOT EXISTS (SELECT 1 FROM sys_dict_type WHERE dict_code = 'model_type');
+
+INSERT INTO sys_dict_data (dict_code, value, label, sort_order, enabled)
+SELECT 'model_type', 'TEXT', '文本对话', 1, 1
+WHERE NOT EXISTS (SELECT 1 FROM sys_dict_data WHERE dict_code = 'model_type' AND value = 'TEXT');
+INSERT INTO sys_dict_data (dict_code, value, label, sort_order, enabled)
+SELECT 'model_type', 'IMAGE', '图片生成', 2, 1
+WHERE NOT EXISTS (SELECT 1 FROM sys_dict_data WHERE dict_code = 'model_type' AND value = 'IMAGE');
+INSERT INTO sys_dict_data (dict_code, value, label, sort_order, enabled)
+SELECT 'model_type', 'AUDIO', '语音合成', 3, 1
+WHERE NOT EXISTS (SELECT 1 FROM sys_dict_data WHERE dict_code = 'model_type' AND value = 'AUDIO');
+INSERT INTO sys_dict_data (dict_code, value, label, sort_order, enabled)
+SELECT 'model_type', 'EMBEDDING', '向量嵌入', 4, 1
+WHERE NOT EXISTS (SELECT 1 FROM sys_dict_data WHERE dict_code = 'model_type' AND value = 'EMBEDDING');
+INSERT INTO sys_dict_data (dict_code, value, label, sort_order, enabled)
+SELECT 'model_type', 'VIDEO', '视频生成', 5, 1
+WHERE NOT EXISTS (SELECT 1 FROM sys_dict_data WHERE dict_code = 'model_type' AND value = 'VIDEO');
+
+-- 迁移：sys_ai_config id=1 的单条配置 → 一条 sys_ai_provider + 一条 TEXT 默认模型；
+-- conch_ai_enabled → sys_setting。幂等（目标表已有数据则跳过）。
+-- 用纯 SQL 而非 DO 块，避免 Spring ScriptUtils 按分号截断 PL/pgSQL 的 dollar quote。
+
+-- 供应商迁移：仅当 provider 表为空时，从旧配置取 endpoint/apiKey/available_models
+INSERT INTO sys_ai_provider (name, endpoint, api_key, available_models, enabled, sort_order, create_time, update_time)
+SELECT '默认供应商', endpoint, api_key, available_models, 1, 0, NOW(), NOW()
+FROM sys_ai_config
+WHERE id = 1
+  AND endpoint IS NOT NULL
+  AND endpoint <> ''
+  AND NOT EXISTS (SELECT 1 FROM sys_ai_provider);
+
+-- 模型迁移：仅当 model 表为空且 provider 表非空时，从旧配置取 model 名挂到首个供应商
+INSERT INTO sys_ai_model (provider_id, model, model_type, enabled, is_default, sort_order, create_time, update_time)
+SELECT (SELECT id FROM sys_ai_provider ORDER BY id LIMIT 1),
+       model, 'TEXT', 1, 1, 0, NOW(), NOW()
+FROM sys_ai_config
+WHERE id = 1
+  AND model IS NOT NULL
+  AND model <> ''
+  AND NOT EXISTS (SELECT 1 FROM sys_ai_model)
+  AND EXISTS (SELECT 1 FROM sys_ai_provider);
+
+-- conch_ai_enabled → sys_setting（幂等，无旧配置则默认 1）
+INSERT INTO sys_setting (setting_key, setting_value, description, create_time, update_time)
+SELECT 'conch_ai_enabled',
+       COALESCE((SELECT conch_ai_enabled::text FROM sys_ai_config WHERE id = 1 LIMIT 1), '1'),
+       '神奇海螺AI匹配开关: 0关闭(纯随机) 1开启(AI语义匹配)', NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM sys_setting WHERE setting_key = 'conch_ai_enabled');
+
+-- sys_ai_usage 扩展：关联供应商与模型类型，便于按类型/供应商统计
+ALTER TABLE sys_ai_usage ADD COLUMN IF NOT EXISTS provider_id BIGINT;
+ALTER TABLE sys_ai_usage ADD COLUMN IF NOT EXISTS model_type VARCHAR(32);
+COMMENT ON COLUMN sys_ai_usage.provider_id IS '供应商ID(引用 sys_ai_provider.id,自带key为NULL)';
+COMMENT ON COLUMN sys_ai_usage.model_type IS '模型类型: TEXT/IMAGE/...(自带key默认TEXT)';
+CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_provider ON sys_ai_usage (provider_id);
+CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_model_type ON sys_ai_usage (model_type);

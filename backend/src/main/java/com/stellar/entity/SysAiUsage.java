@@ -23,7 +23,13 @@ public class SysAiUsage {
     /** 主体 ID: userId 或 IP */
     private String subjectId;
 
+    /** 供应商 ID（自带 key 为 null） */
+    private Long providerId;
+
     private String model;
+
+    /** 模型类型: TEXT/IMAGE/...（自带 key 默认 TEXT） */
+    private String modelType;
 
     private Integer promptTokens;
 
