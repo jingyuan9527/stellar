@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -38,7 +39,7 @@ public class LogAspect {
     private final ObjectMapper objectMapper;
 
     private static final Pattern SENSITIVE_PATTERN = Pattern.compile(
-            "(\"(?:password|oldPassword|confirmPassword|token|secretKey)\"\\s*:\\s*)\"[^\"]*\"",
+            "(\"(?:password|oldPassword|confirmPassword|token|secretKey|apiKey)\"\\s*:\\s*)\"[^\"]*\"",
             Pattern.CASE_INSENSITIVE);
 
     private static final int MAX_FIELD_LENGTH = 2000;
@@ -60,7 +61,11 @@ public class LogAspect {
         String className = joinPoint.getTarget().getClass().getName();
         String methodName = joinPoint.getSignature().getName();
         sysLog.setJavaMethod(className + "." + methodName);
-        sysLog.setParams(maskParams(joinPoint.getArgs()));
+        String[] paramNames = null;
+        if (joinPoint.getSignature() instanceof MethodSignature ms) {
+            paramNames = ms.getParameterNames();
+        }
+        sysLog.setParams(maskParams(joinPoint.getArgs(), paramNames));
         sysLog.setOperator(resolveOperator(logAnno.type(), joinPoint.getArgs()));
 
         try {
@@ -106,12 +111,23 @@ public class LogAspect {
         }
     }
 
-    private String maskParams(Object[] args) {
+    /**
+     * 序列化方法参数为 JSON 并脱敏。按参数名组装成对象（而非数组），
+     * 使正则能按字段名命中 @RequestParam 的 apiKey 等敏感参数；
+     * @RequestBody 的 DTO 字段名同样会被命中。
+     */
+    private String maskParams(Object[] args, String[] paramNames) {
         if (args == null || args.length == 0) {
             return null;
         }
         try {
-            String json = objectMapper.writeValueAsString(args);
+            com.fasterxml.jackson.databind.node.ObjectNode node = objectMapper.createObjectNode();
+            for (int i = 0; i < args.length; i++) {
+                String name = (paramNames != null && i < paramNames.length && paramNames[i] != null)
+                        ? paramNames[i] : "arg" + i;
+                node.putPOJO(name, args[i]);
+            }
+            String json = objectMapper.writeValueAsString(node);
             json = SENSITIVE_PATTERN.matcher(json).replaceAll("$1\"******\"");
             return truncate(json, MAX_FIELD_LENGTH);
         } catch (Exception e) {
