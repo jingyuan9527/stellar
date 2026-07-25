@@ -83,6 +83,7 @@ export interface AiConfig {
   endpoint: string
   apiKey: string
   model: string
+  availableModels: string[]
   conchAiEnabled: number
   configured: boolean
 }

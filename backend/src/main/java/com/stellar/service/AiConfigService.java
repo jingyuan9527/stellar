@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -46,6 +47,7 @@ public class AiConfigService {
         vo.setEndpoint(config.getEndpoint());
         vo.setApiKey(maskApiKey(config.getApiKey()));
         vo.setModel(config.getModel());
+        vo.setAvailableModels(parseAvailableModels(config.getAvailableModels()));
         vo.setConchAiEnabled(config.getConchAiEnabled() == null ? 1 : config.getConchAiEnabled());
         vo.setConfigured(StringUtils.hasText(config.getEndpoint())
                 && StringUtils.hasText(config.getApiKey())
@@ -88,6 +90,7 @@ public class AiConfigService {
         if (!StringUtils.hasText(ep) || !StringUtils.hasText(key)) {
             throw new BusinessException("请先配置接口地址和 API Key");
         }
+        log.info("fetchModels: endpoint={}, apiKey(masked)={}", ep, maskApiKey(key));
         String url = ep.replaceAll("/+$", "") + "/v1/models";
 
         HttpRequest request = HttpRequest.newBuilder()
@@ -113,6 +116,8 @@ public class AiConfigService {
                 }
             }
             Collections.sort(models);
+            // 持久化拉取到的模型列表，供前端切换选择直到下次重新拉取
+            saveAvailableModels(models);
             return models;
         } catch (BusinessException e) {
             throw e;
@@ -137,6 +142,7 @@ public class AiConfigService {
         if (!StringUtils.hasText(ep) || !StringUtils.hasText(key) || !StringUtils.hasText(mdl)) {
             throw new BusinessException("请先配置接口地址、API Key 和模型名称");
         }
+        log.info("testConnection: endpoint={}, apiKey(masked)={}, model={}", ep, maskApiKey(key), mdl);
         String url = ep.replaceAll("/+$", "") + "/v1/chat/completions";
 
         try {
@@ -157,9 +163,19 @@ public class AiConfigService {
 
             HttpResponse<String> response = httpClient.send(request,
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() != 200) {
-                throw new BusinessException("连通失败: HTTP " + response.statusCode());
+            int status = response.statusCode();
+            String respBody = response.body();
+            if (status != 200) {
+                // LLM 返回非 200，记录响应体以便排查 401/4xx 的真实原因（key 越权、模型不可用等）
+                log.warn("LLM 连通测试失败: status={}, url={}, model={}, body={}", status, url, mdl, respBody);
+                String detail = StringUtils.hasText(respBody) ? respBody.trim() : "";
+                if (detail.length() > 300) {
+                    detail = detail.substring(0, 300) + "...";
+                }
+                throw new BusinessException("连通失败: HTTP " + status
+                        + (detail.isEmpty() ? "" : " - " + detail));
             }
+            log.info("LLM 连通测试成功: url={}, model={}", url, mdl);
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -189,5 +205,24 @@ public class AiConfigService {
         if (!StringUtils.hasText(key)) return "";
         if (key.length() <= 8) return "****";
         return key.substring(0, 4) + "****" + key.substring(key.length() - 4);
+    }
+
+    /** 把逗号分隔的 available_models 字段解析为列表，空则返回空列表。 */
+    private List<String> parseAvailableModels(String raw) {
+        if (!StringUtils.hasText(raw)) return Collections.emptyList();
+        return Arrays.asList(raw.split(","));
+    }
+
+    /** 把拉取到的模型列表落库（逗号分隔），覆盖旧值。 */
+    private void saveAvailableModels(List<String> models) {
+        try {
+            SysAiConfig config = getRawConfig();
+            config.setAvailableModels(models.isEmpty() ? "" : String.join(",", models));
+            config.setUpdateTime(LocalDateTime.now());
+            configMapper.updateById(config);
+        } catch (Exception e) {
+            // 落库失败不影响拉取结果返回
+            log.warn("保存可用模型列表失败: {}", e.getMessage(), e);
+        }
     }
 }

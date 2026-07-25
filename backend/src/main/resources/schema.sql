@@ -109,6 +109,10 @@ COMMENT ON COLUMN sys_ai_config.update_time IS '更新时间';
 ALTER TABLE sys_ai_config ADD COLUMN IF NOT EXISTS conch_ai_enabled SMALLINT DEFAULT 1;
 COMMENT ON COLUMN sys_ai_config.conch_ai_enabled IS '神奇海螺AI匹配开关: 0关闭(纯随机) 1开启(AI语义匹配)';
 
+-- 最近一次拉取到的可用模型列表（逗号分隔），前端切换选择用，重新拉取时覆盖
+ALTER TABLE sys_ai_config ADD COLUMN IF NOT EXISTS available_models TEXT;
+COMMENT ON COLUMN sys_ai_config.available_models IS '最近拉取到的可用模型列表(逗号分隔),重新拉取时覆盖';
+
 -- AI 提示词模板表
 CREATE TABLE IF NOT EXISTS sys_ai_template (
     id          BIGSERIAL PRIMARY KEY,

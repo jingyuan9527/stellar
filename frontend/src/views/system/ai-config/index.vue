@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import {
-  NCard, NSpace, NInput, NAutoComplete, NButton, NAlert, useMessage,
+  NCard, NSpace, NInput, NSelect, NButton, NAlert, useMessage,
 } from 'naive-ui'
 import { getAiConfig, updateAiConfig, fetchAiModels, testAiConnection } from '@/api/ai'
 
@@ -20,7 +20,10 @@ async function loadConfig() {
   formData.value.model = config.model
   formData.value.apiKey = ''
   maskedKey.value = config.apiKey
-  modelOptions.value = config.model ? [config.model] : []
+  // 优先用 DB 缓存的可用模型列表回填下拉，未拉取过则只放当前模型
+  modelOptions.value = config.availableModels?.length
+    ? config.availableModels
+    : (config.model ? [config.model] : [])
 }
 
 async function handleFetchModels() {
@@ -113,9 +116,11 @@ onMounted(loadConfig)
         <div class="form-item">
           <span class="label">模型名称</span>
           <div class="model-row">
-            <NAutoComplete
+            <NSelect
               v-model:value="formData.model"
               :options="modelOptions.map((m) => ({ label: m, value: m }))"
+              :filterable="true"
+              :tag="true"
               placeholder="gpt-4o-mini，或点右侧拉取"
               clearable
             />
