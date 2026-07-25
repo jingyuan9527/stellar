@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   NCard, NSpace, NInput, NSelect, NButton, NEmpty, NAlert, NImage, useMessage,
 } from 'naive-ui'
-import { getAiModelsByType, generateAiImage } from '@/api/ai'
+import { createAiImage, getAiImageTask, getAiModelsByType } from '@/api/ai'
 import { useAuthStore } from '@/store/auth'
-import type { AiModel } from '@/types/api'
+import type { AiModel, AiImageTask } from '@/types/api'
 
 const message = useMessage()
 const authStore = useAuthStore()
@@ -13,9 +13,18 @@ const authStore = useAuthStore()
 const models = ref<AiModel[]>([])
 const modelId = ref<number | null>(null)
 const prompt = ref('')
-const size = ref('1024x1024')
-const generating = ref(false)
+const size = ref('1K')
+const ratio = ref('1:1')
+const creating = ref(false)
+
+// 异步任务状态
+const taskId = ref<number | null>(null)
+const taskStatus = ref<string>('')
+const polling = ref(false)
 const resultUrl = ref<string | null>(null)
+const errorMsg = ref<string | null>(null)
+let pollTimer: number | null = null
+let pollStart = 0
 
 const modelOptions = computed(() =>
   models.value.map((m) => ({
@@ -25,10 +34,21 @@ const modelOptions = computed(() =>
 )
 
 const sizeOptions = [
-  { value: '1024x1024', label: '1024×1024（方形）' },
-  { value: '1024x1792', label: '1024×1792（竖图）' },
-  { value: '1792x1024', label: '1792×1024（横图）' },
-  { value: '512x512', label: '512×512（小图）' },
+  { value: '1K', label: '1K（约 1024）' },
+  { value: '2K', label: '2K（约 2048）' },
+  { value: '3K', label: '3K（约 3072）' },
+  { value: '4K', label: '4K（约 4096）' },
+]
+
+const ratioOptions = [
+  { value: '1:1', label: '1:1 方形' },
+  { value: '16:9', label: '16:9 横图' },
+  { value: '9:16', label: '9:16 竖图' },
+  { value: '4:3', label: '4:3 横图' },
+  { value: '3:4', label: '3:4 竖图' },
+  { value: '2:3', label: '2:3 竖图' },
+  { value: '3:2', label: '3:2 横图' },
+  { value: '21:9', label: '21:9 超宽' },
 ]
 
 async function loadModels() {
@@ -43,7 +63,7 @@ async function loadModels() {
   }
 }
 
-async function handleGenerate() {
+async function handleCreate() {
   if (!modelId.value) {
     message.warning('请选择图片模型')
     return
@@ -52,23 +72,66 @@ async function handleGenerate() {
     message.warning('请输入提示词')
     return
   }
-  generating.value = true
+  creating.value = true
   resultUrl.value = null
+  errorMsg.value = null
+  taskStatus.value = ''
   try {
-    const res = await generateAiImage({
+    const id = await createAiImage({
       modelId: modelId.value,
       prompt: prompt.value.trim(),
       size: size.value,
+      ratio: ratio.value,
     })
-    resultUrl.value = res.url
-    message.success('生成成功')
+    taskId.value = id
+    taskStatus.value = 'generating'
+    message.success('任务已创建，正在生成...')
+    startPolling()
   } catch {
     // 错误已由拦截器提示
   } finally {
-    generating.value = false
+    creating.value = false
   }
 }
 
+function startPolling() {
+  if (!taskId.value) return
+  polling.value = true
+  pollStart = Date.now()
+  pollTimer = window.setInterval(pollOnce, 3000)
+}
+
+async function pollOnce() {
+  if (!taskId.value) return
+  try {
+    const res: AiImageTask = await getAiImageTask(taskId.value)
+    taskStatus.value = res.status
+    if (res.status === 'completed') {
+      stopPolling()
+      resultUrl.value = res.url
+      message.success('图片生成完成')
+    } else if (res.status === 'failed') {
+      stopPolling()
+      errorMsg.value = res.errorMsg
+      message.error(res.errorMsg || '图片生成失败')
+    } else if (Date.now() - pollStart > 5 * 60 * 1000) {
+      stopPolling()
+      message.warning('轮询超时，请稍后重试')
+    }
+  } catch {
+    // 单次查询失败不中断轮询
+  }
+}
+
+function stopPolling() {
+  polling.value = false
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+onBeforeUnmount(stopPolling)
 onMounted(loadModels)
 </script>
 
@@ -101,29 +164,35 @@ onMounted(loadModels)
         </div>
 
         <div>
-          <div class="field-label">尺寸</div>
-          <NSelect v-model:value="size" :options="sizeOptions" />
+          <div class="field-label">尺寸档位 / 宽高比</div>
+          <NSpace>
+            <NSelect v-model:value="size" :options="sizeOptions" style="width: 160px" />
+            <NSelect v-model:value="ratio" :options="ratioOptions" style="width: 160px" />
+          </NSpace>
         </div>
 
         <NSpace>
           <NButton
             type="primary"
-            :loading="generating"
-            :disabled="models.length === 0 || !prompt.trim()"
-            @click="handleGenerate"
+            :loading="creating"
+            :disabled="models.length === 0 || !prompt.trim() || polling"
+            @click="handleCreate"
           >
             生成图片
           </NButton>
+          <NButton v-if="polling" type="error" @click="stopPolling">停止轮询</NButton>
         </NSpace>
 
         <NAlert v-if="!authStore.isLogin" type="info" :bordered="false">
-          游客每日可生成 2 次，登录后无此限制（受 IP 限流保护）。
+          游客每日可生成 2 次，登录后无此限制（受 IP 限流保护）。异步生成，无需等待。
         </NAlert>
       </NSpace>
     </NCard>
 
-    <NCard v-if="generating || resultUrl" title="生成结果" :bordered="false">
-      <div v-if="generating" class="loading-box">生成中，请稍候（图片生成通常需要 10-30 秒）...</div>
+    <NCard v-if="polling || taskStatus || resultUrl" title="生成结果" :bordered="false">
+      <div v-if="polling || (taskStatus && taskStatus !== 'completed' && taskStatus !== 'failed')" class="loading-box">
+        生成中，请稍候（通常 10-60 秒）...
+      </div>
       <NImage
         v-else-if="resultUrl"
         :src="resultUrl"
@@ -131,6 +200,7 @@ onMounted(loadModels)
         object-fit="contain"
         style="max-height: 600px"
       />
+      <NEmpty v-else-if="errorMsg" :description="errorMsg" />
       <NEmpty v-else description="无结果" />
     </NCard>
   </div>

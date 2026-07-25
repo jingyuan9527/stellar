@@ -1,6 +1,6 @@
 import service, { request } from './request'
 import { useAuthStore } from '@/store/auth'
-import type { AiModel, AiProvider, AiTemplate, AiTemplateQuery, AiCopyResult, AiImageResult, AiUsageStats, PageResult } from '@/types/api'
+import type { AiModel, AiProvider, AiTemplate, AiTemplateQuery, AiCopyResult, AiImageTask, AiVideoTask, AiVideoStatus, AiUsageStats, PageResult } from '@/types/api'
 
 // ===== AI 供应商 =====
 
@@ -62,10 +62,24 @@ export function setAiModelDefault(id: number) {
   return request<void>({ url: `/ai/model/${id}/default`, method: 'put' })
 }
 
-// ===== AI 图片生成 =====
+// ===== AI 图片生成（异步任务）=====
 
-export function generateAiImage(data: { modelId: number; prompt: string; size?: string }) {
-  return request<AiImageResult>({ url: '/ai/image/generate', method: 'post', data })
+export function createAiImage(data: { modelId: number; prompt: string; size?: string; ratio?: string }) {
+  return request<number>({ url: '/ai/image/create', method: 'post', data })
+}
+
+export function getAiImageTask(taskId: number) {
+  return request<AiImageTask>({ url: `/ai/image/task/${taskId}`, method: 'get' })
+}
+
+// ===== AI 视频生成（异步任务）=====
+
+export function createAiVideo(data: { modelId: number; prompt: string; width?: number; height?: number; numFrames?: number; frameRate?: number }) {
+  return request<AiVideoTask>({ url: '/ai/video/create', method: 'post', data, timeout: 60000 })
+}
+
+export function getAiVideoStatus(modelId: number, videoId: string) {
+  return request<AiVideoStatus>({ url: '/ai/video/status', method: 'get', params: { modelId, videoId } })
 }
 
 // ===== 系统设置 =====

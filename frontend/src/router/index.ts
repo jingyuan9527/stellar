@@ -137,6 +137,12 @@ export const routes: RouteRecordRaw[] = [
             component: () => import('@/views/video/image/index.vue'),
             meta: { title: 'AI图片生成', icon: 'image', order: 3, requiresAuth: false },
           },
+          {
+            path: 'video',
+            name: 'VideoVideo',
+            component: () => import('@/views/video/video/index.vue'),
+            meta: { title: 'AI视频生成', icon: 'play', order: 4 },
+          },
         ],
       },
       {

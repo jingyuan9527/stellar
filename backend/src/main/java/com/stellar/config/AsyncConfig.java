@@ -24,4 +24,18 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /** AI 异步任务线程池（图片生成等耗时任务，与日志隔离） */
+    @Bean("aiTaskExecutor")
+    public Executor aiTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(50);
+        executor.setKeepAliveSeconds(120);
+        executor.setThreadNamePrefix("ai-task-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
 }

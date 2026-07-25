@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { NCard, NGrid, NGridItem, NIcon, NStatistic, NEmpty } from 'naive-ui'
+import { NCard, NGrid, NGridItem, NIcon, NStatistic, NEmpty, NTag } from 'naive-ui'
 import { useAuthStore } from '@/store/auth'
 import { iconMap } from '@/utils/icons'
 import { getAiUsageStats } from '@/api/ai'
@@ -34,6 +34,27 @@ function renderStatIcon(name: string, color: string) {
 const maxTrendTokens = computed(() => {
   if (!stats.value?.dailyTrend?.length) return 1
   return Math.max(1, ...stats.value.dailyTrend.map((d) => d.tokens))
+})
+
+const modelTypeLabels: Record<string, string> = {
+  TEXT: '文本对话',
+  IMAGE: '图片生成',
+  AUDIO: '语音合成',
+  EMBEDDING: '向量嵌入',
+  VIDEO: '视频生成',
+}
+function typeLabel(t: string): string {
+  return modelTypeLabels[t] ?? t
+}
+
+const maxTypeTokens = computed(() => {
+  if (!stats.value?.byType?.length) return 1
+  return Math.max(1, ...stats.value.byType.map((t) => t.tokens))
+})
+
+const maxProviderTokens = computed(() => {
+  if (!stats.value?.byProvider?.length) return 1
+  return Math.max(1, ...stats.value.byProvider.map((p) => p.tokens))
 })
 
 async function loadStats() {
@@ -95,6 +116,43 @@ onMounted(loadStats)
       </div>
       <NEmpty v-else description="暂无数据" />
     </NCard>
+
+    <NGrid :x-gap="16" :y-gap="16" :cols="2" responsive="screen" item-responsive>
+      <NGridItem span="2 m:1">
+        <NCard title="按模型类型" :bordered="false">
+          <div v-if="stats?.byType?.length" class="group-list">
+            <div v-for="t in stats.byType" :key="t.modelType" class="group-row">
+              <div class="group-head">
+                <NTag size="small" :bordered="false" :type="t.modelType === 'TEXT' ? 'success' : 'warning'">{{ typeLabel(t.modelType) }}</NTag>
+                <span class="group-tokens">{{ t.tokens }} tokens</span>
+                <span class="group-calls">{{ t.calls }} 次</span>
+              </div>
+              <div class="group-bar-wrap">
+                <div class="group-bar" :style="{ width: (t.tokens / maxTypeTokens * 100) + '%' }"></div>
+              </div>
+            </div>
+          </div>
+          <NEmpty v-else description="暂无数据" />
+        </NCard>
+      </NGridItem>
+      <NGridItem span="2 m:1">
+        <NCard title="按供应商" :bordered="false">
+          <div v-if="stats?.byProvider?.length" class="group-list">
+            <div v-for="p in stats.byProvider" :key="p.providerId" class="group-row">
+              <div class="group-head">
+                <span class="group-name">{{ p.providerName || '未知' }}</span>
+                <span class="group-tokens">{{ p.tokens }} tokens</span>
+                <span class="group-calls">{{ p.calls }} 次</span>
+              </div>
+              <div class="group-bar-wrap">
+                <div class="group-bar provider-bar" :style="{ width: (p.tokens / maxProviderTokens * 100) + '%' }"></div>
+              </div>
+            </div>
+          </div>
+          <NEmpty v-else description="暂无数据" />
+        </NCard>
+      </NGridItem>
+    </NGrid>
   </div>
 </template>
 
@@ -179,6 +237,60 @@ onMounted(loadStats)
 .trend-val {
   font-size: 12px;
   font-weight: 600;
+}
+
+.group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.group-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.group-name {
+  font-weight: 500;
+  min-width: 80px;
+}
+
+.group-tokens {
+  opacity: 0.8;
+}
+
+.group-calls {
+  margin-left: auto;
+  opacity: 0.5;
+  font-size: 12px;
+}
+
+.group-bar-wrap {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(127, 127, 127, 0.12);
+  overflow: hidden;
+}
+
+.group-bar {
+  height: 100%;
+  background: var(--primary-color, #18a058);
+  border-radius: 3px;
+  transition: width 0.3s;
+  min-width: 2px;
+}
+
+.provider-bar {
+  background: #2080f0;
 }
 
 @media (max-width: 768px) {

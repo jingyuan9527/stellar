@@ -480,3 +480,35 @@ COMMENT ON COLUMN sys_ai_usage.provider_id IS '供应商ID(引用 sys_ai_provide
 COMMENT ON COLUMN sys_ai_usage.model_type IS '模型类型: TEXT/IMAGE/...(自带key默认TEXT)';
 CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_provider ON sys_ai_usage (provider_id);
 CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_model_type ON sys_ai_usage (model_type);
+
+-- AI 图片生成异步任务表（后端异步包同步 API：请求立即返回 taskId，异步线程生成+存库，前端轮询）
+CREATE TABLE IF NOT EXISTS sys_ai_image_task (
+    id            BIGSERIAL PRIMARY KEY,
+    model_id      BIGINT NOT NULL,
+    provider_id   BIGINT,
+    subject_type  VARCHAR(16),
+    subject_id    VARCHAR(64),
+    prompt        TEXT NOT NULL,
+    size          VARCHAR(32),
+    ratio         VARCHAR(32),
+    status        VARCHAR(16) NOT NULL DEFAULT 'generating',
+    file_id       BIGINT,
+    error_msg     TEXT,
+    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_ai_image_task IS 'AI 图片生成异步任务表';
+COMMENT ON COLUMN sys_ai_image_task.id IS '主键';
+COMMENT ON COLUMN sys_ai_image_task.model_id IS '模型ID(引用 sys_ai_model.id)';
+COMMENT ON COLUMN sys_ai_image_task.provider_id IS '供应商ID';
+COMMENT ON COLUMN sys_ai_image_task.subject_type IS '主体类型: account/ip';
+COMMENT ON COLUMN sys_ai_image_task.subject_id IS '主体ID: userId 或 IP';
+COMMENT ON COLUMN sys_ai_image_task.prompt IS '提示词';
+COMMENT ON COLUMN sys_ai_image_task.size IS '尺寸档位: 1K/2K/...';
+COMMENT ON COLUMN sys_ai_image_task.ratio IS '宽高比: 1:1/16:9/...';
+COMMENT ON COLUMN sys_ai_image_task.status IS '状态: generating/completed/failed';
+COMMENT ON COLUMN sys_ai_image_task.file_id IS '生成图片文件ID(引用 sys_file.id)';
+COMMENT ON COLUMN sys_ai_image_task.error_msg IS '失败原因';
+COMMENT ON COLUMN sys_ai_image_task.create_time IS '创建时间';
+COMMENT ON COLUMN sys_ai_image_task.update_time IS '更新时间';
+CREATE INDEX IF NOT EXISTS idx_sys_ai_image_task_subject ON sys_ai_image_task (subject_type, subject_id, create_time DESC);

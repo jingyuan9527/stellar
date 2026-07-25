@@ -104,9 +104,27 @@ export interface AiModel {
   updateTime: string
 }
 
-export interface AiImageResult {
-  fileId: number
-  url: string
+export interface AiImageTask {
+  taskId: number
+  status: string
+  prompt: string
+  url: string | null
+  errorMsg: string | null
+  createTime: string
+}
+
+export interface AiVideoTask {
+  taskId: string
+  videoId: string
+  status: string
+}
+
+export interface AiVideoStatus {
+  status: string
+  progress: number
+  videoUrl: string | null
+  seconds: string
+  size: string
 }
 
 export interface DictData {
@@ -188,12 +206,27 @@ export interface AiUsageDailyPoint {
   calls: number
 }
 
+export interface AiUsageTypeStat {
+  modelType: string
+  tokens: number
+  calls: number
+}
+
+export interface AiUsageProviderStat {
+  providerId: number
+  providerName: string | null
+  tokens: number
+  calls: number
+}
+
 export interface AiUsageStats {
   totalTokens: number
   todayTokens: number
   totalCalls: number
   todayCalls: number
   dailyTrend: AiUsageDailyPoint[]
+  byType: AiUsageTypeStat[]
+  byProvider: AiUsageProviderStat[]
 }
 
 export interface GameScore {

@@ -5,7 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 @Data
-public class AiImageGenerateDTO {
+public class AiVideoCreateDTO {
 
     @NotNull(message = "模型不能为空")
     private Long modelId;
@@ -13,9 +13,12 @@ public class AiImageGenerateDTO {
     @NotBlank(message = "提示词不能为空")
     private String prompt;
 
-    /** 尺寸档位，如 1K/2K/3K/4K，未传用 1K */
-    private String size;
+    private Integer width;
 
-    /** 宽高比，如 1:1/16:9/9:16，未传用 1:1 */
-    private String ratio;
+    private Integer height;
+
+    /** 帧数，须 ≤441 且遵循 8n+1 */
+    private Integer numFrames;
+
+    private Double frameRate;
 }
