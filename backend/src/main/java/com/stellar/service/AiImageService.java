@@ -1,7 +1,10 @@
 package com.stellar.service;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.stellar.common.BusinessException;
+import com.stellar.dto.AiImageHistoryQueryDTO;
 import com.stellar.entity.SysAiImageTask;
 import com.stellar.mapper.SysAiImageTaskMapper;
 import com.stellar.vo.AiImageTaskVO;
@@ -13,11 +16,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 /**
  * AI 图片生成服务：异步任务模式。
  * <p>createTask 立即落库返回 taskId，@Async worker 异步调供应商生成+存库，前端轮询 getTask。
+ * <p>pageHistory 按主体（account/ip）分页查询历史，复用 sys_ai_image_task。
  */
 @Slf4j
 @Service
@@ -63,15 +68,43 @@ public class AiImageService {
         if (task == null) {
             throw new BusinessException("任务不存在");
         }
+        return toVO(task);
+    }
+
+    /**
+     * 按主体分页查询图片生成历史（登录按账号、游客按 IP），按创建时间倒序。
+     */
+    public Page<AiImageTaskVO> pageHistory(AiImageHistoryQueryDTO query, String subjectType, String subjectId) {
+        Page<SysAiImageTask> page = new Page<>(query.getPageNum(), query.getPageSize());
+        LambdaQueryWrapper<SysAiImageTask> wrapper = new LambdaQueryWrapper<SysAiImageTask>()
+                .eq(SysAiImageTask::getSubjectType, subjectType)
+                .eq(SysAiImageTask::getSubjectId, subjectId)
+                .orderByDesc(SysAiImageTask::getCreateTime);
+        Page<SysAiImageTask> result = taskMapper.selectPage(page, wrapper);
+
+        Page<AiImageTaskVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
+        voPage.setPages(result.getPages());
+        voPage.setRecords(result.getRecords().stream().map(this::toVO).toList());
+        return voPage;
+    }
+
+    private AiImageTaskVO toVO(SysAiImageTask task) {
         AiImageTaskVO vo = new AiImageTaskVO();
         vo.setTaskId(task.getId());
         vo.setStatus(task.getStatus());
         vo.setPrompt(task.getPrompt());
+        vo.setSize(task.getSize());
+        vo.setRatio(task.getRatio());
         if (task.getFileId() != null) {
             vo.setUrl("/file/" + task.getFileId());
         }
         vo.setErrorMsg(task.getErrorMsg());
         vo.setCreateTime(task.getCreateTime());
+        vo.setUpdateTime(task.getUpdateTime());
+        if (task.getUpdateTime() != null && task.getCreateTime() != null
+                && task.getUpdateTime().isAfter(task.getCreateTime())) {
+            vo.setDurationMs(Duration.between(task.getCreateTime(), task.getUpdateTime()).toMillis());
+        }
         return vo;
     }
 

@@ -1,17 +1,22 @@
 package com.stellar.controller;
 
+import cn.dev33.satoken.stp.StpUtil;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.stellar.annotation.Log;
 import com.stellar.common.Result;
 import com.stellar.common.annotation.PublicAccess;
 import com.stellar.common.annotation.RateLimit;
 import com.stellar.dto.AiImageGenerateDTO;
+import com.stellar.dto.AiImageHistoryQueryDTO;
 import com.stellar.enums.OperationType;
 import com.stellar.service.AiImageService;
 import com.stellar.vo.AiImageTaskVO;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,7 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * AI 图片生成接口（异步任务模式）。对游客开放，IP 日限 2 次。
- * <p>POST /create 立即返回 taskId，@Async 线程生成；GET /task/{id} 轮询状态。
+ * <p>POST /create 立即返回 taskId，@Async 线程生成；GET /task/{id} 轮询状态；
+ * GET /page 按主体（account/ip）分页查看历史。
  */
 @Slf4j
 @RestController
@@ -47,4 +53,34 @@ public class AiImageController {
     public Result<AiImageTaskVO> task(@PathVariable Long taskId) {
         return Result.success(aiImageService.getTask(taskId));
     }
+
+    /**
+     * 分页查询当前主体的图片生成历史（登录按账号、游客按 IP）。
+     */
+    @PublicAccess
+    @GetMapping("/page")
+    @Log(title = "AI图片历史", type = OperationType.QUERY)
+    public Result<Page<AiImageTaskVO>> page(@ModelAttribute AiImageHistoryQueryDTO query, HttpServletRequest request) {
+        String subjectType = StpUtil.isLogin() ? "account" : "ip";
+        String subjectId = StpUtil.isLogin() ? StpUtil.getLoginIdAsString() : getClientIp(request);
+        return Result.success(aiImageService.pageHistory(query, subjectType, subjectId));
+    }
+
+    /**
+     * 解析客户端真实 IP，穿透代理头（与 RateLimitInterceptor 一致）。
+     */
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip != null && !ip.isBlank()) {
+            ip = ip.split(",")[0].trim();
+        }
+        if (ip == null || ip.isBlank()) {
+            ip = request.getHeader("X-Real-IP");
+        }
+        if (ip == null || ip.isBlank()) {
+            ip = request.getRemoteAddr();
+        }
+        return ip;
+    }
 }
+

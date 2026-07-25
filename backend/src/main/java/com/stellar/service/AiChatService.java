@@ -25,6 +25,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +44,7 @@ public class AiChatService {
     private final AiModelService aiModelService;
     private final ObjectMapper objectMapper;
     private final SysAiUsageService sysAiUsageService;
+    private final SysAiChatRecordService sysAiChatRecordService;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -134,11 +136,20 @@ public class AiChatService {
 
             final String finalSubjectType = subjectType;
             final String finalSubjectId = subjectId;
+            // 历史落库用：请求时刻、供应商/模型（lambda 内 final 捕获）
+            final LocalDateTime requestTime = LocalDateTime.now();
+            final long requestTimeMillis = System.currentTimeMillis();
+            final Long providerId = cfg.providerId();
+            final String finalModel = model;
+            final boolean[] recorded = {false};
 
             httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
                     .thenAccept(response -> {
                         if (response.statusCode() != 200) {
-                            sendError(emitter, "LLM 返回错误: HTTP " + response.statusCode());
+                            String errMsg = "LLM 返回错误: HTTP " + response.statusCode();
+                            recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
+                                    prompt, null, "failed", errMsg, requestTime, requestTimeMillis);
+                            sendError(emitter, errMsg);
                             return;
                         }
                         StringBuilder completionBuf = new StringBuilder();
@@ -193,6 +204,10 @@ public class AiChatService {
                                     cfg.providerId(), model, cfg.modelType(),
                                     promptTokens, completionTokens, totalTokens, source);
 
+                            recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
+                                    prompt, completionBuf.toString(), "success", null,
+                                    requestTime, requestTimeMillis);
+
                             emitter.send(SseEmitter.event()
                                     .data(Map.of("done", true), MediaType.APPLICATION_JSON));
                             emitter.complete();
@@ -200,6 +215,9 @@ public class AiChatService {
                                     promptTokens, completionTokens, totalTokens, source);
                         } catch (Exception e) {
                             log.info("流式响应结束: {}", e.getMessage());
+                            recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
+                                    prompt, completionBuf.toString(), "failed", e.getMessage(),
+                                    requestTime, requestTimeMillis);
                             try {
                                 emitter.complete();
                             } catch (Exception ignored) {
@@ -208,6 +226,8 @@ public class AiChatService {
                     })
                     .exceptionally(e -> {
                         log.error("调用 LLM 失败: {}", e.getMessage(), e);
+                        recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
+                                prompt, null, "failed", e.getMessage(), requestTime, requestTimeMillis);
                         sendError(emitter, e.getMessage());
                         return null;
                     });
@@ -335,5 +355,23 @@ public class AiChatService {
         } catch (Exception e) {
             emitter.completeWithError(e);
         }
+    }
+
+    /**
+     * 落库一次文本生成历史（幂等守卫：每条请求只记一次，避免异常路径重复落库）。
+     * <p>历史落库异常仅记日志，不影响流式主流程。
+     */
+    private void recordHistory(boolean[] recorded, String subjectType, String subjectId,
+                               Long providerId, String model, String prompt, String result,
+                               String status, String errorMsg,
+                               LocalDateTime requestTime, long requestTimeMillis) {
+        if (recorded[0]) {
+            return;
+        }
+        recorded[0] = true;
+        LocalDateTime responseTime = LocalDateTime.now();
+        long durationMs = System.currentTimeMillis() - requestTimeMillis;
+        sysAiChatRecordService.record(subjectType, subjectId, providerId, model,
+                prompt, result, status, errorMsg, requestTime, responseTime, durationMs);
     }
 }

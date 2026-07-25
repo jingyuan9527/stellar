@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { h, computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
-  NCard, NSpace, NInput, NSelect, NButton, NEmpty, NAlert, NImage, useMessage,
+  NSpace, NInput, NSelect, NButton, NEmpty, NAlert, NDataTable, NTag,
+  useMessage,
 } from 'naive-ui'
-import { createAiImage, getAiImageTask, getAiModelsByType } from '@/api/ai'
+import type { DataTableColumns } from 'naive-ui'
+import AiGeneratorLayout from '../components/AiGeneratorLayout.vue'
+import { createAiImage, getAiImageTask, getAiImagePage, getAiModelsByType } from '@/api/ai'
 import { useAuthStore } from '@/store/auth'
 import type { AiModel, AiImageTask } from '@/types/api'
 
@@ -25,6 +28,10 @@ const resultUrl = ref<string | null>(null)
 const errorMsg = ref<string | null>(null)
 let pollTimer: number | null = null
 let pollStart = 0
+
+// 历史
+const history = ref<AiImageTask[]>([])
+const historyLoading = ref(false)
 
 const modelOptions = computed(() =>
   models.value.map((m) => ({
@@ -51,6 +58,61 @@ const ratioOptions = [
   { value: '21:9', label: '21:9 超宽' },
 ]
 
+function formatTime(s?: string | null): string {
+  if (!s) return ''
+  return s.replace('T', ' ').slice(0, 19)
+}
+
+const columns: DataTableColumns<AiImageTask> = [
+  { title: '请求时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },
+  { title: '提示词', key: 'prompt', ellipsis: { tooltip: true } },
+  {
+    title: '尺寸/比例', key: 'size', width: 130,
+    render: (row) => `${row.size ?? '-'} / ${row.ratio ?? '-'}`,
+  },
+  {
+    title: '结果', key: 'result', width: 90,
+    render: (row) => {
+      if (row.status === 'completed' && row.url) {
+        return h('img', { src: row.url, style: 'width:60px;height:60px;object-fit:contain;border-radius:4px' })
+      }
+      if (row.status === 'failed') {
+        return h(NTag, { type: 'error', size: 'small' }, { default: () => '失败' })
+      }
+      if (row.status === 'generating') {
+        return h(NTag, { size: 'small' }, { default: () => '生成中' })
+      }
+      return h(NTag, { size: 'small' }, { default: () => row.status })
+    },
+  },
+  { title: '返回时间', key: 'updateTime', width: 170, render: (row) => formatTime(row.updateTime) },
+  {
+    title: '耗时', key: 'durationMs', width: 90,
+    render: (row) => (row.durationMs != null ? `${row.durationMs} ms` : '-'),
+  },
+  {
+    title: '操作', key: 'actions', width: 90, fixed: 'right',
+    render: (row) => h(NButton, { size: 'small', onClick: () => viewHistory(row) }, { default: () => '查看' }),
+  },
+]
+
+const pagination = reactive({
+  page: 1,
+  pageSize: 10,
+  itemCount: 0,
+  showSizePicker: true,
+  pageSizes: [10, 20, 50],
+  onChange: (page: number) => {
+    pagination.page = page
+    loadHistory()
+  },
+  onUpdatePageSize: (size: number) => {
+    pagination.pageSize = size
+    pagination.page = 1
+    loadHistory()
+  },
+})
+
 async function loadModels() {
   try {
     models.value = await getAiModelsByType('IMAGE')
@@ -61,6 +123,31 @@ async function loadModels() {
   } catch {
     // 错误已由拦截器提示
   }
+}
+
+async function loadHistory() {
+  historyLoading.value = true
+  try {
+    const res = await getAiImagePage({ pageNum: pagination.page, pageSize: pagination.pageSize })
+    history.value = res.records
+    pagination.itemCount = res.total
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function refreshHistory() {
+  pagination.page = 1
+  await loadHistory()
+}
+
+function viewHistory(row: AiImageTask) {
+  taskId.value = row.taskId
+  taskStatus.value = row.status
+  resultUrl.value = row.url
+  errorMsg.value = row.errorMsg
 }
 
 async function handleCreate() {
@@ -86,6 +173,7 @@ async function handleCreate() {
     taskId.value = id
     taskStatus.value = 'generating'
     message.success('任务已创建，正在生成...')
+    await refreshHistory()
     startPolling()
   } catch {
     // 错误已由拦截器提示
@@ -110,10 +198,12 @@ async function pollOnce() {
       stopPolling()
       resultUrl.value = res.url
       message.success('图片生成完成')
+      await refreshHistory()
     } else if (res.status === 'failed') {
       stopPolling()
       errorMsg.value = res.errorMsg
       message.error(res.errorMsg || '图片生成失败')
+      await refreshHistory()
     } else if (Date.now() - pollStart > 5 * 60 * 1000) {
       stopPolling()
       message.warning('轮询超时，请稍后重试')
@@ -132,77 +222,94 @@ function stopPolling() {
 }
 
 onBeforeUnmount(stopPolling)
-onMounted(loadModels)
+onMounted(() => {
+  loadModels()
+  loadHistory()
+})
 </script>
 
 <template>
   <div class="image-page">
-    <NCard title="AI 图片生成" :bordered="false">
-      <NSpace vertical :size="16">
-        <NAlert v-if="models.length === 0" type="warning" :bordered="false">
-          暂无可用的图片生成模型，请联系管理员在 系统管理 → AI 配置 中添加 IMAGE 类型模型。
-        </NAlert>
+    <AiGeneratorLayout aside-title="AI 图片生成">
+      <template #aside>
+        <NSpace vertical :size="16">
+          <NAlert v-if="models.length === 0" type="warning" :bordered="false">
+            暂无可用的图片模型，请联系管理员在 系统管理 → AI 配置 中添加 IMAGE 类型模型。
+          </NAlert>
 
-        <div>
-          <div class="field-label">模型</div>
-          <NSelect
-            v-model:value="modelId"
-            :options="modelOptions"
-            placeholder="选择图片模型"
-            :disabled="models.length === 0"
-          />
-        </div>
+          <div>
+            <div class="field-label">模型</div>
+            <NSelect
+              v-model:value="modelId"
+              :options="modelOptions"
+              placeholder="选择图片模型"
+              :disabled="models.length === 0"
+            />
+          </div>
 
-        <div>
-          <div class="field-label">提示词</div>
-          <NInput
-            v-model:value="prompt"
-            type="textarea"
-            :autosize="{ minRows: 3, maxRows: 6 }"
-            placeholder="描述要生成的图片，如：一只在月球上弹吉他的猫，赛博朋克风格"
-          />
-        </div>
+          <div>
+            <div class="field-label">提示词</div>
+            <NInput
+              v-model:value="prompt"
+              type="textarea"
+              :autosize="{ minRows: 3, maxRows: 6 }"
+              placeholder="描述要生成的图片，如：一只在月球上弹吉他的猫，赛博朋克风格"
+            />
+          </div>
 
-        <div>
-          <div class="field-label">尺寸档位 / 宽高比</div>
+          <div>
+            <div class="field-label">尺寸档位 / 宽高比</div>
+            <NSpace>
+              <NSelect v-model:value="size" :options="sizeOptions" style="width: 160px" />
+              <NSelect v-model:value="ratio" :options="ratioOptions" style="width: 160px" />
+            </NSpace>
+          </div>
+
           <NSpace>
-            <NSelect v-model:value="size" :options="sizeOptions" style="width: 160px" />
-            <NSelect v-model:value="ratio" :options="ratioOptions" style="width: 160px" />
+            <NButton
+              type="primary"
+              :loading="creating"
+              :disabled="models.length === 0 || !prompt.trim() || polling"
+              @click="handleCreate"
+            >
+              生成图片
+            </NButton>
+            <NButton v-if="polling" type="error" @click="stopPolling">停止轮询</NButton>
           </NSpace>
-        </div>
 
-        <NSpace>
-          <NButton
-            type="primary"
-            :loading="creating"
-            :disabled="models.length === 0 || !prompt.trim() || polling"
-            @click="handleCreate"
-          >
-            生成图片
-          </NButton>
-          <NButton v-if="polling" type="error" @click="stopPolling">停止轮询</NButton>
+          <NAlert v-if="!authStore.isLogin" type="info" :bordered="false">
+            游客每日 2 次（受 IP 限流）。历史按 IP 记录，同网络下他人可见。
+          </NAlert>
         </NSpace>
+      </template>
 
-        <NAlert v-if="!authStore.isLogin" type="info" :bordered="false">
-          游客每日可生成 2 次，登录后无此限制（受 IP 限流保护）。异步生成，无需等待。
-        </NAlert>
-      </NSpace>
-    </NCard>
+      <template #result>
+        <div v-if="polling || (taskStatus && taskStatus !== 'completed' && taskStatus !== 'failed')" class="loading-box">
+          生成中，请稍候（通常 10-60 秒）...
+        </div>
+        <img
+          v-else-if="resultUrl"
+          :src="resultUrl"
+          alt="生成结果"
+          class="result-img"
+        />
+        <NEmpty v-else-if="errorMsg" :description="errorMsg" />
+        <NEmpty v-else description="暂无结果，输入提示词后点击生成" />
+      </template>
 
-    <NCard v-if="polling || taskStatus || resultUrl" title="生成结果" :bordered="false">
-      <div v-if="polling || (taskStatus && taskStatus !== 'completed' && taskStatus !== 'failed')" class="loading-box">
-        生成中，请稍候（通常 10-60 秒）...
-      </div>
-      <NImage
-        v-else-if="resultUrl"
-        :src="resultUrl"
-        :width="'100%'"
-        object-fit="contain"
-        style="max-height: 600px"
-      />
-      <NEmpty v-else-if="errorMsg" :description="errorMsg" />
-      <NEmpty v-else description="无结果" />
-    </NCard>
+      <template #history>
+        <NDataTable
+          :columns="columns"
+          :data="history"
+          :loading="historyLoading"
+          :pagination="pagination"
+          :scroll-x="1000"
+          remote
+          striped
+          size="small"
+        />
+      </template>
+    </AiGeneratorLayout>
   </div>
 </template>
 
@@ -211,8 +318,6 @@ onMounted(loadModels)
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 720px;
-  margin: 0 auto;
 }
 
 .field-label {
@@ -226,5 +331,12 @@ onMounted(loadModels)
   padding: 40px 0;
   text-align: center;
   opacity: 0.6;
+}
+
+.result-img {
+  width: 100%;
+  max-height: 600px;
+  object-fit: contain;
+  border-radius: 4px;
 }
 </style>

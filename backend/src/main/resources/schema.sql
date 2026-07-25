@@ -137,30 +137,6 @@ COMMENT ON COLUMN sys_ai_template.update_time IS '更新时间';
 COMMENT ON COLUMN sys_ai_template.deleted IS '逻辑删除: 0未删 1已删';
 CREATE INDEX IF NOT EXISTS idx_sys_ai_template_platform ON sys_ai_template (platform);
 
--- AI 文案生成历史表
-CREATE TABLE IF NOT EXISTS sys_ai_copy_result (
-    id           BIGSERIAL PRIMARY KEY,
-    topic        VARCHAR(500) NOT NULL,
-    template_id  BIGINT,
-    result       TEXT NOT NULL,
-    generated_at BIGINT,
-    creator_id   BIGINT,
-    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    deleted      SMALLINT DEFAULT 0
-);
-COMMENT ON TABLE  sys_ai_copy_result IS 'AI 文案生成历史表';
-COMMENT ON COLUMN sys_ai_copy_result.id IS '主键';
-COMMENT ON COLUMN sys_ai_copy_result.topic IS '视频主题';
-COMMENT ON COLUMN sys_ai_copy_result.template_id IS '使用的模板ID';
-COMMENT ON COLUMN sys_ai_copy_result.result IS '生成结果JSON: {titles,description,tags}';
-COMMENT ON COLUMN sys_ai_copy_result.generated_at IS '生成时间戳(ms)';
-COMMENT ON COLUMN sys_ai_copy_result.creator_id IS '创建人ID';
-COMMENT ON COLUMN sys_ai_copy_result.create_time IS '创建时间';
-COMMENT ON COLUMN sys_ai_copy_result.update_time IS '更新时间';
-COMMENT ON COLUMN sys_ai_copy_result.deleted IS '逻辑删除: 0未删 1已删';
-CREATE INDEX IF NOT EXISTS idx_sys_ai_copy_result_creator ON sys_ai_copy_result (creator_id, create_time DESC);
-
 -- 菜单可见性配置表（控制哪些路由对游客公开）
 CREATE TABLE IF NOT EXISTS sys_menu_visibility (
     id              BIGSERIAL PRIMARY KEY,
@@ -512,3 +488,77 @@ COMMENT ON COLUMN sys_ai_image_task.error_msg IS '失败原因';
 COMMENT ON COLUMN sys_ai_image_task.create_time IS '创建时间';
 COMMENT ON COLUMN sys_ai_image_task.update_time IS '更新时间';
 CREATE INDEX IF NOT EXISTS idx_sys_ai_image_task_subject ON sys_ai_image_task (subject_type, subject_id, create_time DESC);
+
+-- AI 文本生成历史记录表（流式生成结束自动落库：提示词/结果/请求与返回时间，方便像日志一样查看历史）
+CREATE TABLE IF NOT EXISTS sys_ai_chat_record (
+    id            BIGSERIAL PRIMARY KEY,
+    subject_type  VARCHAR(16) NOT NULL,
+    subject_id    VARCHAR(64) NOT NULL,
+    provider_id   BIGINT,
+    model         VARCHAR(100),
+    prompt        TEXT NOT NULL,
+    result        TEXT,
+    status        VARCHAR(16) NOT NULL DEFAULT 'success',
+    error_msg     TEXT,
+    request_time  TIMESTAMP NOT NULL,
+    response_time TIMESTAMP,
+    duration_ms   BIGINT,
+    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_ai_chat_record IS 'AI 文本生成历史记录表(流式结束自动落库)';
+COMMENT ON COLUMN sys_ai_chat_record.id IS '主键';
+COMMENT ON COLUMN sys_ai_chat_record.subject_type IS '主体类型: account/ip';
+COMMENT ON COLUMN sys_ai_chat_record.subject_id IS '主体ID: userId 或 IP';
+COMMENT ON COLUMN sys_ai_chat_record.provider_id IS '供应商ID(自带key为NULL)';
+COMMENT ON COLUMN sys_ai_chat_record.model IS 'LLM 模型名';
+COMMENT ON COLUMN sys_ai_chat_record.prompt IS '请求提示词(实际发送给LLM的完整prompt)';
+COMMENT ON COLUMN sys_ai_chat_record.result IS '返回结果(流式完整文本)';
+COMMENT ON COLUMN sys_ai_chat_record.status IS '状态: success/failed';
+COMMENT ON COLUMN sys_ai_chat_record.error_msg IS '失败原因';
+COMMENT ON COLUMN sys_ai_chat_record.request_time IS '请求时间(发起LLM调用时刻)';
+COMMENT ON COLUMN sys_ai_chat_record.response_time IS '返回时间(流式结束时刻)';
+COMMENT ON COLUMN sys_ai_chat_record.duration_ms IS '耗时(毫秒)';
+COMMENT ON COLUMN sys_ai_chat_record.create_time IS '落库时间';
+CREATE INDEX IF NOT EXISTS idx_sys_ai_chat_record_subject ON sys_ai_chat_record (subject_type, subject_id, request_time DESC);
+
+-- AI 视频生成异步任务表（本地留痕：createTask 落库，getTask 轮询更新，完成存 sys_file）
+CREATE TABLE IF NOT EXISTS sys_ai_video_task (
+    id            BIGSERIAL PRIMARY KEY,
+    model_id      BIGINT NOT NULL,
+    provider_id   BIGINT,
+    subject_type  VARCHAR(16),
+    subject_id    VARCHAR(64),
+    prompt        TEXT NOT NULL,
+    ratio         VARCHAR(16),
+    duration      INT,
+    width         INT,
+    height        INT,
+    num_frames    INT,
+    frame_rate    DOUBLE PRECISION,
+    video_id      VARCHAR(128),
+    status        VARCHAR(16) NOT NULL DEFAULT 'generating',
+    file_id       BIGINT,
+    error_msg     TEXT,
+    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_ai_video_task IS 'AI 视频生成异步任务表(本地留痕)';
+COMMENT ON COLUMN sys_ai_video_task.id IS '主键';
+COMMENT ON COLUMN sys_ai_video_task.model_id IS '模型ID(引用 sys_ai_model.id)';
+COMMENT ON COLUMN sys_ai_video_task.provider_id IS '供应商ID';
+COMMENT ON COLUMN sys_ai_video_task.subject_type IS '主体类型: account/ip';
+COMMENT ON COLUMN sys_ai_video_task.subject_id IS '主体ID: userId 或 IP';
+COMMENT ON COLUMN sys_ai_video_task.prompt IS '提示词';
+COMMENT ON COLUMN sys_ai_video_task.ratio IS '画面比例: 16:9/9:16/1:1';
+COMMENT ON COLUMN sys_ai_video_task.duration IS '时长(秒)';
+COMMENT ON COLUMN sys_ai_video_task.width IS '画面宽';
+COMMENT ON COLUMN sys_ai_video_task.height IS '画面高';
+COMMENT ON COLUMN sys_ai_video_task.num_frames IS '帧数';
+COMMENT ON COLUMN sys_ai_video_task.frame_rate IS '帧率';
+COMMENT ON COLUMN sys_ai_video_task.video_id IS '供应商返回的 video_id(供轮询)';
+COMMENT ON COLUMN sys_ai_video_task.status IS '状态: generating/completed/failed';
+COMMENT ON COLUMN sys_ai_video_task.file_id IS '生成视频文件ID(引用 sys_file.id)';
+COMMENT ON COLUMN sys_ai_video_task.error_msg IS '失败原因';
+COMMENT ON COLUMN sys_ai_video_task.create_time IS '请求时间(任务创建)';
+COMMENT ON COLUMN sys_ai_video_task.update_time IS '返回时间(完成/失败更新)';
+CREATE INDEX IF NOT EXISTS idx_sys_ai_video_task_subject ON sys_ai_video_task (subject_type, subject_id, create_time DESC);

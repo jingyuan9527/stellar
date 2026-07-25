@@ -13,6 +13,12 @@ public class AiVideoCreateDTO {
     @NotBlank(message = "提示词不能为空")
     private String prompt;
 
+    /** 画面比例，如 16:9/9:16/1:1（仅历史展示用，可选） */
+    private String ratio;
+
+    /** 时长(秒)，仅历史展示用，可选 */
+    private Integer duration;
+
     private Integer width;
 
     private Integer height;

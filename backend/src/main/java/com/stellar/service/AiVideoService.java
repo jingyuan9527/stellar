@@ -1,12 +1,19 @@
 package com.stellar.service;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.common.BusinessException;
+import com.stellar.dto.AiVideoCreateDTO;
+import com.stellar.dto.AiVideoHistoryQueryDTO;
+import com.stellar.entity.SysAiVideoTask;
 import com.stellar.entity.SysFile;
+import com.stellar.mapper.SysAiVideoTaskMapper;
 import com.stellar.mapper.SysFileMapper;
 import com.stellar.vo.AiResolvedConfig;
+import com.stellar.vo.AiVideoHistoryVO;
 import com.stellar.vo.AiVideoStatusVO;
 import com.stellar.vo.AiVideoTaskVO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,6 +38,8 @@ import java.util.Map;
  * AI 视频生成服务：异步任务模式（创建任务 → 轮询结果）。
  * <p>创建任务 POST /v1/videos 返回 video_id；查询 GET /agnesapi?video_id=xxx，
  * completed 时下载 mp4 存 sys_file 永久化。
+ * <p>本地留痕：createTask 落库 sys_ai_video_task，getTask 轮询更新本地行，
+ * pageHistory 按主体分页查询历史。
  */
 @Slf4j
 @Service
@@ -40,6 +49,7 @@ public class AiVideoService {
     private final AiModelService aiModelService;
     private final SysFileMapper fileMapper;
     private final SysAiUsageService sysAiUsageService;
+    private final SysAiVideoTaskMapper videoTaskMapper;
     private final ObjectMapper objectMapper;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -47,10 +57,11 @@ public class AiVideoService {
             .build();
 
     /**
-     * 创建视频生成任务，返回 video_id 供前端轮询。
+     * 创建视频生成任务，返回 video_id 供前端轮询。同时本地落库留痕。
      */
-    public AiVideoTaskVO createTask(Long modelId, String prompt, Integer width, Integer height,
-                                    Integer numFrames, Double frameRate) {
+    public AiVideoTaskVO createTask(AiVideoCreateDTO dto) {
+        Long modelId = dto.getModelId();
+        String prompt = dto.getPrompt();
         AiResolvedConfig cfg = aiModelService.resolveConfig(modelId);
         if (!"VIDEO".equals(cfg.modelType())) {
             throw new BusinessException("该模型不是视频生成类型，请选择 VIDEO 类型模型");
@@ -61,10 +72,10 @@ public class AiVideoService {
             Map<String, Object> body = new HashMap<>();
             body.put("model", cfg.model());
             body.put("prompt", prompt);
-            if (width != null) body.put("width", width);
-            if (height != null) body.put("height", height);
-            if (numFrames != null) body.put("num_frames", numFrames);
-            if (frameRate != null) body.put("frame_rate", frameRate);
+            if (dto.getWidth() != null) body.put("width", dto.getWidth());
+            if (dto.getHeight() != null) body.put("height", dto.getHeight());
+            if (dto.getNumFrames() != null) body.put("num_frames", dto.getNumFrames());
+            if (dto.getFrameRate() != null) body.put("frame_rate", dto.getFrameRate());
             String bodyJson = objectMapper.writeValueAsString(body);
 
             HttpRequest request = HttpRequest.newBuilder()
@@ -101,6 +112,29 @@ public class AiVideoService {
                     cfg.providerId(), cfg.model(), cfg.modelType(),
                     promptTokens, 0, promptTokens, "estimate");
 
+            // 本地留痕（失败不影响主流程）
+            try {
+                SysAiVideoTask task = new SysAiVideoTask();
+                task.setModelId(modelId);
+                task.setProviderId(cfg.providerId());
+                task.setSubjectType(getSubjectType());
+                task.setSubjectId(getSubjectId());
+                task.setPrompt(prompt);
+                task.setRatio(dto.getRatio());
+                task.setDuration(dto.getDuration());
+                task.setWidth(dto.getWidth());
+                task.setHeight(dto.getHeight());
+                task.setNumFrames(dto.getNumFrames());
+                task.setFrameRate(dto.getFrameRate());
+                task.setVideoId(vo.getVideoId());
+                task.setStatus("generating");
+                task.setCreateTime(LocalDateTime.now());
+                task.setUpdateTime(LocalDateTime.now());
+                videoTaskMapper.insert(task);
+            } catch (Exception e) {
+                log.warn("视频任务本地留痕失败: {}", e.getMessage());
+            }
+
             log.info("AI 视频任务已创建: videoId={}, status={}", vo.getVideoId(), vo.getStatus());
             return vo;
         } catch (BusinessException e) {
@@ -113,6 +147,7 @@ public class AiVideoService {
 
     /**
      * 查询视频任务状态。completed 时下载 mp4 存 sys_file，返回 /file/{id}。
+     * <p>同步更新本地留痕行（status/file_id/error_msg），失败不影响轮询。
      */
     public AiVideoStatusVO getTask(Long modelId, String videoId) {
         AiResolvedConfig cfg = aiModelService.resolveConfig(modelId);
@@ -145,22 +180,32 @@ public class AiVideoService {
             vo.setSeconds(json.path("seconds").asText(""));
             vo.setSize(json.path("size").asText(""));
 
-            // completed 时下载视频存 sys_file 永久化
+            // 本地留痕行（可能不存在：旧任务/留痕失败）
+            SysAiVideoTask local = findLocalTask(videoId);
+
+            // completed 时下载视频存 sys_file 永久化（本地行已有 file_id 则复用，避免重复下载）
             if ("completed".equals(taskStatus)) {
-                String videoUrl = json.path("metadata").path("url").asText("");
-                if (StringUtils.hasText(videoUrl)) {
-                    byte[] videoBytes = downloadFile(videoUrl);
-                    SysFile file = new SysFile();
-                    file.setOriginalName(videoId + ".mp4");
-                    file.setExt("mp4");
-                    file.setContentType("video/mp4");
-                    file.setSize((long) videoBytes.length);
-                    file.setData(videoBytes);
-                    file.setCreateTime(LocalDateTime.now());
-                    fileMapper.insert(file);
-                    vo.setVideoUrl("/file/" + file.getId());
-                    log.info("AI 视频已生成: videoId={}, fileId={}, size={}", videoId, file.getId(), videoBytes.length);
+                if (local != null && local.getFileId() != null) {
+                    vo.setVideoUrl("/file/" + local.getFileId());
+                } else {
+                    String videoUrl = json.path("metadata").path("url").asText("");
+                    if (StringUtils.hasText(videoUrl)) {
+                        byte[] videoBytes = downloadFile(videoUrl);
+                        SysFile file = new SysFile();
+                        file.setOriginalName(videoId + ".mp4");
+                        file.setExt("mp4");
+                        file.setContentType("video/mp4");
+                        file.setSize((long) videoBytes.length);
+                        file.setData(videoBytes);
+                        file.setCreateTime(LocalDateTime.now());
+                        fileMapper.insert(file);
+                        vo.setVideoUrl("/file/" + file.getId());
+                        log.info("AI 视频已生成: videoId={}, fileId={}, size={}", videoId, file.getId(), videoBytes.length);
+                        updateLocalCompleted(videoId, file.getId());
+                    }
                 }
+            } else if ("failed".equals(taskStatus)) {
+                updateLocalFailed(videoId);
             }
             return vo;
         } catch (BusinessException e) {
@@ -169,6 +214,78 @@ public class AiVideoService {
             log.error("AI 视频查询异常: {}", e.getMessage(), e);
             throw new BusinessException("视频查询失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 按主体分页查询视频生成历史（登录按账号、游客按 IP），按创建时间倒序。
+     */
+    public Page<AiVideoHistoryVO> pageHistory(AiVideoHistoryQueryDTO query, String subjectType, String subjectId) {
+        Page<SysAiVideoTask> page = new Page<>(query.getPageNum(), query.getPageSize());
+        LambdaQueryWrapper<SysAiVideoTask> wrapper = new LambdaQueryWrapper<SysAiVideoTask>()
+                .eq(SysAiVideoTask::getSubjectType, subjectType)
+                .eq(SysAiVideoTask::getSubjectId, subjectId)
+                .orderByDesc(SysAiVideoTask::getCreateTime);
+        Page<SysAiVideoTask> result = videoTaskMapper.selectPage(page, wrapper);
+
+        Page<AiVideoHistoryVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
+        voPage.setPages(result.getPages());
+        voPage.setRecords(result.getRecords().stream().map(this::toHistoryVO).toList());
+        return voPage;
+    }
+
+    private SysAiVideoTask findLocalTask(String videoId) {
+        try {
+            return videoTaskMapper.selectOne(new LambdaQueryWrapper<SysAiVideoTask>()
+                    .eq(SysAiVideoTask::getVideoId, videoId));
+        } catch (Exception e) {
+            log.warn("查询本地视频任务失败 videoId={}: {}", videoId, e.getMessage());
+            return null;
+        }
+    }
+
+    private void updateLocalCompleted(String videoId, Long fileId) {
+        try {
+            SysAiVideoTask task = findLocalTask(videoId);
+            if (task == null) return;
+            task.setStatus("completed");
+            task.setFileId(fileId);
+            task.setUpdateTime(LocalDateTime.now());
+            videoTaskMapper.updateById(task);
+        } catch (Exception e) {
+            log.warn("更新本地视频任务完成状态失败 videoId={}: {}", videoId, e.getMessage());
+        }
+    }
+
+    private void updateLocalFailed(String videoId) {
+        try {
+            SysAiVideoTask task = findLocalTask(videoId);
+            if (task == null) return;
+            task.setStatus("failed");
+            task.setUpdateTime(LocalDateTime.now());
+            videoTaskMapper.updateById(task);
+        } catch (Exception e) {
+            log.warn("更新本地视频任务失败状态失败 videoId={}: {}", videoId, e.getMessage());
+        }
+    }
+
+    private AiVideoHistoryVO toHistoryVO(SysAiVideoTask task) {
+        AiVideoHistoryVO vo = new AiVideoHistoryVO();
+        vo.setId(task.getId());
+        vo.setPrompt(task.getPrompt());
+        vo.setRatio(task.getRatio());
+        vo.setDuration(task.getDuration());
+        vo.setStatus(task.getStatus());
+        if (task.getFileId() != null) {
+            vo.setUrl("/file/" + task.getFileId());
+        }
+        vo.setErrorMsg(task.getErrorMsg());
+        vo.setCreateTime(task.getCreateTime());
+        vo.setUpdateTime(task.getUpdateTime());
+        if (task.getUpdateTime() != null && task.getCreateTime() != null
+                && task.getUpdateTime().isAfter(task.getCreateTime())) {
+            vo.setDurationMs(Duration.between(task.getCreateTime(), task.getUpdateTime()).toMillis());
+        }
+        return vo;
     }
 
     /**

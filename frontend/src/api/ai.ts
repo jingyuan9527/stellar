@@ -1,6 +1,6 @@
 import service, { request } from './request'
 import { useAuthStore } from '@/store/auth'
-import type { AiModel, AiProvider, AiTemplate, AiTemplateQuery, AiCopyResult, AiImageTask, AiVideoTask, AiVideoStatus, AiUsageStats, PageResult } from '@/types/api'
+import type { AiModel, AiProvider, AiTemplate, AiTemplateQuery, AiChatRecord, AiImageTask, AiVideoTask, AiVideoHistory, AiVideoStatus, AiUsageStats, PageResult } from '@/types/api'
 
 // ===== AI 供应商 =====
 
@@ -72,14 +72,24 @@ export function getAiImageTask(taskId: number) {
   return request<AiImageTask>({ url: `/ai/image/task/${taskId}`, method: 'get' })
 }
 
+/** 图片生成历史分页（登录按账号、游客按 IP） */
+export function getAiImagePage(params: { pageNum: number; pageSize: number }) {
+  return request<PageResult<AiImageTask>>({ url: '/ai/image/page', method: 'get', params })
+}
+
 // ===== AI 视频生成（异步任务）=====
 
-export function createAiVideo(data: { modelId: number; prompt: string; width?: number; height?: number; numFrames?: number; frameRate?: number }) {
+export function createAiVideo(data: { modelId: number; prompt: string; ratio?: string; duration?: number; width?: number; height?: number; numFrames?: number; frameRate?: number }) {
   return request<AiVideoTask>({ url: '/ai/video/create', method: 'post', data, timeout: 60000 })
 }
 
 export function getAiVideoStatus(modelId: number, videoId: string) {
   return request<AiVideoStatus>({ url: '/ai/video/status', method: 'get', params: { modelId, videoId } })
+}
+
+/** 视频生成历史分页（登录按账号） */
+export function getAiVideoPage(params: { pageNum: number; pageSize: number }) {
+  return request<PageResult<AiVideoHistory>>({ url: '/ai/video/page', method: 'get', params })
 }
 
 // ===== 系统设置 =====
@@ -182,22 +192,18 @@ export async function streamAiChat(
   return full
 }
 
-// ===== AI 文案历史 =====
+// ===== AI 文本生成历史（流式结束自动落库）=====
 
-export function getCopyResultPage(params: { pageNum: number; pageSize: number }) {
-  return request<PageResult<AiCopyResult>>({ url: '/ai/copy-result/page', method: 'get', params })
+export function getChatRecordPage(params: { pageNum: number; pageSize: number }) {
+  return request<PageResult<AiChatRecord>>({ url: '/ai/chat/record/page', method: 'get', params })
 }
 
-export function saveCopyResult(data: { topic: string; templateId?: number; result: string }) {
-  return request<void>({ url: '/ai/copy-result', method: 'post', data })
+export function deleteChatRecord(id: number) {
+  return request<void>({ url: `/ai/chat/record/${id}`, method: 'delete' })
 }
 
-export function deleteCopyResult(id: number) {
-  return request<void>({ url: `/ai/copy-result/${id}`, method: 'delete' })
-}
-
-export function clearCopyResults() {
-  return request<void>({ url: '/ai/copy-result', method: 'delete' })
+export function clearChatRecords() {
+  return request<void>({ url: '/ai/chat/record', method: 'delete' })
 }
 
 // ===== AI token 统计 =====

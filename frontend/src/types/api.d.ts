@@ -108,9 +108,13 @@ export interface AiImageTask {
   taskId: number
   status: string
   prompt: string
+  size: string | null
+  ratio: string | null
   url: string | null
   errorMsg: string | null
   createTime: string
+  updateTime: string | null
+  durationMs: number | null
 }
 
 export interface AiVideoTask {
@@ -151,21 +155,38 @@ export interface AiTemplateQuery {
   pageSize: number
 }
 
-export interface AiCopyResult {
-  id: number
-  topic: string
-  templateId: number | null
-  result: string
-  generatedAt: number
-  creatorId: number
-  createTime: string
-  updateTime: string
-}
-
 export interface CopyResultData {
   titles: string[]
   description: string
   tags: string[]
+}
+
+/** AI 文本生成历史记录（流式结束自动落库） */
+export interface AiChatRecord {
+  id: number
+  model: string | null
+  prompt: string
+  result: string | null
+  status: string
+  errorMsg: string | null
+  requestTime: string
+  responseTime: string | null
+  durationMs: number | null
+  createTime: string
+}
+
+/** AI 视频生成历史记录（本地留痕） */
+export interface AiVideoHistory {
+  id: number
+  prompt: string
+  ratio: string | null
+  duration: number | null
+  status: string
+  url: string | null
+  errorMsg: string | null
+  createTime: string
+  updateTime: string | null
+  durationMs: number | null
 }
 
 export interface MenuVisibility {
