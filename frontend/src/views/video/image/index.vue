@@ -20,18 +20,24 @@ const size = ref('1K')
 const ratio = ref('1:1')
 const creating = ref(false)
 
-// 异步任务状态
+// 异步任务：生成中按钮 loading，完成自动弹抽屉
 const taskId = ref<number | null>(null)
-const taskStatus = ref<string>('')
 const polling = ref(false)
-const resultUrl = ref<string | null>(null)
-const errorMsg = ref<string | null>(null)
 let pollTimer: number | null = null
 let pollStart = 0
 
 // 历史
 const history = ref<AiImageTask[]>([])
 const historyLoading = ref(false)
+
+// 历史详情抽屉：点历史「查看」/生成完成自动弹
+const drawerOpen = ref(false)
+const drawerRow = ref<AiImageTask | null>(null)
+
+function openDrawer(row: AiImageTask) {
+  drawerRow.value = row
+  drawerOpen.value = true
+}
 
 const modelOptions = computed(() =>
   models.value.map((m) => ({
@@ -92,7 +98,7 @@ const columns: DataTableColumns<AiImageTask> = [
   },
   {
     title: '操作', key: 'actions', width: 90, fixed: 'right',
-    render: (row) => h(NButton, { size: 'small', onClick: () => viewHistory(row) }, { default: () => '查看' }),
+    render: (row) => h(NButton, { size: 'small', onClick: () => openDrawer(row) }, { default: () => '查看' }),
   },
 ]
 
@@ -143,13 +149,6 @@ async function refreshHistory() {
   await loadHistory()
 }
 
-function viewHistory(row: AiImageTask) {
-  taskId.value = row.taskId
-  taskStatus.value = row.status
-  resultUrl.value = row.url
-  errorMsg.value = row.errorMsg
-}
-
 async function handleCreate() {
   if (!modelId.value) {
     message.warning('请选择图片模型')
@@ -160,9 +159,6 @@ async function handleCreate() {
     return
   }
   creating.value = true
-  resultUrl.value = null
-  errorMsg.value = null
-  taskStatus.value = ''
   try {
     const id = await createAiImage({
       modelId: modelId.value,
@@ -171,7 +167,6 @@ async function handleCreate() {
       ratio: ratio.value,
     })
     taskId.value = id
-    taskStatus.value = 'generating'
     message.success('任务已创建，正在生成...')
     await refreshHistory()
     startPolling()
@@ -193,15 +188,13 @@ async function pollOnce() {
   if (!taskId.value) return
   try {
     const res: AiImageTask = await getAiImageTask(taskId.value)
-    taskStatus.value = res.status
     if (res.status === 'completed') {
       stopPolling()
-      resultUrl.value = res.url
       message.success('图片生成完成')
       await refreshHistory()
+      if (history.value[0]) openDrawer(history.value[0])
     } else if (res.status === 'failed') {
       stopPolling()
-      errorMsg.value = res.errorMsg
       message.error(res.errorMsg || '图片生成失败')
       await refreshHistory()
     } else if (Date.now() - pollStart > 5 * 60 * 1000) {
@@ -230,7 +223,11 @@ onMounted(() => {
 
 <template>
   <div class="image-page">
-    <AiGeneratorLayout aside-title="AI 图片生成">
+    <AiGeneratorLayout
+      aside-title="AI 图片生成"
+      drawer-title="图片详情"
+      v-model:drawer-open="drawerOpen"
+    >
       <template #aside>
         <NSpace vertical :size="16">
           <NAlert v-if="models.length === 0" type="warning" :bordered="false">
@@ -268,7 +265,7 @@ onMounted(() => {
           <NSpace>
             <NButton
               type="primary"
-              :loading="creating"
+              :loading="creating || polling"
               :disabled="models.length === 0 || !prompt.trim() || polling"
               @click="handleCreate"
             >
@@ -283,20 +280,6 @@ onMounted(() => {
         </NSpace>
       </template>
 
-      <template #result>
-        <div v-if="polling || (taskStatus && taskStatus !== 'completed' && taskStatus !== 'failed')" class="loading-box">
-          生成中，请稍候（通常 10-60 秒）...
-        </div>
-        <img
-          v-else-if="resultUrl"
-          :src="resultUrl"
-          alt="生成结果"
-          class="result-img"
-        />
-        <NEmpty v-else-if="errorMsg" :description="errorMsg" />
-        <NEmpty v-else description="暂无结果，输入提示词后点击生成" />
-      </template>
-
       <template #history>
         <NDataTable
           :columns="columns"
@@ -308,6 +291,21 @@ onMounted(() => {
           striped
           size="small"
         />
+      </template>
+
+      <template #drawer>
+        <div v-if="drawerRow" class="drawer-body">
+          <div class="result-meta">
+            {{ formatTime(drawerRow.createTime) }} · {{ drawerRow.size ?? '-' }} / {{ drawerRow.ratio ?? '-' }}
+          </div>
+          <img v-if="drawerRow.url" :src="drawerRow.url" alt="历史图片" class="drawer-img" />
+          <NEmpty v-else-if="drawerRow.status === 'failed'" :description="drawerRow.errorMsg || '生成失败'" />
+          <NEmpty v-else description="该任务暂无结果" />
+          <div class="drawer-prompt">{{ drawerRow.prompt }}</div>
+          <NButton v-if="drawerRow.url" tag="a" :href="drawerRow.url" target="_blank" download>
+            下载图片
+          </NButton>
+        </div>
       </template>
     </AiGeneratorLayout>
   </div>
@@ -327,16 +325,26 @@ onMounted(() => {
   opacity: 0.8;
 }
 
-.loading-box {
-  padding: 40px 0;
-  text-align: center;
+.result-meta {
+  font-size: 12px;
   opacity: 0.6;
 }
 
-.result-img {
+.drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.drawer-img {
   width: 100%;
-  max-height: 600px;
-  object-fit: contain;
   border-radius: 4px;
+}
+
+.drawer-prompt {
+  font-size: 13px;
+  opacity: 0.8;
+  line-height: 1.6;
+  word-break: break-word;
 }
 </style>

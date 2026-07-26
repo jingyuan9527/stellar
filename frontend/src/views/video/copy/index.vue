@@ -6,6 +6,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import AiGeneratorLayout from '../components/AiGeneratorLayout.vue'
+import CopyResultDetail from '../components/CopyResultDetail.vue'
 import { useCoverStore } from '../store/cover'
 import { useApiConfigStore } from '../store/apiConfig'
 import { useUIStore } from '../store/ui'
@@ -49,22 +50,25 @@ const configured = ref(false)
 // ===== 生成 =====
 const topic = ref('')
 const streaming = ref(false)
-const raw = ref('')
 const abortRef = ref<AbortController | null>(null)
 
 // ===== 历史（后端流式结束自动落库，登录按账号、游客按 IP）=====
 const history = ref<AiChatRecord[]>([])
-const activeId = ref<number | null>(null)
 const historyLoading = ref(false)
 
-const activeResult = computed(() =>
-  history.value.find((h) => h.id === activeId.value) ?? null,
-)
-
-const display = computed<CopyResultData | null>(() => {
-  if (!activeResult.value || streaming.value || !activeResult.value.result) return null
-  return parseCopyResult(activeResult.value.result)
+// 历史详情抽屉：点历史「查看」或生成完成后自动弹
+const drawerOpen = ref(false)
+const drawerRow = ref<AiChatRecord | null>(null)
+const drawerDisplay = computed<CopyResultData | null>(() => {
+  const row = drawerRow.value
+  if (!row?.result) return null
+  return parseCopyResult(row.result)
 })
+
+function openDrawer(row: AiChatRecord) {
+  drawerRow.value = row
+  drawerOpen.value = true
+}
 
 const pagination = reactive({
   page: 1,
@@ -109,8 +113,7 @@ const columns: DataTableColumns<AiChatRecord> = [
       default: () => [
         h(NButton, {
           size: 'small',
-          type: row.id === activeId.value ? 'primary' : 'default',
-          onClick: () => { activeId.value = row.id },
+          onClick: () => openDrawer(row),
         }, { default: () => '查看' }),
         h(NPopconfirm, { onPositiveClick: () => handleDeleteHistory(row.id) }, {
           trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' }),
@@ -123,7 +126,7 @@ const columns: DataTableColumns<AiChatRecord> = [
 
 const rowProps = (row: AiChatRecord) => ({
   style: 'cursor: pointer',
-  onClick: () => { activeId.value = row.id },
+  onClick: () => openDrawer(row),
 })
 
 onBeforeUnmount(() => abortRef.value?.abort())
@@ -159,9 +162,6 @@ async function loadHistory() {
     const res = await getChatRecordPage({ pageNum: pagination.page, pageSize: pagination.pageSize })
     history.value = res.records
     pagination.itemCount = res.total
-    if (activeId.value === null && res.records.length > 0) {
-      activeId.value = res.records[0].id
-    }
   } catch {
     // 错误已由拦截器提示
   } finally {
@@ -169,10 +169,9 @@ async function loadHistory() {
   }
 }
 
-async function refreshHistoryAndSelectNewest() {
+async function refreshHistory() {
   pagination.page = 1
   await loadHistory()
-  if (history.value[0]) activeId.value = history.value[0].id
 }
 
 async function generate() {
@@ -190,13 +189,12 @@ async function generate() {
     return
   }
   streaming.value = true
-  raw.value = ''
   const ac = new AbortController()
   abortRef.value = ac
   try {
     const full = await streamAiChat(
       buildPrompt(tpl.prompt, topic.value.trim()),
-      (text) => { raw.value = text },
+      () => {},
       ac.signal,
       selectedModelId.value
         ? { modelId: selectedModelId.value }
@@ -208,11 +206,12 @@ async function generate() {
     if (!parsed) {
       message.error('未能解析为 JSON，已展示原始文本')
     }
-    await refreshHistoryAndSelectNewest()
+    await refreshHistory()
+    if (history.value[0]) openDrawer(history.value[0])
   } catch (e) {
     if ((e as Error).name !== 'AbortError') {
       message.error('请求失败: ' + (e as Error).message)
-      await refreshHistoryAndSelectNewest()
+      await refreshHistory()
     }
   } finally {
     streaming.value = false
@@ -224,6 +223,7 @@ function stop() {
 }
 
 function sendToCover(title: string) {
+  drawerOpen.value = false
   coverStore.update({ title })
   router.push('/video/cover')
 }
@@ -236,7 +236,10 @@ function copyText(text: string) {
 async function handleDeleteHistory(id: number) {
   try {
     await deleteChatRecord(id)
-    if (activeId.value === id) activeId.value = null
+    if (drawerRow.value?.id === id) {
+      drawerOpen.value = false
+      drawerRow.value = null
+    }
     await loadHistory()
   } catch {
     // 错误已由拦截器提示
@@ -246,16 +249,13 @@ async function handleDeleteHistory(id: number) {
 async function handleClearHistory() {
   try {
     await clearChatRecords()
-    activeId.value = null
+    drawerOpen.value = false
+    drawerRow.value = null
     await loadHistory()
     message.success('已清空全部历史')
   } catch {
     // 错误已由拦截器提示
   }
-}
-
-function formatTag(t: string) {
-  return t.startsWith('#') ? t : `#${t}`
 }
 
 onMounted(() => {
@@ -271,7 +271,11 @@ onMounted(() => {
 
 <template>
   <div class="copy-page">
-    <AiGeneratorLayout aside-title="AI 文案生成">
+    <AiGeneratorLayout
+      aside-title="AI 文案生成"
+      drawer-title="历史详情"
+      v-model:drawer-open="drawerOpen"
+    >
       <template #aside>
         <NSpace vertical :size="16">
           <NAlert v-if="!configured" type="warning" :bordered="false">
@@ -326,65 +330,6 @@ onMounted(() => {
         </NSpace>
       </template>
 
-      <template #result>
-        <pre v-if="streaming" class="stream-preview">{{ raw || '等待响应...' }}</pre>
-        <div v-else-if="display && activeResult" class="result-wrap">
-          <div class="result-meta">{{ formatTime(activeResult.requestTime) }}</div>
-          <div class="result-section">
-            <div class="section-header">
-              <span class="section-label">标题</span>
-            </div>
-            <NSpace vertical :size="8" style="margin-top: 8px">
-              <div
-                v-for="(t, i) in display.titles"
-                :key="i"
-                class="title-row"
-              >
-                <span class="title-text">{{ t }}</span>
-                <NSpace size="small">
-                  <NButton size="small" @click="copyText(t)">复制</NButton>
-                  <NButton size="small" type="primary" @click="sendToCover(t)">发送到封面</NButton>
-                </NSpace>
-              </div>
-            </NSpace>
-          </div>
-
-          <div class="result-section">
-            <div class="section-header">
-              <span class="section-label">简介</span>
-              <NButton size="tiny" text type="primary" @click="copyText(display.description)">复制</NButton>
-            </div>
-            <p class="section-text">{{ display.description }}</p>
-          </div>
-
-          <div class="result-section">
-            <div class="section-header">
-              <span class="section-label">标签</span>
-              <NButton
-                size="tiny"
-                text
-                type="primary"
-                @click="copyText(display.tags.map(formatTag).join(' '))"
-              >
-                复制全部
-              </NButton>
-            </div>
-            <NSpace :size="8" style="margin-top: 8px">
-              <NTag
-                v-for="(t, i) in display.tags"
-                :key="i"
-                :bordered="false"
-                style="cursor: pointer"
-                @click="copyText(formatTag(t))"
-              >
-                {{ formatTag(t) }}
-              </NTag>
-            </NSpace>
-          </div>
-        </div>
-        <NEmpty v-else description="暂无结果，输入主题后点击生成" />
-      </template>
-
       <template #history-extra>
         <NPopconfirm @positive-click="handleClearHistory">
           <template #trigger>
@@ -407,6 +352,18 @@ onMounted(() => {
           size="small"
         />
       </template>
+
+      <template #drawer>
+        <CopyResultDetail
+          v-if="drawerDisplay"
+          :data="drawerDisplay"
+          :meta-time="formatTime(drawerRow?.requestTime)"
+          @copy="copyText"
+          @send-cover="sendToCover"
+        />
+        <NEmpty v-else-if="drawerRow?.status === 'failed'" description="该条生成失败" />
+        <NEmpty v-else description="无结果内容" />
+      </template>
     </AiGeneratorLayout>
 
     <ApiSettingsModal />
@@ -425,56 +382,5 @@ onMounted(() => {
   font-weight: 500;
   margin-bottom: 6px;
   opacity: 0.8;
-}
-
-.stream-preview {
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.result-meta {
-  font-size: 12px;
-  opacity: 0.6;
-  margin-bottom: 12px;
-}
-
-.result-section {
-  margin-bottom: 16px;
-}
-
-.result-section:last-child {
-  margin-bottom: 0;
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
-}
-
-.section-label {
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.section-text {
-  margin: 8px 0 0;
-  line-height: 1.6;
-}
-
-.title-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.title-text {
-  flex: 1;
 }
 </style>

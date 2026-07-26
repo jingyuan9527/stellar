@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { h, computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
-  NSpace, NInput, NSelect, NButton, NEmpty, NAlert, NProgress, NDataTable, NTag,
+  NSpace, NInput, NSelect, NButton, NEmpty, NAlert, NDataTable, NTag,
   useMessage,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
@@ -18,24 +18,25 @@ const ratio = ref('16:9')
 const duration = ref('5')
 const creating = ref(false)
 
-// 轮询状态
+// 异步任务：生成中按钮 loading，完成自动弹抽屉
 const taskVideoId = ref<string | null>(null)
 const taskModelId = ref<number | null>(null)
-const taskStatus = ref<string>('')
-const progress = ref(0)
 const polling = ref(false)
 let pollTimer: number | null = null
 let pollStart = 0
 
-// 结果
-const resultUrl = ref<string | null>(null)
-const resultSize = ref('')
-const resultSeconds = ref('')
-const errorMsg = ref<string | null>(null)
-
 // 历史
 const history = ref<AiVideoHistory[]>([])
 const historyLoading = ref(false)
+
+// 历史详情抽屉：点历史「查看」/生成完成自动弹
+const drawerOpen = ref(false)
+const drawerRow = ref<AiVideoHistory | null>(null)
+
+function openDrawer(row: AiVideoHistory) {
+  drawerRow.value = row
+  drawerOpen.value = true
+}
 
 const modelOptions = computed(() =>
   models.value.map((m) => ({
@@ -97,7 +98,7 @@ const columns: DataTableColumns<AiVideoHistory> = [
   },
   {
     title: '操作', key: 'actions', width: 90, fixed: 'right',
-    render: (row) => h(NButton, { size: 'small', disabled: !row.url, onClick: () => viewHistory(row) }, { default: () => '查看' }),
+    render: (row) => h(NButton, { size: 'small', disabled: !row.url, onClick: () => openDrawer(row) }, { default: () => '查看' }),
   },
 ]
 
@@ -148,14 +149,6 @@ async function refreshHistory() {
   await loadHistory()
 }
 
-function viewHistory(row: AiVideoHistory) {
-  resultUrl.value = row.url
-  taskStatus.value = row.status
-  errorMsg.value = row.status === 'failed' ? (row.errorMsg || '生成失败') : null
-  resultSize.value = ''
-  resultSeconds.value = ''
-}
-
 async function handleCreate() {
   if (!modelId.value) {
     message.warning('请选择视频模型')
@@ -166,12 +159,6 @@ async function handleCreate() {
     return
   }
   creating.value = true
-  resultUrl.value = null
-  resultSize.value = ''
-  resultSeconds.value = ''
-  errorMsg.value = null
-  taskStatus.value = ''
-  progress.value = 0
   try {
     const sz = sizeMap[ratio.value]
     const du = durationMap[duration.value]
@@ -187,7 +174,6 @@ async function handleCreate() {
     })
     taskVideoId.value = res.videoId
     taskModelId.value = modelId.value
-    taskStatus.value = res.status
     message.success('任务已创建，正在生成...')
     await refreshHistory()
     startPolling()
@@ -209,18 +195,13 @@ async function pollOnce() {
   if (!taskVideoId.value || !taskModelId.value) return
   try {
     const res: AiVideoStatus = await getAiVideoStatus(taskModelId.value, taskVideoId.value)
-    taskStatus.value = res.status
-    progress.value = res.progress
     if (res.status === 'completed') {
       stopPolling()
-      resultUrl.value = res.videoUrl
-      resultSize.value = res.size
-      resultSeconds.value = res.seconds
       message.success('视频生成完成')
       await refreshHistory()
+      if (history.value[0]) openDrawer(history.value[0])
     } else if (res.status === 'failed') {
       stopPolling()
-      errorMsg.value = '视频生成失败'
       message.error('视频生成失败')
       await refreshHistory()
     } else if (Date.now() - pollStart > 5 * 60 * 1000) {
@@ -240,17 +221,6 @@ function stopPolling() {
   }
 }
 
-const statusText = computed(() => {
-  const map: Record<string, string> = {
-    queued: '排队中',
-    in_progress: '生成中',
-    completed: '已完成',
-    failed: '失败',
-    '': '',
-  }
-  return map[taskStatus.value] ?? taskStatus.value
-})
-
 onBeforeUnmount(stopPolling)
 onMounted(() => {
   loadModels()
@@ -260,7 +230,11 @@ onMounted(() => {
 
 <template>
   <div class="video-page">
-    <AiGeneratorLayout aside-title="AI 视频生成">
+    <AiGeneratorLayout
+      aside-title="AI 视频生成"
+      drawer-title="视频详情"
+      v-model:drawer-open="drawerOpen"
+    >
       <template #aside>
         <NSpace vertical :size="16">
           <NAlert v-if="models.length === 0" type="warning" :bordered="false">
@@ -301,7 +275,7 @@ onMounted(() => {
           <NSpace>
             <NButton
               type="primary"
-              :loading="creating"
+              :loading="creating || polling"
               :disabled="models.length === 0 || !prompt.trim() || polling"
               @click="handleCreate"
             >
@@ -316,27 +290,6 @@ onMounted(() => {
         </NSpace>
       </template>
 
-      <template #result>
-        <div v-if="polling || (taskStatus && taskStatus !== 'completed' && taskStatus !== 'failed')" class="progress-box">
-          <div class="progress-status">{{ statusText }} · {{ progress }}%</div>
-          <NProgress
-            type="line"
-            :percentage="progress"
-            :show-indicator="false"
-            status="success"
-          />
-        </div>
-        <video
-          v-else-if="resultUrl"
-          :src="resultUrl"
-          controls
-          autoplay
-          style="width: 100%; max-height: 500px"
-        />
-        <NEmpty v-else-if="errorMsg" :description="errorMsg" />
-        <NEmpty v-else description="暂无结果，输入提示词后点击生成" />
-      </template>
-
       <template #history>
         <NDataTable
           :columns="columns"
@@ -348,6 +301,21 @@ onMounted(() => {
           striped
           size="small"
         />
+      </template>
+
+      <template #drawer>
+        <div v-if="drawerRow" class="drawer-body">
+          <div class="result-meta">
+            {{ formatTime(drawerRow.createTime) }} · {{ drawerRow.ratio ?? '-' }} / {{ drawerRow.duration != null ? drawerRow.duration + 's' : '-' }}
+          </div>
+          <video v-if="drawerRow.url" :src="drawerRow.url" controls autoplay class="drawer-video" />
+          <NEmpty v-else-if="drawerRow.status === 'failed'" :description="drawerRow.errorMsg || '生成失败'" />
+          <NEmpty v-else description="该任务暂无结果" />
+          <div class="drawer-prompt">{{ drawerRow.prompt }}</div>
+          <NButton v-if="drawerRow.url" tag="a" :href="drawerRow.url" target="_blank" download>
+            下载视频
+          </NButton>
+        </div>
       </template>
     </AiGeneratorLayout>
   </div>
@@ -367,13 +335,27 @@ onMounted(() => {
   opacity: 0.8;
 }
 
-.progress-box {
-  padding: 20px 0;
+.result-meta {
+  font-size: 12px;
+  opacity: 0.6;
 }
 
-.progress-status {
-  margin-bottom: 12px;
-  font-size: 14px;
-  font-weight: 500;
+.drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.drawer-video {
+  width: 100%;
+  max-height: 560px;
+  border-radius: 4px;
+}
+
+.drawer-prompt {
+  font-size: 13px;
+  opacity: 0.8;
+  line-height: 1.6;
+  word-break: break-word;
 }
 </style>

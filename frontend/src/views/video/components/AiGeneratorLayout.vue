@@ -1,15 +1,26 @@
 <script setup lang="ts">
-import { NCard } from 'naive-ui'
+import { computed } from 'vue'
+import { NCard, NDrawer, NDrawerContent } from 'naive-ui'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   asideTitle?: string
-  resultTitle?: string
   historyTitle?: string
+  drawerTitle?: string
+  drawerOpen?: boolean
+  drawerWidth?: number
 }>(), {
   asideTitle: '生成配置',
-  resultTitle: '生成结果',
   historyTitle: '生成历史',
+  drawerTitle: '历史详情',
+  drawerOpen: false,
+  drawerWidth: 560,
 })
+
+const emit = defineEmits<{ 'update:drawerOpen': [boolean] }>()
+
+const isMobile = useIsMobile()
+const resolvedWidth = computed(() => (isMobile.value ? '100%' : props.drawerWidth))
 </script>
 
 <template>
@@ -20,9 +31,6 @@ withDefaults(defineProps<{
       </NCard>
     </aside>
     <main class="ai-gen-main">
-      <NCard v-if="$slots.result" :title="resultTitle" :bordered="false">
-        <slot name="result" />
-      </NCard>
       <NCard v-if="$slots.history" :title="historyTitle" :bordered="false">
         <template v-if="$slots['history-extra']" #header-extra>
           <slot name="history-extra" />
@@ -30,6 +38,16 @@ withDefaults(defineProps<{
         <slot name="history" />
       </NCard>
     </main>
+    <NDrawer
+      :show="drawerOpen"
+      :width="resolvedWidth"
+      placement="right"
+      @update:show="(v: boolean) => emit('update:drawerOpen', v)"
+    >
+      <NDrawerContent :title="drawerTitle" :native-scrollbar="false" closable>
+        <slot name="drawer" />
+      </NDrawerContent>
+    </NDrawer>
   </div>
 </template>
 
