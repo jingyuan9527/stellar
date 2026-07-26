@@ -45,7 +45,7 @@ public class SysAiChatRecordService {
             record.setCreateTime(LocalDateTime.now());
             chatRecordMapper.insert(record);
         } catch (Exception e) {
-            log.warn("记录 AI 文本生成历史失败: {}", e.getMessage());
+            log.warn("记录 AI 文本生成历史失败: {}", e.getMessage(), e);
         }
     }
 

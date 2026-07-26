@@ -2,6 +2,7 @@ package com.stellar.config;
 
 import com.stellar.interceptor.AuthInterceptor;
 import com.stellar.interceptor.RateLimitInterceptor;
+import com.stellar.interceptor.RequestLogInterceptor;
 import com.stellar.service.RateLimitService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -25,6 +26,9 @@ public class SaTokenConfig implements WebMvcConfigurer {
      */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        // 请求日志 + traceId：最先执行（preHandle 设 traceId，afterCompletion 记耗时）
+        registry.addInterceptor(new RequestLogInterceptor())
+                .addPathPatterns("/**");
         // 鉴权：默认全拦，仅 @PublicAccess 放行
         registry.addInterceptor(new AuthInterceptor())
                 .addPathPatterns("/**")

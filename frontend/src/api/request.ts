@@ -23,10 +23,12 @@ service.interceptors.response.use(
   (response) => {
     const res = response.data as ApiResult
     if (res.code !== undefined && res.code !== 200) {
-      window.$message?.error(res.message || '请求失败')
+      // 401 不弹提示，跳登录即反馈；其余按后端 message 提示
       if (res.code === 401) {
         const authStore = useAuthStore()
         authStore.handleUnauthorized()
+      } else {
+        window.$message?.error(res.message || '请求失败')
       }
       return Promise.reject(new Error(res.message || 'Error'))
     }
@@ -34,23 +36,30 @@ service.interceptors.response.use(
   },
   (error) => {
     const status = error?.response?.status
+    // 401 不弹提示，直接跳登录
     if (status === 401) {
       const authStore = useAuthStore()
       authStore.handleUnauthorized()
+      return Promise.reject(error)
+    }
+    // 超时单独提示
+    if (error.code === 'ECONNABORTED') {
+      window.$message?.error('请求超时，请稍后重试')
+      return Promise.reject(error)
+    }
+    // 其他 HTTP 错误：优先用后端 message，兜底网络异常
+    const data = error?.response?.data
+    if (data instanceof Blob) {
+      data.text().then((text: string) => {
+        try {
+          const json = JSON.parse(text)
+          window.$message?.error(json.message || '请求失败')
+        } catch {
+          window.$message?.error('网络异常')
+        }
+      })
     } else {
-      const data = error?.response?.data
-      if (data instanceof Blob) {
-        data.text().then((text: string) => {
-          try {
-            const json = JSON.parse(text)
-            window.$message?.error(json.message || '请求失败')
-          } catch {
-            window.$message?.error(error.message || '网络异常')
-          }
-        })
-      } else {
-        window.$message?.error(data?.message || error.message || '网络异常')
-      }
+      window.$message?.error(data?.message || '网络异常')
     }
     return Promise.reject(error)
   },

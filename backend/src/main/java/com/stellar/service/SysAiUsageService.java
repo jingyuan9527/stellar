@@ -47,7 +47,7 @@ public class SysAiUsageService {
             u.setCreateTime(LocalDateTime.now());
             usageMapper.insert(u);
         } catch (Exception e) {
-            log.warn("[AI统计] 记录失败: {}", e.getMessage());
+            log.warn("[AI统计] 记录失败: {}", e.getMessage(), e);
         }
     }
 

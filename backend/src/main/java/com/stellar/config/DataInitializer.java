@@ -36,6 +36,6 @@ public class DataInitializer implements CommandLineRunner {
         user.setCreateTime(LocalDateTime.now());
         user.setUpdateTime(LocalDateTime.now());
         sysUserMapper.insert(user);
-        log.info("已初始化管理员账号: admin / 123456");
+        log.info("已初始化管理员账号: admin（默认密码见 README，登录后请立即修改）");
     }
 }

@@ -147,7 +147,7 @@ public class AiImageTaskWorker {
             task.setUpdateTime(LocalDateTime.now());
             taskMapper.updateById(task);
         } catch (Exception e) {
-            log.error("[AI图片] 标记失败状态异常 taskId={}: {}", taskId, e.getMessage());
+            log.error("[AI图片] 标记失败状态异常 taskId={}: {}", taskId, e.getMessage(), e);
         }
     }
 

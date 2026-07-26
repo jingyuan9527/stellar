@@ -86,7 +86,7 @@ public class ConchService {
                     matchSource = "ai";
                 }
             } catch (Exception e) {
-                log.warn("[神奇海螺] AI 匹配失败，兜底随机: {}", e.getMessage());
+                log.warn("[神奇海螺] AI 匹配失败，兜底随机: {}", e.getMessage(), e);
             }
         } else {
             log.info("[神奇海螺] AI 匹配已关闭，纯随机");
@@ -111,7 +111,7 @@ public class ConchService {
             record.setCreateTime(LocalDateTime.now());
             recordMapper.insert(record);
         } catch (Exception e) {
-            log.warn("[神奇海螺] 记录提问历史失败: {}", e.getMessage());
+            log.warn("[神奇海螺] 记录提问历史失败: {}", e.getMessage(), e);
         }
 
         log.info("[神奇海螺] 问题=\"{}\" 命中=\"{}\"(id={}) source={}",

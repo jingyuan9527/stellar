@@ -61,7 +61,7 @@ public class TtsController {
         try {
             ttsRecordService.save(request, audio);
         } catch (Exception e) {
-            log.warn("保存语音合成记录失败: {}", e.getMessage());
+            log.warn("保存语音合成记录失败: {}", e.getMessage(), e);
         }
 
         String fileName = URLEncoder.encode("语音合成", StandardCharsets.UTF_8);

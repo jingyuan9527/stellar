@@ -45,8 +45,8 @@ async function handleFetchModels() {
       modelOptions.value = models
       message.success(`已拉取 ${models.length} 个模型`)
     }
-  } catch (e) {
-    message.error('拉取失败: ' + (e as Error).message)
+  } catch {
+    // 错误提示由 axios 拦截器统一处理
   } finally {
     fetching.value = false
   }
@@ -61,8 +61,8 @@ async function handleTest() {
   try {
     await testConnection(formData.value)
     message.success('连通正常，可正常调用')
-  } catch (e) {
-    message.error('连通失败: ' + (e as Error).message)
+  } catch {
+    // 错误提示由 axios 拦截器统一处理
   } finally {
     testing.value = false
   }

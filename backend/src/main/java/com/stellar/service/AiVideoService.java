@@ -132,7 +132,7 @@ public class AiVideoService {
                 task.setUpdateTime(LocalDateTime.now());
                 videoTaskMapper.insert(task);
             } catch (Exception e) {
-                log.warn("视频任务本地留痕失败: {}", e.getMessage());
+                log.warn("视频任务本地留痕失败: {}", e.getMessage(), e);
             }
 
             log.info("AI 视频任务已创建: videoId={}, status={}", vo.getVideoId(), vo.getStatus());
@@ -238,7 +238,7 @@ public class AiVideoService {
             return videoTaskMapper.selectOne(new LambdaQueryWrapper<SysAiVideoTask>()
                     .eq(SysAiVideoTask::getVideoId, videoId));
         } catch (Exception e) {
-            log.warn("查询本地视频任务失败 videoId={}: {}", videoId, e.getMessage());
+            log.warn("查询本地视频任务失败 videoId={}: {}", videoId, e.getMessage(), e);
             return null;
         }
     }
@@ -252,7 +252,7 @@ public class AiVideoService {
             task.setUpdateTime(LocalDateTime.now());
             videoTaskMapper.updateById(task);
         } catch (Exception e) {
-            log.warn("更新本地视频任务完成状态失败 videoId={}: {}", videoId, e.getMessage());
+            log.warn("更新本地视频任务完成状态失败 videoId={}: {}", videoId, e.getMessage(), e);
         }
     }
 
@@ -264,7 +264,7 @@ public class AiVideoService {
             task.setUpdateTime(LocalDateTime.now());
             videoTaskMapper.updateById(task);
         } catch (Exception e) {
-            log.warn("更新本地视频任务失败状态失败 videoId={}: {}", videoId, e.getMessage());
+            log.warn("更新本地视频任务失败状态失败 videoId={}: {}", videoId, e.getMessage(), e);
         }
     }
 
