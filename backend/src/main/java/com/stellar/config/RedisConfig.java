@@ -3,6 +3,8 @@ package com.stellar.config;
 import com.stellar.common.CacheConstants;
 import com.stellar.service.AiNotifyListener;
 import com.stellar.service.AiNotifyPublisher;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -47,16 +49,20 @@ public class RedisConfig {
     /**
      * Spring Cache 管理器：cacheName 加 {@code stellar:} 前缀，默认 30min TTL，
      * 禁止缓存 null（防穿透由调用方自行处理）。
+     * <p>value 序列化器注册 JavaTimeModule 以支持 {@link java.time.LocalDateTime} 等 Java 8 日期类型。
      */
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory factory) {
+        GenericJackson2JsonRedisSerializer valueSerializer = GenericJackson2JsonRedisSerializer.builder()
+                .objectMapper(new ObjectMapper().registerModule(new JavaTimeModule()))
+                .build();
         RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofMinutes(30))
                 .prefixCacheNameWith(CacheConstants.KEY_PREFIX)
                 .serializeKeysWith(RedisSerializationContext.SerializationPair
                         .fromSerializer(new StringRedisSerializer()))
                 .serializeValuesWith(RedisSerializationContext.SerializationPair
-                        .fromSerializer(new GenericJackson2JsonRedisSerializer()))
+                        .fromSerializer(valueSerializer))
                 .disableCachingNullValues();
         return RedisCacheManager.builder(factory)
                 .cacheDefaults(config)

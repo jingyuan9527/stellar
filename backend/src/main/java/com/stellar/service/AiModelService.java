@@ -11,6 +11,8 @@ import com.stellar.vo.AiModelVO;
 import com.stellar.vo.AiResolvedConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -35,17 +37,19 @@ public class AiModelService {
     /**
      * 查某供应商下全部模型，按 sort_order 升序。
      */
+    @Cacheable(cacheNames = "ai-model", key = "'provider:'+#providerId")
     public List<AiModelVO> listByProvider(Long providerId) {
         List<SysAiModel> list = modelMapper.selectList(new LambdaQueryWrapper<SysAiModel>()
                 .eq(SysAiModel::getProviderId, providerId)
                 .orderByAsc(SysAiModel::getSortOrder)
                 .orderByAsc(SysAiModel::getId));
-        return list.stream().map(m -> toVO(m, null)).toList();
+        return list.stream().map(m -> toVO(m, null)).collect(Collectors.toList());
     }
 
     /**
      * 查全部模型（带供应商名称），按 sort_order 升序。
      */
+    @Cacheable(cacheNames = "ai-model", key = "'all'")
     public List<AiModelVO> listAll() {
         List<SysAiModel> list = modelMapper.selectList(new LambdaQueryWrapper<SysAiModel>()
                 .orderByAsc(SysAiModel::getSortOrder)
@@ -59,12 +63,13 @@ public class AiModelService {
             providerMapper.selectBatchIds(providerIds)
                     .forEach(p -> nameMap.put(p.getId(), p.getName()));
         }
-        return list.stream().map(m -> toVO(m, nameMap.get(m.getProviderId()))).toList();
+        return list.stream().map(m -> toVO(m, nameMap.get(m.getProviderId()))).collect(Collectors.toList());
     }
 
     /**
-     * 按类型查启用的模型（供前端下拉/调用方选模型用）。
+     * 按类型查启用的模型（供前端下拉/调用方选模型用）。公开接口高频读，走 Spring Cache。
      */
+    @Cacheable(cacheNames = "ai-model", key = "#modelType")
     public List<AiModelVO> listEnabledByType(String modelType) {
         List<SysAiModel> list = modelMapper.selectList(new LambdaQueryWrapper<SysAiModel>()
                 .eq(SysAiModel::getModelType, modelType)
@@ -84,9 +89,10 @@ public class AiModelService {
         return list.stream()
                 .filter(m -> nameMap.containsKey(m.getProviderId()))
                 .map(m -> toVO(m, nameMap.get(m.getProviderId())))
-                .toList();
+                .collect(Collectors.toList());
     }
 
+    @CacheEvict(cacheNames = "ai-model", allEntries = true)
     public void create(AiModelDTO dto) {
         if (dto.getProviderId() == null) {
             throw new BusinessException("供应商不能为空");
@@ -112,6 +118,7 @@ public class AiModelService {
                 m.getId(), m.getProviderId(), m.getModel(), m.getModelType());
     }
 
+    @CacheEvict(cacheNames = "ai-model", allEntries = true)
     public void update(AiModelDTO dto) {
         if (dto.getId() == null) {
             throw new BusinessException("模型 id 不能为空");
@@ -146,11 +153,13 @@ public class AiModelService {
         log.info("[AI模型] 更新 id={} model={} type={}", exist.getId(), exist.getModel(), exist.getModelType());
     }
 
+    @CacheEvict(cacheNames = "ai-model", allEntries = true)
     public void delete(Long id) {
         modelMapper.deleteById(id);
         log.info("[AI模型] 删除 id={}", id);
     }
 
+    @CacheEvict(cacheNames = "ai-model", allEntries = true)
     public void toggleEnabled(Long id, Integer enabled) {
         SysAiModel exist = modelMapper.selectById(id);
         if (exist == null) {
@@ -165,6 +174,7 @@ public class AiModelService {
     /**
      * 设为该类型默认：先把同 model_type 的 is_default 清 0，再置当前为 1（同类型互斥）。
      */
+    @CacheEvict(cacheNames = "ai-model", allEntries = true)
     public void setDefault(Long id) {
         SysAiModel exist = modelMapper.selectById(id);
         if (exist == null) {

@@ -6,6 +6,8 @@ import com.stellar.entity.SysMenuVisibility;
 import com.stellar.mapper.SysMenuVisibilityMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,7 +29,9 @@ public class MenuVisibilityService {
 
     /**
      * 游客可见的 route key 列表（public_visible=1）。
+     * <p>游客首屏高频读，写仅后台批量保存，走 Spring Cache。
      */
+    @Cacheable(cacheNames = "menu-visibility", key = "'public-keys'")
     public List<String> listPublicRouteKeys() {
         List<SysMenuVisibility> list = mapper.selectList(new LambdaQueryWrapper<SysMenuVisibility>()
                 .eq(SysMenuVisibility::getPublicVisible, 1)
@@ -40,6 +44,7 @@ public class MenuVisibilityService {
     /**
      * 全量配置列表（管理后台展示用）。
      */
+    @Cacheable(cacheNames = "menu-visibility", key = "'all'")
     public List<SysMenuVisibility> listAll() {
         return mapper.selectList(new LambdaQueryWrapper<SysMenuVisibility>()
                 .orderByAsc(SysMenuVisibility::getSortOrder));
@@ -47,8 +52,10 @@ public class MenuVisibilityService {
 
     /**
      * 批量 upsert：存在则更新状态，不存在则插入。整事务。
+     * <p>写操作清空菜单可见性全部缓存（public-keys + all）。
      */
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(cacheNames = "menu-visibility", allEntries = true)
     public void batchUpsert(List<MenuVisibilityItemDTO> items) {
         if (items == null) {
             return;

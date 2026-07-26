@@ -5,6 +5,8 @@ import com.stellar.entity.SysProfile;
 import com.stellar.mapper.SysProfileMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -19,7 +21,8 @@ public class ProfileService {
 
     private final SysProfileMapper profileMapper;
 
-    /** 获取个人介绍（不存在则返回空对象，id=1 占位） */
+    /** 获取个人介绍（不存在则返回空对象，id=1 占位）。公开页/后台共用，走 Spring Cache。 */
+    @Cacheable(cacheNames = "profile", key = "'single'")
     public SysProfile get() {
         SysProfile p = profileMapper.selectById(1L);
         if (p == null) {
@@ -29,7 +32,8 @@ public class ProfileService {
         return p;
     }
 
-    /** 更新或初始化（id=1） */
+    /** 更新或初始化（id=1）。写操作清空个人介绍缓存。 */
+    @CacheEvict(cacheNames = "profile", allEntries = true)
     public void update(ProfileDTO dto) {
         SysProfile p = profileMapper.selectById(1L);
         if (p == null) {

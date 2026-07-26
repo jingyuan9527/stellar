@@ -12,6 +12,9 @@ import com.stellar.mapper.SysAiProviderMapper;
 import com.stellar.vo.AiProviderVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -49,14 +52,15 @@ public class AiProviderService {
             .build();
 
     /**
-     * 查全部供应商（apiKey 脱敏），按 sort_order 升序。
+     * 查全部供应商（apiKey 脱敏），按 sort_order 升序。后台配置页首屏读，走 Spring Cache。
      */
+    @Cacheable(cacheNames = "ai-provider", key = "'all'")
     public List<AiProviderVO> list() {
         List<SysAiProvider> list = providerMapper.selectList(
                 new LambdaQueryWrapper<SysAiProvider>()
                         .orderByAsc(SysAiProvider::getSortOrder)
                         .orderByAsc(SysAiProvider::getId));
-        return list.stream().map(this::toVO).toList();
+        return list.stream().map(this::toVO).collect(Collectors.toList());
     }
 
     /**
@@ -70,6 +74,7 @@ public class AiProviderService {
         return p;
     }
 
+    @CacheEvict(cacheNames = "ai-provider", allEntries = true)
     public void create(AiProviderDTO dto) {
         SysAiProvider p = new SysAiProvider();
         p.setName(dto.getName().trim());
@@ -84,6 +89,10 @@ public class AiProviderService {
         log.info("[AI供应商] 新增 id={} name={}", p.getId(), p.getName());
     }
 
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "ai-provider", allEntries = true),
+            @CacheEvict(cacheNames = "ai-model", allEntries = true)
+    })
     public void update(AiProviderDTO dto) {
         if (dto.getId() == null) {
             throw new BusinessException("供应商 id 不能为空");
@@ -110,8 +119,12 @@ public class AiProviderService {
     }
 
     /**
-     * 删除供应商，级联删除其下模型。
+     * 删除供应商，级联删除其下模型。同时清掉 ai-provider 与 ai-model 两份缓存。
      */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "ai-provider", allEntries = true),
+            @CacheEvict(cacheNames = "ai-model", allEntries = true)
+    })
     public void delete(Long id) {
         if (providerMapper.selectById(id) == null) {
             throw new BusinessException("供应商不存在: id=" + id);
@@ -122,6 +135,10 @@ public class AiProviderService {
         log.info("[AI供应商] 删除 id={}（含其下模型）", id);
     }
 
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "ai-provider", allEntries = true),
+            @CacheEvict(cacheNames = "ai-model", allEntries = true)
+    })
     public void toggleEnabled(Long id, Integer enabled) {
         SysAiProvider exist = providerMapper.selectById(id);
         if (exist == null) {
@@ -134,8 +151,13 @@ public class AiProviderService {
     }
 
     /**
-     * 拉取供应商端点支持的模型列表，落库 available_models。
+     * 拉取供应商端点支持的模型列表，落库 available_models，并同步创建未存在的模型记录。
+     * <p>会改 available_models 与 sys_ai_model，同时清掉 ai-provider 与 ai-model 两份缓存。
      */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "ai-provider", allEntries = true),
+            @CacheEvict(cacheNames = "ai-model", allEntries = true)
+    })
     public List<String> fetchModels(Long id) {
         SysAiProvider p = getRawById(id);
         if (!StringUtils.hasText(p.getEndpoint()) || !StringUtils.hasText(p.getApiKey())) {
