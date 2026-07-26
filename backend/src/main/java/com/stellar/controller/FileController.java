@@ -1,31 +1,35 @@
 package com.stellar.controller;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.stellar.annotation.Log;
 import com.stellar.common.BusinessException;
 import com.stellar.common.Result;
 import com.stellar.common.annotation.PublicAccess;
+import com.stellar.dto.SysFileQueryDTO;
 import com.stellar.entity.SysFile;
 import com.stellar.enums.OperationType;
-import com.stellar.mapper.SysFileMapper;
+import com.stellar.service.FileService;
+import com.stellar.vo.SysFileVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.time.LocalDateTime;
-import java.util.Set;
+import java.util.List;
 
 /**
- * 文件上传。登录方可上传，游客可读（GET /file/{id} 标 @PublicAccess）。
- * <p>文件二进制存数据库 sys_file 表，无磁盘依赖；仅允许图片类型，防可执行文件上传。
+ * 文件管理：上传需登录、读取对游客公开（GET /file/{id} 标 @PublicAccess），
+ * 列表/删除需登录。二进制存库 sys_file，无磁盘依赖。
  */
 @Slf4j
 @RestController
@@ -33,42 +37,12 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class FileController {
 
-    private final SysFileMapper fileMapper;
-
-    private static final Set<String> ALLOWED_EXT = Set.of(
-            "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico",
-            "mp3", "wav", "m4a", "aac", "ogg");
+    private final FileService fileService;
 
     @PostMapping("/upload")
     @Log(title = "文件上传", type = OperationType.OTHER)
     public Result<String> upload(@RequestParam("file") MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new BusinessException("上传文件为空");
-        }
-        String original = file.getOriginalFilename();
-        String ext = "";
-        if (original != null && original.contains(".")) {
-            ext = original.substring(original.lastIndexOf('.') + 1).toLowerCase();
-        }
-        if (!ALLOWED_EXT.contains(ext)) {
-            throw new BusinessException("不支持的文件类型，仅允许图片或音频");
-        }
-        SysFile entity = new SysFile();
-        entity.setOriginalName(original);
-        entity.setExt(ext);
-        entity.setContentType(file.getContentType());
-        entity.setSize(file.getSize());
-        try {
-            entity.setData(file.getBytes());
-        } catch (IOException e) {
-            log.error("[文件上传] 读取字节失败 orig={} err={}", original, e.getMessage(), e);
-            throw new BusinessException("文件读取失败");
-        }
-        entity.setCreateTime(LocalDateTime.now());
-        fileMapper.insert(entity);
-        String url = "/file/" + entity.getId();
-        log.info("[文件上传] 成功 orig={} size={} -> {}", original, file.getSize(), url);
-        return Result.success(url);
+        return Result.success(fileService.upload(file));
     }
 
     /**
@@ -78,7 +52,7 @@ public class FileController {
     @PublicAccess
     @GetMapping("/{id}")
     public ResponseEntity<byte[]> get(@PathVariable Long id) {
-        SysFile entity = fileMapper.selectFullById(id);
+        SysFile entity = fileService.getFull(id);
         if (entity == null || entity.getData() == null) {
             throw new BusinessException("文件不存在");
         }
@@ -90,5 +64,34 @@ public class FileController {
                 .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(entity.getData().length))
                 .header(HttpHeaders.CACHE_CONTROL, "public, max-age=604800")
                 .body(entity.getData());
+    }
+
+    /**
+     * 文件分页（管理后台，不含二进制）。
+     */
+    @GetMapping("/page")
+    @Log(title = "文件管理", type = OperationType.QUERY)
+    public Result<Page<SysFileVO>> page(@ModelAttribute SysFileQueryDTO query) {
+        return Result.success(fileService.page(query));
+    }
+
+    /**
+     * 硬删除单条（引用方需自行承担悬空风险）。
+     */
+    @DeleteMapping("/{id}")
+    @Log(title = "文件管理", type = OperationType.DELETE)
+    public Result<Void> remove(@PathVariable Long id) {
+        fileService.remove(id);
+        return Result.success();
+    }
+
+    /**
+     * 批量硬删除。
+     */
+    @DeleteMapping("/batch")
+    @Log(title = "文件管理", type = OperationType.DELETE)
+    public Result<Void> removeBatch(@RequestBody List<Long> ids) {
+        fileService.removeBatch(ids);
+        return Result.success();
     }
 }

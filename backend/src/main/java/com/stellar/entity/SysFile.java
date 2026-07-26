@@ -34,6 +34,9 @@ public class SysFile {
     @TableField(select = false)
     private byte[] data;
 
+    /** 上传者用户ID（可空，历史数据/系统生成为 NULL） */
+    private Long userId;
+
     /** 上传时间 */
     private LocalDateTime createTime;
 }

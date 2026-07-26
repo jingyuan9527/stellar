@@ -85,6 +85,12 @@ export const routes: RouteRecordRaw[] = [
             component: () => import('@/views/system/conch/index.vue'),
             meta: { title: '海螺预设', icon: 'conch', order: 8 },
           },
+          {
+            path: 'file',
+            name: 'SystemFile',
+            component: () => import('@/views/system/file/index.vue'),
+            meta: { title: '文件管理', icon: 'folder', order: 9 },
+          },
         ],
       },
       {

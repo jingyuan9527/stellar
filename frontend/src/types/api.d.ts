@@ -297,3 +297,25 @@ export interface ConchRecord {
   userId: number | null
   createTime: string
 }
+
+/** 文件记录（列表/详情，不含二进制 data） */
+export interface SysFile {
+  id: number
+  originalName: string | null
+  ext: string | null
+  contentType: string | null
+  size: number | null
+  userId: number | null
+  uploaderName: string | null
+  createTime: string
+}
+
+export interface SysFileQuery {
+  originalName?: string
+  fileType?: string | null
+  userId?: number | null
+  startTime?: string | null
+  endTime?: string | null
+  pageNum: number
+  pageSize: number
+}

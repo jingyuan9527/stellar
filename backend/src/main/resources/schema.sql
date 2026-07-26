@@ -251,6 +251,12 @@ COMMENT ON COLUMN sys_file.size IS '文件大小(字节)';
 COMMENT ON COLUMN sys_file.data IS '文件二进制数据';
 COMMENT ON COLUMN sys_file.create_time IS '上传时间';
 
+-- sys_file 扩展：记录上传者（历史数据/系统生成为 NULL）
+ALTER TABLE sys_file ADD COLUMN IF NOT EXISTS user_id BIGINT;
+COMMENT ON COLUMN sys_file.user_id IS '上传者用户ID(可空,历史数据/系统生成为NULL)';
+CREATE INDEX IF NOT EXISTS idx_sys_file_user_id ON sys_file (user_id);
+CREATE INDEX IF NOT EXISTS idx_sys_file_create_time ON sys_file (create_time DESC);
+
 -- 神奇海螺预设回答表（管理员上传音频+文本，AI 按问题语义匹配）
 CREATE TABLE IF NOT EXISTS conch_answer (
     id                BIGSERIAL PRIMARY KEY,
