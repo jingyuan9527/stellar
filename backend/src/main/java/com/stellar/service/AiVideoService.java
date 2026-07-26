@@ -10,6 +10,7 @@ import com.stellar.dto.AiVideoCreateDTO;
 import com.stellar.dto.AiVideoHistoryQueryDTO;
 import com.stellar.entity.SysAiVideoTask;
 import com.stellar.entity.SysFile;
+import com.stellar.event.VideoTaskCreatedEvent;
 import com.stellar.mapper.SysAiVideoTaskMapper;
 import com.stellar.mapper.SysFileMapper;
 import com.stellar.vo.AiResolvedConfig;
@@ -19,6 +20,7 @@ import com.stellar.vo.AiVideoTaskVO;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -35,10 +37,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * AI 视频生成服务：异步任务模式（创建任务 → 轮询结果）。
+ * AI 视频生成服务：异步任务模式（创建任务 → 后端 worker 轮询结果 → SSE 通知）。
  * <p>创建任务 POST /v1/videos 返回 video_id；查询 GET /agnesapi?video_id=xxx，
  * completed 时下载 mp4 存 sys_file 永久化。
- * <p>本地留痕：createTask 落库 sys_ai_video_task，getTask 轮询更新本地行，
+ * <p>本地留痕：createTask 落库 sys_ai_video_task，getTask 被 AiVideoTaskWorker 调用更新本地行，
  * pageHistory 按主体分页查询历史。
  */
 @Slf4j
@@ -51,13 +53,14 @@ public class AiVideoService {
     private final SysAiUsageService sysAiUsageService;
     private final SysAiVideoTaskMapper videoTaskMapper;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 
     /**
-     * 创建视频生成任务，返回 video_id 供前端轮询。同时本地落库留痕。
+     * 创建视频生成任务，返回 video_id 供后端 worker 轮询。同时本地落库。
      */
     public AiVideoTaskVO createTask(AiVideoCreateDTO dto) {
         Long modelId = dto.getModelId();
@@ -131,6 +134,7 @@ public class AiVideoService {
                 task.setCreateTime(LocalDateTime.now());
                 task.setUpdateTime(LocalDateTime.now());
                 videoTaskMapper.insert(task);
+                eventPublisher.publishEvent(new VideoTaskCreatedEvent(task.getId(), modelId, vo.getVideoId()));
             } catch (Exception e) {
                 log.warn("视频任务本地留痕失败: {}", e.getMessage(), e);
             }
@@ -147,7 +151,7 @@ public class AiVideoService {
 
     /**
      * 查询视频任务状态。completed 时下载 mp4 存 sys_file，返回 /file/{id}。
-     * <p>同步更新本地留痕行（status/file_id/error_msg），失败不影响轮询。
+     * <p>同步更新本地留痕行（status/file_id/error_msg），失败不影响 worker 轮询。
      */
     public AiVideoStatusVO getTask(Long modelId, String videoId) {
         AiResolvedConfig cfg = aiModelService.resolveConfig(modelId);
@@ -231,6 +235,24 @@ public class AiVideoService {
         voPage.setPages(result.getPages());
         voPage.setRecords(result.getRecords().stream().map(this::toHistoryVO).toList());
         return voPage;
+    }
+
+    /**
+     * 删除历史记录（校验归属，连关联文件一起删）。
+     */
+    public void deleteTask(Long taskId, String subjectType, String subjectId) {
+        SysAiVideoTask task = videoTaskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException("任务不存在");
+        }
+        if (!subjectType.equals(task.getSubjectType()) || !subjectId.equals(task.getSubjectId())) {
+            throw new BusinessException("无权删除该记录");
+        }
+        if (task.getFileId() != null) {
+            fileMapper.deleteById(task.getFileId());
+        }
+        videoTaskMapper.deleteById(taskId);
+        log.info("[AI视频] 删除历史记录 taskId={} fileId={}", taskId, task.getFileId());
     }
 
     private SysAiVideoTask findLocalTask(String videoId) {

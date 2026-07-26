@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { NLayout, NLayoutContent, NBackTop, NDrawer, NDrawerContent, NIcon } from 'naive-ui'
 import { useIsMobile } from '@/composables/useBreakpoint'
 import { useThemeStore } from '@/store/theme'
 import { useAuthStore } from '@/store/auth'
+import { useAiNotifyStore } from '@/store/aiNotify'
 import { iconMap } from '@/utils/icons'
 import LayoutSider from './components/LayoutSider.vue'
 import LayoutHeader from './components/LayoutHeader.vue'
@@ -14,6 +15,7 @@ import ThemeDrawer from './components/ThemeDrawer.vue'
 const isMobile = useIsMobile()
 const themeStore = useThemeStore()
 const authStore = useAuthStore()
+const aiNotifyStore = useAiNotifyStore()
 
 const themeDrawerShow = ref(false)
 const refreshKey = ref(0)
@@ -35,6 +37,19 @@ watch(isMobile, (mobile) => {
   if (!mobile) {
     mobileSiderShow.value = false
   }
+})
+
+watch(() => authStore.isLogin, () => {
+  aiNotifyStore.disconnect()
+  aiNotifyStore.connect()
+})
+
+onMounted(() => {
+  aiNotifyStore.connect()
+})
+
+onBeforeUnmount(() => {
+  aiNotifyStore.disconnect()
 })
 </script>
 

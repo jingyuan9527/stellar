@@ -123,9 +123,17 @@ public class LogAspect {
         try {
             com.fasterxml.jackson.databind.node.ObjectNode node = objectMapper.createObjectNode();
             for (int i = 0; i < args.length; i++) {
+                Object arg = args[i];
+                if (arg == null) continue;
+                if (arg instanceof HttpServletRequest
+                        || arg instanceof jakarta.servlet.http.HttpServletResponse
+                        || arg instanceof jakarta.servlet.http.HttpSession
+                        || arg instanceof org.springframework.web.multipart.MultipartFile) {
+                    continue;
+                }
                 String name = (paramNames != null && i < paramNames.length && paramNames[i] != null)
                         ? paramNames[i] : "arg" + i;
-                node.putPOJO(name, args[i]);
+                node.putPOJO(name, arg);
             }
             String json = objectMapper.writeValueAsString(node);
             json = SENSITIVE_PATTERN.matcher(json).replaceAll("$1\"******\"");

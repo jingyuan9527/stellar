@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { h, computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
-  NSpace, NInput, NSelect, NButton, NEmpty, NAlert, NDataTable, NTag,
+  NSpace, NInput, NSelect, NButton, NEmpty, NAlert, NDataTable, NTag, NPopconfirm,
   useMessage,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import AiGeneratorLayout from '../components/AiGeneratorLayout.vue'
-import { createAiImage, getAiImageTask, getAiImagePage, getAiModelsByType } from '@/api/ai'
+import { createAiImage, deleteAiImage, getAiImagePage, getAiModelsByType } from '@/api/ai'
 import { useAuthStore } from '@/store/auth'
+import { useAiNotifyStore, type AiNotifyMessage } from '@/store/aiNotify'
 import type { AiModel, AiImageTask } from '@/types/api'
 
 const message = useMessage()
 const authStore = useAuthStore()
+const aiNotifyStore = useAiNotifyStore()
 
 const models = ref<AiModel[]>([])
 const modelId = ref<number | null>(null)
@@ -19,12 +21,7 @@ const prompt = ref('')
 const size = ref('1K')
 const ratio = ref('1:1')
 const creating = ref(false)
-
-// 异步任务：生成中按钮 loading，完成自动弹抽屉
-const taskId = ref<number | null>(null)
-const polling = ref(false)
-let pollTimer: number | null = null
-let pollStart = 0
+const generating = ref(false)
 
 // 历史
 const history = ref<AiImageTask[]>([])
@@ -97,8 +94,16 @@ const columns: DataTableColumns<AiImageTask> = [
     render: (row) => (row.durationMs != null ? `${row.durationMs} ms` : '-'),
   },
   {
-    title: '操作', key: 'actions', width: 90, fixed: 'right',
-    render: (row) => h(NButton, { size: 'small', onClick: () => openDrawer(row) }, { default: () => '查看' }),
+    title: '操作', key: 'actions', width: 140, fixed: 'right',
+    render: (row) => h(NSpace, { size: 'small' }, {
+      default: () => [
+        h(NButton, { size: 'small', onClick: () => openDrawer(row) }, { default: () => '查看' }),
+        h(NPopconfirm, { onPositiveClick: () => handleDelete(row.taskId) }, {
+          trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' }),
+          default: () => '确定删除该记录？',
+        }),
+      ],
+    }),
   },
 ]
 
@@ -160,16 +165,15 @@ async function handleCreate() {
   }
   creating.value = true
   try {
-    const id = await createAiImage({
+    await createAiImage({
       modelId: modelId.value,
       prompt: prompt.value.trim(),
       size: size.value,
       ratio: ratio.value,
     })
-    taskId.value = id
+    generating.value = true
     message.success('任务已创建，正在生成...')
     await refreshHistory()
-    startPolling()
   } catch {
     // 错误已由拦截器提示
   } finally {
@@ -177,47 +181,40 @@ async function handleCreate() {
   }
 }
 
-function startPolling() {
-  if (!taskId.value) return
-  polling.value = true
-  pollStart = Date.now()
-  pollTimer = window.setInterval(pollOnce, 3000)
-}
-
-async function pollOnce() {
-  if (!taskId.value) return
+async function handleDelete(taskId: number) {
   try {
-    const res: AiImageTask = await getAiImageTask(taskId.value)
-    if (res.status === 'completed') {
-      stopPolling()
-      message.success('图片生成完成')
-      await refreshHistory()
-      if (history.value[0]) openDrawer(history.value[0])
-    } else if (res.status === 'failed') {
-      stopPolling()
-      message.error(res.errorMsg || '图片生成失败')
-      await refreshHistory()
-    } else if (Date.now() - pollStart > 5 * 60 * 1000) {
-      stopPolling()
-      message.warning('轮询超时，请稍后重试')
-    }
+    await deleteAiImage(taskId)
+    message.success('删除成功')
+    await loadHistory()
   } catch {
-    // 单次查询失败不中断轮询
+    // 拦截器提示
   }
 }
 
-function stopPolling() {
-  polling.value = false
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
+function onTaskNotify(msg: AiNotifyMessage) {
+  if (msg.type !== 'image') return
+  generating.value = false
+  if (msg.status === 'completed') {
+    message.success('图片生成完成')
+    refreshHistory().then(() => {
+      if (history.value[0]) openDrawer(history.value[0])
+    })
+  } else {
+    message.error('图片生成失败')
+    refreshHistory()
   }
 }
 
-onBeforeUnmount(stopPolling)
+let offNotify: (() => void) | null = null
+
 onMounted(() => {
   loadModels()
   loadHistory()
+  offNotify = aiNotifyStore.onTaskNotify(onTaskNotify)
+})
+
+onBeforeUnmount(() => {
+  if (offNotify) offNotify()
 })
 </script>
 
@@ -265,13 +262,12 @@ onMounted(() => {
           <NSpace>
             <NButton
               type="primary"
-              :loading="creating || polling"
-              :disabled="models.length === 0 || !prompt.trim() || polling"
+              :loading="creating || generating"
+              :disabled="models.length === 0 || !prompt.trim() || generating"
               @click="handleCreate"
             >
               生成图片
             </NButton>
-            <NButton v-if="polling" type="error" @click="stopPolling">停止轮询</NButton>
           </NSpace>
 
           <NAlert v-if="!authStore.isLogin" type="info" :bordered="false">

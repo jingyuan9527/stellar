@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { h, computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
-  NSpace, NInput, NSelect, NButton, NEmpty, NAlert, NDataTable, NTag,
+  NSpace, NInput, NSelect, NButton, NEmpty, NAlert, NDataTable, NTag, NPopconfirm,
   useMessage,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import AiGeneratorLayout from '../components/AiGeneratorLayout.vue'
-import { createAiVideo, getAiVideoStatus, getAiVideoPage, getAiModelsByType } from '@/api/ai'
-import type { AiModel, AiVideoStatus, AiVideoHistory } from '@/types/api'
+import { createAiVideo, deleteAiVideo, getAiVideoPage, getAiModelsByType } from '@/api/ai'
+import { useAiNotifyStore, type AiNotifyMessage } from '@/store/aiNotify'
+import type { AiModel, AiVideoHistory } from '@/types/api'
 
 const message = useMessage()
+const aiNotifyStore = useAiNotifyStore()
 
 const models = ref<AiModel[]>([])
 const modelId = ref<number | null>(null)
@@ -17,13 +19,7 @@ const prompt = ref('')
 const ratio = ref('16:9')
 const duration = ref('5')
 const creating = ref(false)
-
-// 异步任务：生成中按钮 loading，完成自动弹抽屉
-const taskVideoId = ref<string | null>(null)
-const taskModelId = ref<number | null>(null)
-const polling = ref(false)
-let pollTimer: number | null = null
-let pollStart = 0
+const generating = ref(false)
 
 // 历史
 const history = ref<AiVideoHistory[]>([])
@@ -97,8 +93,16 @@ const columns: DataTableColumns<AiVideoHistory> = [
     render: (row) => (row.durationMs != null ? `${(row.durationMs / 1000).toFixed(1)} s` : '-'),
   },
   {
-    title: '操作', key: 'actions', width: 90, fixed: 'right',
-    render: (row) => h(NButton, { size: 'small', disabled: !row.url, onClick: () => openDrawer(row) }, { default: () => '查看' }),
+    title: '操作', key: 'actions', width: 140, fixed: 'right',
+    render: (row) => h(NSpace, { size: 'small' }, {
+      default: () => [
+        h(NButton, { size: 'small', disabled: !row.url, onClick: () => openDrawer(row) }, { default: () => '查看' }),
+        h(NPopconfirm, { onPositiveClick: () => handleDelete(row.id) }, {
+          trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' }),
+          default: () => '确定删除该记录？',
+        }),
+      ],
+    }),
   },
 ]
 
@@ -162,7 +166,7 @@ async function handleCreate() {
   try {
     const sz = sizeMap[ratio.value]
     const du = durationMap[duration.value]
-    const res = await createAiVideo({
+    await createAiVideo({
       modelId: modelId.value,
       prompt: prompt.value.trim(),
       ratio: ratio.value,
@@ -172,11 +176,9 @@ async function handleCreate() {
       numFrames: du.numFrames,
       frameRate: du.frameRate,
     })
-    taskVideoId.value = res.videoId
-    taskModelId.value = modelId.value
+    generating.value = true
     message.success('任务已创建，正在生成...')
     await refreshHistory()
-    startPolling()
   } catch {
     // 错误已由拦截器提示
   } finally {
@@ -184,47 +186,40 @@ async function handleCreate() {
   }
 }
 
-function startPolling() {
-  if (!taskVideoId.value || !taskModelId.value) return
-  polling.value = true
-  pollStart = Date.now()
-  pollTimer = window.setInterval(pollOnce, 5000)
-}
-
-async function pollOnce() {
-  if (!taskVideoId.value || !taskModelId.value) return
+async function handleDelete(taskId: number) {
   try {
-    const res: AiVideoStatus = await getAiVideoStatus(taskModelId.value, taskVideoId.value)
-    if (res.status === 'completed') {
-      stopPolling()
-      message.success('视频生成完成')
-      await refreshHistory()
-      if (history.value[0]) openDrawer(history.value[0])
-    } else if (res.status === 'failed') {
-      stopPolling()
-      message.error('视频生成失败')
-      await refreshHistory()
-    } else if (Date.now() - pollStart > 5 * 60 * 1000) {
-      stopPolling()
-      message.warning('轮询超时，请稍后重试或联系管理员')
-    }
+    await deleteAiVideo(taskId)
+    message.success('删除成功')
+    await loadHistory()
   } catch {
-    // 单次查询失败不中断轮询
+    // 拦截器提示
   }
 }
 
-function stopPolling() {
-  polling.value = false
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
+function onTaskNotify(msg: AiNotifyMessage) {
+  if (msg.type !== 'video') return
+  generating.value = false
+  if (msg.status === 'completed') {
+    message.success('视频生成完成')
+    refreshHistory().then(() => {
+      if (history.value[0]) openDrawer(history.value[0])
+    })
+  } else {
+    message.error('视频生成失败')
+    refreshHistory()
   }
 }
 
-onBeforeUnmount(stopPolling)
+let offNotify: (() => void) | null = null
+
 onMounted(() => {
   loadModels()
   loadHistory()
+  offNotify = aiNotifyStore.onTaskNotify(onTaskNotify)
+})
+
+onBeforeUnmount(() => {
+  if (offNotify) offNotify()
 })
 </script>
 
@@ -275,17 +270,16 @@ onMounted(() => {
           <NSpace>
             <NButton
               type="primary"
-              :loading="creating || polling"
-              :disabled="models.length === 0 || !prompt.trim() || polling"
+              :loading="creating || generating"
+              :disabled="models.length === 0 || !prompt.trim() || generating"
               @click="handleCreate"
             >
               生成视频
             </NButton>
-            <NButton v-if="polling" type="error" @click="stopPolling">停止轮询</NButton>
           </NSpace>
 
           <NAlert type="info" :bordered="false">
-            视频生成为异步任务，创建后自动轮询（每 5 秒），通常 1-5 分钟。每日限 3 次。
+            视频生成为异步任务，创建后后台自动生成，通常 1-5 分钟。每日限 3 次。
           </NAlert>
         </NSpace>
       </template>

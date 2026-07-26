@@ -77,6 +77,11 @@ export function getAiImagePage(params: { pageNum: number; pageSize: number }) {
   return request<PageResult<AiImageTask>>({ url: '/ai/image/page', method: 'get', params })
 }
 
+/** 删除图片生成历史（连关联文件一起删） */
+export function deleteAiImage(taskId: number) {
+  return request<void>({ url: `/ai/image/${taskId}`, method: 'delete' })
+}
+
 // ===== AI 视频生成（异步任务）=====
 
 export function createAiVideo(data: { modelId: number; prompt: string; ratio?: string; duration?: number; width?: number; height?: number; numFrames?: number; frameRate?: number }) {
@@ -90,6 +95,11 @@ export function getAiVideoStatus(modelId: number, videoId: string) {
 /** 视频生成历史分页（登录按账号） */
 export function getAiVideoPage(params: { pageNum: number; pageSize: number }) {
   return request<PageResult<AiVideoHistory>>({ url: '/ai/video/page', method: 'get', params })
+}
+
+/** 删除视频生成历史（连关联文件一起删） */
+export function deleteAiVideo(taskId: number) {
+  return request<void>({ url: `/ai/video/${taskId}`, method: 'delete' })
 }
 
 // ===== 系统设置 =====

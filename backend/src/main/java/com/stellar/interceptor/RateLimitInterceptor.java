@@ -4,6 +4,7 @@ import com.stellar.common.BusinessException;
 import com.stellar.common.ResultCode;
 import com.stellar.common.annotation.RateLimit;
 import com.stellar.service.RateLimitService;
+import cn.dev33.satoken.stp.StpUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -15,7 +16,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * IP 单日限流拦截器：识别 {@link RateLimit} 注解，按 IP 计数，超限抛
  * {@code BusinessException(TOO_MANY_REQUESTS)}，由全局异常处理器转 429 envelope。
  *
- * <p>需注册在 {@code AuthInterceptor} 之后（放行后计数）。
+ * <p>登录用户跳过限流（仅对游客计数）。需注册在 {@code AuthInterceptor} 之后（放行后计数）。
  *
  * @author stellar
  */
@@ -35,6 +36,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             rateLimit = handlerMethod.getBeanType().getAnnotation(RateLimit.class);
         }
         if (rateLimit == null) {
+            return true;
+        }
+        if (StpUtil.isLogin()) {
             return true;
         }
         String ip = getClientIp(request);

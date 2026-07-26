@@ -7,6 +7,7 @@ import com.stellar.common.BusinessException;
 import com.stellar.dto.AiImageHistoryQueryDTO;
 import com.stellar.entity.SysAiImageTask;
 import com.stellar.mapper.SysAiImageTaskMapper;
+import com.stellar.mapper.SysFileMapper;
 import com.stellar.vo.AiImageTaskVO;
 import com.stellar.vo.AiResolvedConfig;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,7 +22,7 @@ import java.time.LocalDateTime;
 
 /**
  * AI 图片生成服务：异步任务模式。
- * <p>createTask 立即落库返回 taskId，@Async worker 异步调供应商生成+存库，前端轮询 getTask。
+ * <p>createTask 立即落库返回 taskId，@Async worker 异步调供应商生成+存库，前端 SSE 通知完成（getTask 保留兜底查询）。
  * <p>pageHistory 按主体（account/ip）分页查询历史，复用 sys_ai_image_task。
  */
 @Slf4j
@@ -31,6 +32,7 @@ public class AiImageService {
 
     private final AiModelService aiModelService;
     private final SysAiImageTaskMapper taskMapper;
+    private final SysFileMapper fileMapper;
     private final AiImageTaskWorker worker;
 
     /**
@@ -86,6 +88,24 @@ public class AiImageService {
         voPage.setPages(result.getPages());
         voPage.setRecords(result.getRecords().stream().map(this::toVO).toList());
         return voPage;
+    }
+
+    /**
+     * 删除历史记录（校验归属，连关联文件一起删）。
+     */
+    public void deleteTask(Long taskId, String subjectType, String subjectId) {
+        SysAiImageTask task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException("任务不存在");
+        }
+        if (!subjectType.equals(task.getSubjectType()) || !subjectId.equals(task.getSubjectId())) {
+            throw new BusinessException("无权删除该记录");
+        }
+        if (task.getFileId() != null) {
+            fileMapper.deleteById(task.getFileId());
+        }
+        taskMapper.deleteById(taskId);
+        log.info("[AI图片] 删除历史记录 taskId={} fileId={}", taskId, task.getFileId());
     }
 
     private AiImageTaskVO toVO(SysAiImageTask task) {

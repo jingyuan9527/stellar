@@ -15,6 +15,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * AI 图片生成接口（异步任务模式）。对游客开放，IP 日限 2 次。
- * <p>POST /create 立即返回 taskId，@Async 线程生成；GET /task/{id} 轮询状态；
+ * <p>POST /create 立即返回 taskId，@Async 线程生成；GET /task/{id} 查询状态（兜底，前端改用 SSE 通知）；
  * GET /page 按主体（account/ip）分页查看历史。
  */
 @Slf4j
@@ -45,7 +46,7 @@ public class AiImageController {
     }
 
     /**
-     * 查询图片任务状态。completed 时返回 /file/{id}。轮询用，不限流。
+     * 查询图片任务状态。completed 时返回 /file/{id}。状态查询用，不限流（前端改用 SSE 通知，此接口保留兜底）。
      */
     @PublicAccess
     @GetMapping("/task/{taskId}")
@@ -64,6 +65,19 @@ public class AiImageController {
         String subjectType = StpUtil.isLogin() ? "account" : "ip";
         String subjectId = StpUtil.isLogin() ? StpUtil.getLoginIdAsString() : getClientIp(request);
         return Result.success(aiImageService.pageHistory(query, subjectType, subjectId));
+    }
+
+    /**
+     * 删除图片生成历史（连关联文件一起删，校验归属）。
+     */
+    @PublicAccess
+    @DeleteMapping("/{taskId}")
+    @Log(title = "AI图片历史", type = OperationType.DELETE)
+    public Result<Void> delete(@PathVariable Long taskId, HttpServletRequest request) {
+        String subjectType = StpUtil.isLogin() ? "account" : "ip";
+        String subjectId = StpUtil.isLogin() ? StpUtil.getLoginIdAsString() : getClientIp(request);
+        aiImageService.deleteTask(taskId, subjectType, subjectId);
+        return Result.success();
     }
 
     /**

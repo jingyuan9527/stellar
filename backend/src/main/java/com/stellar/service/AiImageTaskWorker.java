@@ -7,6 +7,7 @@ import com.stellar.entity.SysAiImageTask;
 import com.stellar.entity.SysFile;
 import com.stellar.mapper.SysAiImageTaskMapper;
 import com.stellar.mapper.SysFileMapper;
+import com.stellar.vo.AiNotifyMessage;
 import com.stellar.vo.AiResolvedConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +40,7 @@ public class AiImageTaskWorker {
     private final SysFileMapper fileMapper;
     private final SysAiUsageService sysAiUsageService;
     private final ObjectMapper objectMapper;
+    private final AiNotifyPublisher publisher;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -80,10 +82,16 @@ public class AiImageTaskWorker {
                     cfg.providerId(), cfg.model(), cfg.modelType(),
                     promptTokens, 0, promptTokens, "estimate");
 
+            publisher.publish(new AiNotifyMessage(
+                    task.getSubjectType() + ":" + task.getSubjectId(),
+                    "image", taskId, "completed"));
             log.info("[AI图片] 异步生成完成 taskId={} fileId={} size={}", taskId, file.getId(), imageBytes.length);
         } catch (Exception e) {
             log.error("[AI图片] 异步生成失败 taskId={}: {}", taskId, e.getMessage(), e);
             markFailed(taskId, e instanceof BusinessException ? e.getMessage() : "图片生成失败: " + e.getMessage());
+            publisher.publish(new AiNotifyMessage(
+                    task.getSubjectType() + ":" + task.getSubjectId(),
+                    "image", taskId, "failed"));
         }
     }
 

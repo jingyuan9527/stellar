@@ -463,7 +463,7 @@ COMMENT ON COLUMN sys_ai_usage.model_type IS '模型类型: TEXT/IMAGE/...(自�
 CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_provider ON sys_ai_usage (provider_id);
 CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_model_type ON sys_ai_usage (model_type);
 
--- AI 图片生成异步任务表（后端异步包同步 API：请求立即返回 taskId，异步线程生成+存库，前端轮询）
+-- AI 图片生成异步任务表（后端异步包同步 API：请求立即返回 taskId，异步线程生成+存库，前端 SSE 通知）
 CREATE TABLE IF NOT EXISTS sys_ai_image_task (
     id            BIGSERIAL PRIMARY KEY,
     model_id      BIGINT NOT NULL,
@@ -527,7 +527,7 @@ COMMENT ON COLUMN sys_ai_chat_record.duration_ms IS '耗时(毫秒)';
 COMMENT ON COLUMN sys_ai_chat_record.create_time IS '落库时间';
 CREATE INDEX IF NOT EXISTS idx_sys_ai_chat_record_subject ON sys_ai_chat_record (subject_type, subject_id, request_time DESC);
 
--- AI 视频生成异步任务表（本地留痕：createTask 落库，getTask 轮询更新，完成存 sys_file）
+-- AI 视频生成异步任务表（本地留痕：createTask 落库，getTask 被 worker 调用更新，完成存 sys_file）
 CREATE TABLE IF NOT EXISTS sys_ai_video_task (
     id            BIGSERIAL PRIMARY KEY,
     model_id      BIGINT NOT NULL,
@@ -561,7 +561,7 @@ COMMENT ON COLUMN sys_ai_video_task.width IS '画面宽';
 COMMENT ON COLUMN sys_ai_video_task.height IS '画面高';
 COMMENT ON COLUMN sys_ai_video_task.num_frames IS '帧数';
 COMMENT ON COLUMN sys_ai_video_task.frame_rate IS '帧率';
-COMMENT ON COLUMN sys_ai_video_task.video_id IS '供应商返回的 video_id(供轮询)';
+COMMENT ON COLUMN sys_ai_video_task.video_id IS '供应商返回的 video_id(供后端 worker 轮询)';
 COMMENT ON COLUMN sys_ai_video_task.status IS '状态: generating/completed/failed';
 COMMENT ON COLUMN sys_ai_video_task.file_id IS '生成视频文件ID(引用 sys_file.id)';
 COMMENT ON COLUMN sys_ai_video_task.error_msg IS '失败原因';
