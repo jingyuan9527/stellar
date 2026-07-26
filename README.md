@@ -13,7 +13,7 @@ Stellar 是一个前后端分离的个人作品站。游客可浏览落地页与
 - **工具箱**：TTS 语音合成、AI 文案生成、封面画布编辑等。
 - **AI 模块**：内置模板（B站/抖音/小红书）、流式 SSE 对话、自带 AI 配置、token 消费统计与首页看板。
 - **鉴权**：Sa-Token 统一拦截，`@PublicAccess` 注解放行游客方法，公开接口内按登录态差异化处理。
-- **IP 单日限流**：纯 JDK 内存计数（无 Redis 依赖），耗资源接口超限返回 429。
+- **IP 单日限流**：基于 Redis 计数（多实例共享），耗资源接口超限返回 429。
 - **操作日志**：AOP + `@Log` 注解采集，支持 Excel 导出。
 - **可配置公开菜单**：后台勾选哪些路由对游客可见，前端拉取配置动态过滤。
 
@@ -24,6 +24,7 @@ Stellar 是一个前后端分离的个人作品站。游客可浏览落地页与
 | 前端 | Vue 3 · Vite · TypeScript · Pinia · UnoCSS · Naive UI |
 | 后端 | Spring Boot 3.3 · Java 21 · Maven · MyBatis-Plus · Sa-Token |
 | 数据库 | PostgreSQL |
+| 缓存/会话 | Redis（Sa-Token 持久化 + IP 限流 + Spring Cache） |
 | 部署 | Docker · Docker Compose · Nginx |
 
 ## 项目结构
@@ -102,6 +103,7 @@ docker compose up -d --build
 | `DB_URL` | `jdbc:postgresql://localhost:5432/soybean` | PostgreSQL JDBC 连接串 |
 | `DB_USERNAME` | `postgres` | 数据库用户名 |
 | `DB_PASSWORD` | `postgres` | 数据库密码 |
+| `REDIS_URL` | （空） | Redis 连接串，如 `redis://:pwd@host:6379/1`（末段 `/db` 隔离应用）；空则不启用 Redis |
 | `SPRING_PROFILES_ACTIVE` | `default` | Spring profile（默认不自动执行建表脚本） |
 | `RATE_LIMIT_DAILY` | `50` | IP 单日限流阈值 |
 | `FRONTEND_PORT` | `80` | 容器对外端口（Nginx） |
@@ -117,7 +119,7 @@ mvn -q compile -DskipTests          # 编译检查
 $env:SPRING_PROFILES_ACTIVE="local"; mvn spring-boot:run   # 启动于 :8080
 ```
 
-> `local` profile 用于连接真实数据库，其凭证保存在 gitignored 的 `application-local.yml` 中。
+> `local` profile 用于连接真实数据库与 Redis，其凭证保存在 gitignored 的 `application-local.yml` 中。
 
 **前端**（`frontend/`，包管理器为 pnpm）
 
@@ -132,6 +134,7 @@ pnpm build        # 生产构建（typecheck 门禁）
 
 - 上传文件：二进制存数据库 `sys_file` 表（BYTEA），无磁盘卷依赖；Nginx 经 `/file/` 反代到后端 `GET /file/{id}` 读取。
 - 数据库：由外部 PostgreSQL 管理，本仓库不负责其持久化。
+- 缓存/会话：Redis 管理 Sa-Token 会话（重启不丢登录态）、IP 限流计数、Spring Cache 业务缓存；key 统一以 `stellar:` 前缀隔离。
 
 ## 开源协议
 
