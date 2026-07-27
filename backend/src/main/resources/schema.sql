@@ -587,3 +587,148 @@ COMMENT ON COLUMN sys_ai_video_task.error_msg IS '失败原因';
 COMMENT ON COLUMN sys_ai_video_task.create_time IS '请求时间(任务创建)';
 COMMENT ON COLUMN sys_ai_video_task.update_time IS '返回时间(完成/失败更新)';
 CREATE INDEX IF NOT EXISTS idx_sys_ai_video_task_subject ON sys_ai_video_task (subject_type, subject_id, create_time DESC);
+
+-- ===== AI 聊天模块 =====
+-- 向量存 ai_knowledge_chunk.embedding(TEXT, JSON 数组文本 [v1,v2,...])，纯 Java 内存余弦检索，无 pgvector 依赖。
+
+-- AI 人设表（预设 system prompt，聊天时快捷选择）
+CREATE TABLE IF NOT EXISTS ai_persona (
+    id            BIGSERIAL PRIMARY KEY,
+    name          VARCHAR(100) NOT NULL,
+    system_prompt TEXT NOT NULL,
+    description   VARCHAR(500),
+    enabled       SMALLINT NOT NULL DEFAULT 1,
+    sort_order    INT NOT NULL DEFAULT 0,
+    built_in      SMALLINT NOT NULL DEFAULT 0,
+    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted       SMALLINT DEFAULT 0
+);
+COMMENT ON TABLE  ai_persona IS 'AI 人设表(预设 system prompt)';
+COMMENT ON COLUMN ai_persona.id IS '主键';
+COMMENT ON COLUMN ai_persona.name IS '人设名称(如 通用助手/程序员)';
+COMMENT ON COLUMN ai_persona.system_prompt IS '系统提示词(注入 LLM messages[0].role=system)';
+COMMENT ON COLUMN ai_persona.description IS '描述说明';
+COMMENT ON COLUMN ai_persona.enabled IS '是否启用: 0禁用 1启用';
+COMMENT ON COLUMN ai_persona.sort_order IS '排序';
+COMMENT ON COLUMN ai_persona.built_in IS '是否内置: 0否 1是(不可删,可恢复默认)';
+COMMENT ON COLUMN ai_persona.create_time IS '创建时间';
+COMMENT ON COLUMN ai_persona.update_time IS '更新时间';
+COMMENT ON COLUMN ai_persona.deleted IS '逻辑删除: 0未删 1已删';
+CREATE INDEX IF NOT EXISTS idx_ai_persona_enabled ON ai_persona (enabled, sort_order);
+
+-- AI 聊天会话表（一个会话=多轮消息，主体按账号/IP区分）
+CREATE TABLE IF NOT EXISTS ai_chat_session (
+    id           BIGSERIAL PRIMARY KEY,
+    title         VARCHAR(200),
+    persona_id    BIGINT,
+    kb_id         BIGINT,
+    subject_type  VARCHAR(16) NOT NULL,
+    subject_id    VARCHAR(64) NOT NULL,
+    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted       SMALLINT DEFAULT 0
+);
+COMMENT ON TABLE  ai_chat_session IS 'AI 聊天会话表(多轮对话容器)';
+COMMENT ON COLUMN ai_chat_session.id IS '主键';
+COMMENT ON COLUMN ai_chat_session.title IS '会话标题(取首条用户消息截断或LLM生成)';
+COMMENT ON COLUMN ai_chat_session.persona_id IS '关联人设ID(引用 ai_persona.id,可空)';
+COMMENT ON COLUMN ai_chat_session.kb_id IS '关联知识库ID(引用 ai_knowledge_base.id,可空,启用RAG)';
+COMMENT ON COLUMN ai_chat_session.subject_type IS '主体类型: account/ip';
+COMMENT ON COLUMN ai_chat_session.subject_id IS '主体ID: userId 或 IP';
+COMMENT ON COLUMN ai_chat_session.create_time IS '创建时间';
+COMMENT ON COLUMN ai_chat_session.update_time IS '更新时间(最近一轮消息时间)';
+COMMENT ON COLUMN ai_chat_session.deleted IS '逻辑删除: 0未删 1已删';
+CREATE INDEX IF NOT EXISTS idx_ai_chat_session_subject ON ai_chat_session (subject_type, subject_id, update_time DESC);
+
+-- AI 聊天消息表（会话内逐条 user/assistant 消息）
+CREATE TABLE IF NOT EXISTS ai_chat_message (
+    id           BIGSERIAL PRIMARY KEY,
+    session_id   BIGINT NOT NULL,
+    role          VARCHAR(16) NOT NULL,
+    content       TEXT NOT NULL,
+    tokens        INT DEFAULT 0,
+    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  ai_chat_message IS 'AI 聊天消息表(会话内逐条消息)';
+COMMENT ON COLUMN ai_chat_message.id IS '主键';
+COMMENT ON COLUMN ai_chat_message.session_id IS '会话ID(引用 ai_chat_session.id)';
+COMMENT ON COLUMN ai_chat_message.role IS '角色: system/user/assistant';
+COMMENT ON COLUMN ai_chat_message.content IS '消息内容';
+COMMENT ON COLUMN ai_chat_message.tokens IS '该条消息token数(可空)';
+COMMENT ON COLUMN ai_chat_message.create_time IS '创建时间';
+CREATE INDEX IF NOT EXISTS idx_ai_chat_message_session ON ai_chat_message (session_id, create_time ASC);
+
+-- AI 长期记忆表（定期整理会话为事实陈述，按账号，对话时注入 system prompt）
+CREATE TABLE IF NOT EXISTS ai_memory (
+    id                 BIGSERIAL PRIMARY KEY,
+    user_id            BIGINT NOT NULL,
+    content            TEXT NOT NULL,
+    source_session_id  BIGINT,
+    create_time        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted            SMALLINT DEFAULT 0
+);
+COMMENT ON TABLE  ai_memory IS 'AI 长期记忆表(会话摘要事实陈述,按账号)';
+COMMENT ON COLUMN ai_memory.id IS '主键';
+COMMENT ON COLUMN ai_memory.user_id IS '用户ID(仅登录用户有长期记忆)';
+COMMENT ON COLUMN ai_memory.content IS '记忆内容(LLM整理的事实陈述)';
+COMMENT ON COLUMN ai_memory.source_session_id IS '来源会话ID(可空)';
+COMMENT ON COLUMN ai_memory.create_time IS '创建时间';
+COMMENT ON COLUMN ai_memory.deleted IS '逻辑删除: 0未删 1已删';
+CREATE INDEX IF NOT EXISTS idx_ai_memory_user ON ai_memory (user_id, create_time DESC);
+
+-- AI 知识库表（RAG 文档集合，每个 KB 含多个分块）
+CREATE TABLE IF NOT EXISTS ai_knowledge_base (
+    id                  BIGSERIAL PRIMARY KEY,
+    name                VARCHAR(100) NOT NULL,
+    description         VARCHAR(500),
+    embedding_model_id  BIGINT,
+    chunk_count         INT DEFAULT 0,
+    create_time         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted             SMALLINT DEFAULT 0
+);
+COMMENT ON TABLE  ai_knowledge_base IS 'AI 知识库表(RAG文档集合)';
+COMMENT ON COLUMN ai_knowledge_base.id IS '主键';
+COMMENT ON COLUMN ai_knowledge_base.name IS '知识库名称';
+COMMENT ON COLUMN ai_knowledge_base.description IS '描述';
+COMMENT ON COLUMN ai_knowledge_base.embedding_model_id IS '向量化模型ID(引用 sys_ai_model.id,EMBEDDING类型)';
+COMMENT ON COLUMN ai_knowledge_base.chunk_count IS '分块数(冗余计数)';
+COMMENT ON COLUMN ai_knowledge_base.create_time IS '创建时间';
+COMMENT ON COLUMN ai_knowledge_base.update_time IS '更新时间';
+COMMENT ON COLUMN ai_knowledge_base.deleted IS '逻辑删除: 0未删 1已删';
+
+-- AI 知识库分块表（文档分块+向量，embedding 存 JSON 数组文本，纯 Java 内存余弦检索）
+CREATE TABLE IF NOT EXISTS ai_knowledge_chunk (
+    id           BIGSERIAL PRIMARY KEY,
+    kb_id        BIGINT NOT NULL,
+    chunk_text   TEXT NOT NULL,
+    chunk_index  INT NOT NULL DEFAULT 0,
+    token_count  INT DEFAULT 0,
+    source_name  VARCHAR(255),
+    embedding    TEXT,
+    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  ai_knowledge_chunk IS 'AI 知识库分块表(文档分块+向量)';
+COMMENT ON COLUMN ai_knowledge_chunk.id IS '主键';
+COMMENT ON COLUMN ai_knowledge_chunk.kb_id IS '知识库ID(引用 ai_knowledge_base.id)';
+COMMENT ON COLUMN ai_knowledge_chunk.chunk_text IS '分块文本';
+COMMENT ON COLUMN ai_knowledge_chunk.chunk_index IS '分块序号(同KB内从0)';
+COMMENT ON COLUMN ai_knowledge_chunk.token_count IS '分块token估算';
+COMMENT ON COLUMN ai_knowledge_chunk.source_name IS '来源文档名(可空)';
+COMMENT ON COLUMN ai_knowledge_chunk.embedding IS '向量(JSON数组文本 [v1,v2,...]),纯Java内存余弦检索,默认查询不加载';
+COMMENT ON COLUMN ai_knowledge_chunk.create_time IS '创建时间';
+CREATE INDEX IF NOT EXISTS idx_ai_knowledge_chunk_kb ON ai_knowledge_chunk (kb_id, chunk_index);
+-- 幂等：已存在的表补 embedding 列
+ALTER TABLE ai_knowledge_chunk ADD COLUMN IF NOT EXISTS embedding TEXT;
+
+-- 内置人设种子（幂等）
+INSERT INTO ai_persona (name, system_prompt, description, enabled, sort_order, built_in, create_time, update_time)
+SELECT '通用助手', '你是一个友好、博学的助手。请用简洁清晰的中文回答用户问题。', '默认通用对话助手', 1, 0, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM ai_persona WHERE built_in = 1);
+INSERT INTO ai_persona (name, system_prompt, description, enabled, sort_order, built_in, create_time, update_time)
+SELECT '程序员', '你是一位资深全栈工程师，精通 Java、Vue、TypeScript、数据库与系统设计。回答技术问题时给出准确、可落地的方案与代码示例，指出潜在坑点。', '技术问答助手', 1, 1, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM ai_persona WHERE name = '程序员' AND built_in = 1);
+INSERT INTO ai_persona (name, system_prompt, description, enabled, sort_order, built_in, create_time, update_time)
+SELECT '写作助手', '你是一位优秀的写作搭档，擅长润色、改写、构思大纲与生成多平台文案。根据用户需求提供多种风格的文本，并简要说明取舍。', '写作与文案助手', 1, 2, 1, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM ai_persona WHERE name = '写作助手' AND built_in = 1);

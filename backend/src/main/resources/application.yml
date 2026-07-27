@@ -16,6 +16,8 @@ spring:
   data:
     redis:
       url: ${REDIS_URL:}
+      # 显式 db：url 末尾 /db 在某些 Spring Boot 版本不被 Lettuce 解析（会落到 db0），必须显式指定
+      database: ${REDIS_DATABASE:0}
       lettuce:
         pool:
           max-active: 8

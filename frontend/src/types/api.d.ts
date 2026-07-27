@@ -329,3 +329,79 @@ export interface SysFileQuery {
   pageNum: number
   pageSize: number
 }
+
+// ===== AI 聊天模块 =====
+
+export interface AiPersona {
+  id: number
+  name: string
+  systemPrompt: string
+  description: string | null
+  enabled: number
+  sortOrder: number
+  builtIn: number
+  createTime: string
+  updateTime: string
+}
+
+export interface AiChatSession {
+  id: number
+  title: string
+  personaId: number | null
+  kbId: number | null
+  subjectType: string
+  subjectId: string
+  createTime: string
+  updateTime: string
+}
+
+/** 管理后台会话列表项（含用户名） */
+export interface AiChatSessionAdmin {
+  id: number
+  title: string
+  personaId: number | null
+  kbId: number | null
+  subjectType: string
+  subjectId: string
+  username: string | null
+  createTime: string
+  updateTime: string
+}
+
+export interface AiChatMessage {
+  id: number
+  sessionId: number
+  role: string
+  content: string
+  tokens: number | null
+  createTime: string
+}
+
+export interface AiMemory {
+  id: number
+  userId: number
+  username: string | null
+  content: string
+  sourceSessionId: number | null
+  createTime: string
+}
+
+export interface AiKnowledgeBase {
+  id: number
+  name: string
+  description: string | null
+  embeddingModelId: number | null
+  chunkCount: number
+  createTime: string
+  updateTime: string
+}
+
+export interface AiKnowledgeChunk {
+  id: number
+  kbId: number
+  chunkText: string
+  chunkIndex: number
+  tokenCount: number | null
+  sourceName: string | null
+  createTime: string
+}

@@ -38,6 +38,44 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: '仪表盘', icon: 'grid', order: 3, affix: true },
       },
       {
+        path: 'chat',
+        name: 'Chat',
+        redirect: '/chat/talk',
+        meta: { title: 'AI聊天', icon: 'chatbubbles', order: 2 },
+        children: [
+          {
+            path: 'talk',
+            name: 'ChatTalk',
+            component: () => import('@/views/chat/talk/index.vue'),
+            meta: { title: '聊天', icon: 'chatbubble', order: 1, requiresAuth: false },
+          },
+          {
+            path: 'history',
+            name: 'ChatHistory',
+            component: () => import('@/views/chat/history/index.vue'),
+            meta: { title: '历史聊天管理', icon: 'timer', order: 2 },
+          },
+          {
+            path: 'memory',
+            name: 'ChatMemory',
+            component: () => import('@/views/chat/memory/index.vue'),
+            meta: { title: '长期记忆管理', icon: 'bulb', order: 3 },
+          },
+          {
+            path: 'knowledge',
+            name: 'ChatKnowledge',
+            component: () => import('@/views/chat/knowledge/index.vue'),
+            meta: { title: '知识库管理', icon: 'book', order: 4 },
+          },
+          {
+            path: 'persona',
+            name: 'ChatPersona',
+            component: () => import('@/views/chat/persona/index.vue'),
+            meta: { title: '人设管理', icon: 'persona', order: 5 },
+          },
+        ],
+      },
+      {
         path: 'system',
         name: 'System',
         redirect: '/system/user-profile',

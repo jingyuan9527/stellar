@@ -10,6 +10,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -44,5 +45,12 @@ public class UserService {
         update.setPassword(passwordEncoder.encode(request.getNewPassword()));
         update.setUpdateTime(LocalDateTime.now());
         sysUserMapper.updateById(update);
+    }
+
+    /**
+     * 查全部用户（password 字段 @JsonIgnore 不返回）。供长期记忆等管理功能选用户。
+     */
+    public List<SysUser> listAll() {
+        return sysUserMapper.selectList(null);
     }
 }

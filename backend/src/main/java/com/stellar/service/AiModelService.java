@@ -68,8 +68,10 @@ public class AiModelService {
 
     /**
      * 按类型查启用的模型（供前端下拉/调用方选模型用）。公开接口高频读，走 Spring Cache。
+     * <p>空结果不缓存（unless）：避免空 List 序列化/反序列化 type id 的边界问题，
+     * 同时无该类型模型时每次查 DB（空，快），配了模型后自动缓存。
      */
-    @Cacheable(cacheNames = "ai-model", key = "#modelType")
+    @Cacheable(cacheNames = "ai-model", key = "#modelType", unless = "#result.isEmpty()")
     public List<AiModelVO> listEnabledByType(String modelType) {
         List<SysAiModel> list = modelMapper.selectList(new LambdaQueryWrapper<SysAiModel>()
                 .eq(SysAiModel::getModelType, modelType)

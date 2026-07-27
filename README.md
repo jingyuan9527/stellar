@@ -103,7 +103,8 @@ docker compose up -d --build
 | `DB_URL` | `jdbc:postgresql://localhost:5432/soybean` | PostgreSQL JDBC 连接串 |
 | `DB_USERNAME` | `postgres` | 数据库用户名 |
 | `DB_PASSWORD` | `postgres` | 数据库密码 |
-| `REDIS_URL` | （空） | Redis 连接串，如 `redis://:pwd@host:6379/1`（末段 `/db` 隔离应用）；空则不启用 Redis |
+| `REDIS_URL` | （空） | Redis 连接串，如 `redis://:pwd@host:6379`（不含末段 `/db`，db 由 `REDIS_DATABASE` 指定）；空则不启用 Redis |
+| `REDIS_DATABASE` | `0` | Redis db（隔离应用数据，本项目用 1）。url 末段 `/db` 在某些 Spring Boot 版本不被 Lettuce 解析，必须用此变量显式指定 |
 | `SPRING_PROFILES_ACTIVE` | `default` | Spring profile（默认不自动执行建表脚本） |
 | `RATE_LIMIT_DAILY` | `50` | IP 单日限流阈值 |
 | `FRONTEND_PORT` | `80` | 容器对外端口（Nginx） |

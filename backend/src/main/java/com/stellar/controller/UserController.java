@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/user")
 @RequiredArgsConstructor
@@ -25,6 +27,12 @@ public class UserController {
     @Log(title = "用户管理", type = OperationType.QUERY)
     public Result<SysUser> info() {
         return Result.success(userService.getCurrentUser());
+    }
+
+    @GetMapping("/list")
+    @Log(title = "用户管理", type = OperationType.QUERY)
+    public Result<List<SysUser>> list() {
+        return Result.success(userService.listAll());
     }
 
     @PostMapping("/change-password")

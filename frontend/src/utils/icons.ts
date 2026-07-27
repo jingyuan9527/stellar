@@ -38,6 +38,11 @@ import {
   LockClosedOutline,
   ColorWandOutline,
   FolderOpenOutline,
+  ChatbubblesOutline,
+  ChatbubbleEllipsesOutline,
+  BulbOutline,
+  BookOutline,
+  BodyOutline,
 } from '@vicons/ionicons5'
 
 export const iconMap: Record<string, Component> = {
@@ -79,4 +84,9 @@ export const iconMap: Record<string, Component> = {
   lock: LockClosedOutline,
   conch: ColorWandOutline,
   folder: FolderOpenOutline,
+  chatbubbles: ChatbubblesOutline,
+  chatbubble: ChatbubbleEllipsesOutline,
+  bulb: BulbOutline,
+  book: BookOutline,
+  persona: BodyOutline,
 }
