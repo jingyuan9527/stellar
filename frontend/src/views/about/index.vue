@@ -35,6 +35,15 @@ const linkItems = computed<LinkItem[]>(() => {
     }))
 })
 
+// 项目卡片主题色板（按索引循环），用于卡片左侧色条 + hover 边框
+const projectColors: string[] = [
+  '#18a058', '#2080f0', '#f0a020', '#d03050', '#7c3aed', '#0ea5e9',
+]
+
+function projectAccent(idx: number): string {
+  return projectColors[idx % projectColors.length]
+}
+
 async function load() {
   try {
     profile.value = await getPublicProfile()
@@ -119,19 +128,19 @@ onMounted(() => {
     <!-- 项目展示 -->
     <section v-if="projects.length" class="section">
       <h2 class="section-title">项目展示</h2>
-      <NGrid :x-gap="16" :y-gap="16" :cols="1" responsive="screen" item-responsive>
+      <NGrid :x-gap="16" :y-gap="16" :cols="2" responsive="screen" item-responsive>
         <NGridItem
-          v-for="p in projects"
+          v-for="(p, idx) in projects"
           :key="p.id"
-          span="1 m:1 l:2"
+          span="2 m:1"
         >
-          <NCard :bordered="false" class="project-card">
+          <NCard :bordered="false" class="project-card" :style="{ '--project-accent': projectAccent(idx) }">
             <div class="project-body">
               <div class="project-head">
                 <h3 class="project-name">{{ p.name }}</h3>
                 <p v-if="p.description" class="project-desc">{{ p.description }}</p>
               </div>
-              <NSpace :size="8" class="project-actions">
+              <NSpace v-if="p.siteUrl || p.sourceUrl" :size="8" class="project-actions">
                 <NButton
                   v-if="p.siteUrl"
                   size="small"
@@ -254,26 +263,39 @@ onMounted(() => {
   font-size: 14px;
 }
 
+.project-card {
+  height: 100%;
+  overflow: hidden;
+  border-left: 4px solid var(--project-accent, #18a058);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.project-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.1);
+}
+
 .project-card :deep(.n-card__content) {
-  padding: 20px 24px;
+  padding: 18px 20px;
 }
 
 .project-body {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  flex: 1;
+  gap: 12px;
+  min-height: 120px;
 }
 
 .project-head {
   flex: 1;
-  min-width: 0;
 }
 
 .project-name {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   margin: 0 0 6px;
+  line-height: 1.4;
 }
 
 .project-desc {
@@ -281,6 +303,10 @@ onMounted(() => {
   font-size: 13px;
   opacity: 0.7;
   line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .project-actions {
@@ -297,10 +323,6 @@ onMounted(() => {
   }
   .hero-name {
     font-size: 26px;
-  }
-  .project-body {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }
 </style>
