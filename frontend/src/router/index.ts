@@ -35,13 +35,13 @@ export const routes: RouteRecordRaw[] = [
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/dashboard/index.vue'),
-        meta: { title: '仪表盘', icon: 'grid', order: 3, affix: true },
+        meta: { title: '仪表盘', icon: 'grid', order: 2, affix: true },
       },
       {
         path: 'chat',
         name: 'Chat',
         redirect: '/chat/talk',
-        meta: { title: 'AI聊天', icon: 'chatbubbles', order: 2 },
+        meta: { title: 'AI聊天', icon: 'chatbubbles', order: 3 },
         children: [
           {
             path: 'talk',

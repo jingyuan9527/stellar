@@ -260,6 +260,47 @@ export interface AiUsageStats {
   byProvider: AiUsageProviderStat[]
 }
 
+/** 通用任务统计：成功率/平均耗时，文案耗时单位 ms，图片/视频为 s */
+export interface DashboardTaskStat {
+  total: number
+  today: number
+  successCount: number
+  /** 成功率 0-100，保留 1 位小数 */
+  successRate: number
+  /** 平均耗时（文案 ms / 图片视频 s） */
+  avgDuration: number
+}
+
+export interface DashboardFileTypeStat {
+  /** image / audio / other */
+  type: string
+  count: number
+  size: number
+}
+
+export interface DashboardFileStat {
+  total: number
+  todayUpload: number
+  totalSize: number
+  byType: DashboardFileTypeStat[]
+}
+
+export interface DashboardTtsStat {
+  total: number
+  today: number
+  totalSize: number
+}
+
+/** 仪表盘聚合统计 */
+export interface DashboardStats {
+  aiUsage: AiUsageStats | null
+  textGen: DashboardTaskStat | null
+  imageTask: DashboardTaskStat | null
+  videoTask: DashboardTaskStat | null
+  file: DashboardFileStat | null
+  tts: DashboardTtsStat | null
+}
+
 export interface GameScore {
   id: number
   playerName: string

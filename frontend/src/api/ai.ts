@@ -1,6 +1,6 @@
-import service, { request } from './request'
+import { request } from './request'
 import { useAuthStore } from '@/store/auth'
-import type { AiModel, AiProvider, AiTemplate, AiTemplateQuery, AiChatRecord, AiImageTask, AiVideoTask, AiVideoHistory, AiVideoStatus, AiUsageStats, PageResult } from '@/types/api'
+import type { AiModel, AiProvider, AiTemplate, AiTemplateQuery, AiChatRecord, AiImageTask, AiVideoTask, AiVideoHistory, AiVideoStatus, PageResult } from '@/types/api'
 
 // ===== AI 供应商 =====
 
@@ -214,11 +214,4 @@ export function deleteChatRecord(id: number) {
 
 export function clearChatRecords() {
   return request<void>({ url: '/ai/chat/record', method: 'delete' })
-}
-
-// ===== AI token 统计 =====
-
-/** token 消费统计（仪表盘，需登录） */
-export function getAiUsageStats() {
-  return request<AiUsageStats>({ url: '/ai/chat/usage/stats', method: 'get' })
 }
