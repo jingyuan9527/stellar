@@ -3,7 +3,9 @@ package com.stellar.controller;
 import com.stellar.common.annotation.PublicAccess;
 import com.stellar.common.Result;
 import com.stellar.entity.SysProfile;
+import com.stellar.entity.SysProfileProject;
 import com.stellar.service.MenuVisibilityService;
+import com.stellar.service.ProfileProjectService;
 import com.stellar.service.ProfileService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,6 +26,7 @@ public class PublicController {
 
     private final MenuVisibilityService menuVisibilityService;
     private final ProfileService profileService;
+    private final ProfileProjectService profileProjectService;
 
     /** 游客可见菜单的 route key 列表，前端据此过滤侧边栏与路由守卫。 */
     @PublicAccess
@@ -38,4 +41,12 @@ public class PublicController {
     public Result<SysProfile> profile() {
         return Result.success(profileService.get());
     }
+
+    /** 个人项目展示列表（关于我 /about 页公开访问）。 */
+    @PublicAccess
+    @GetMapping("/profile-projects")
+    public Result<List<SysProfileProject>> profileProjects() {
+        return Result.success(profileProjectService.list());
+    }
 }
+

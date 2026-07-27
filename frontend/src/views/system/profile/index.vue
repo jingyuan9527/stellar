@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { NCard, NFormItem, NInput, NButton, NUpload, NImage, NSpace, useMessage } from 'naive-ui'
-import type { UploadCustomRequestOptions } from 'naive-ui'
-import { getProfile, updateProfile } from '@/api/profile'
+import { computed, h, onMounted, reactive, ref } from 'vue'
+import {
+  NCard, NFormItem, NInput, NButton, NUpload, NImage, NSpace,
+  NDataTable, NModal, NPopconfirm, NIcon, useMessage,
+} from 'naive-ui'
+import type { DataTableColumns, UploadCustomRequestOptions } from 'naive-ui'
+import { getProfile, updateProfile, getProfileProjects, createProfileProject, updateProfileProject, deleteProfileProject } from '@/api/profile'
 import { uploadFile } from '@/api/file'
-import type { Profile } from '@/types/api'
+import type { Profile, ProfileProject } from '@/types/api'
+import { iconMap } from '@/utils/icons'
 
 const message = useMessage()
 const saving = ref(false)
@@ -47,7 +51,125 @@ async function customUpload({ file, onFinish, onError }: UploadCustomRequestOpti
   }
 }
 
-onMounted(load)
+// ============== 项目展示管理 ==============
+const projects = ref<ProfileProject[]>([])
+const projectLoading = ref(false)
+
+async function loadProjects() {
+  projectLoading.value = true
+  try {
+    projects.value = await getProfileProjects()
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    projectLoading.value = false
+  }
+}
+
+const projectColumns: DataTableColumns<ProfileProject> = [
+  { title: '项目名', key: 'name', width: 160, ellipsis: { tooltip: true } },
+  {
+    title: '线上地址', key: 'siteUrl', width: 220, ellipsis: { tooltip: true },
+    render: (row) => row.siteUrl
+      ? h(NButton, { text: true, tag: 'a', href: row.siteUrl, target: '_blank', type: 'primary' },
+          { default: () => row.siteUrl })
+      : h('span', { style: 'color:#999' }, '-'),
+  },
+  {
+    title: '源码地址', key: 'sourceUrl', width: 220, ellipsis: { tooltip: true },
+    render: (row) => row.sourceUrl
+      ? h(NButton, { text: true, tag: 'a', href: row.sourceUrl, target: '_blank', type: 'primary' },
+          { default: () => row.sourceUrl })
+      : h('span', { style: 'color:#999' }, '-'),
+  },
+  { title: '简介', key: 'description', ellipsis: { tooltip: true }, render: (row) => row.description || '-' },
+  {
+    title: '操作', key: 'actions', width: 120, fixed: 'right',
+    render: (row) => h(NSpace, { size: 0 },
+      {
+        default: () => [
+          h(NButton, { size: 'small', text: true, onClick: () => openEditProject(row) },
+            { default: () => '编辑' }),
+          h(NPopconfirm, { onPositiveClick: () => handleDeleteProject(row.id) },
+            {
+              trigger: () => h(NButton, { size: 'small', text: true, type: 'error' },
+                { icon: () => h(NIcon, null, { default: () => h(iconMap.trash) }), default: () => '删除' }),
+              default: () => `确认删除「${row.name}」？`,
+            }),
+        ],
+      }),
+  },
+]
+
+const showProjectModal = ref(false)
+const projectSaving = ref(false)
+const projectForm = reactive<{ id: number | null; name: string; siteUrl: string; sourceUrl: string; description: string }>({
+  id: null, name: '', siteUrl: '', sourceUrl: '', description: '',
+})
+const isEditProject = computed(() => projectForm.id !== null)
+
+function openCreateProject() {
+  projectForm.id = null
+  projectForm.name = ''
+  projectForm.siteUrl = ''
+  projectForm.sourceUrl = ''
+  projectForm.description = ''
+  showProjectModal.value = true
+}
+
+function openEditProject(row: ProfileProject) {
+  projectForm.id = row.id
+  projectForm.name = row.name
+  projectForm.siteUrl = row.siteUrl || ''
+  projectForm.sourceUrl = row.sourceUrl || ''
+  projectForm.description = row.description || ''
+  showProjectModal.value = true
+}
+
+async function handleSaveProject() {
+  if (!projectForm.name.trim()) {
+    message.warning('项目名不能为空')
+    return
+  }
+  projectSaving.value = true
+  const payload = {
+    id: projectForm.id ?? undefined,
+    name: projectForm.name.trim(),
+    siteUrl: projectForm.siteUrl.trim() || null,
+    sourceUrl: projectForm.sourceUrl.trim() || null,
+    description: projectForm.description.trim() || null,
+  }
+  try {
+    if (isEditProject.value) {
+      await updateProfileProject(payload)
+      message.success('已更新')
+    } else {
+      await createProfileProject(payload)
+      message.success('已新增')
+    }
+    showProjectModal.value = false
+    loadProjects()
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    projectSaving.value = false
+  }
+}
+
+async function handleDeleteProject(id: number) {
+  try {
+    await deleteProfileProject(id)
+    message.success('删除成功')
+    loadProjects()
+  } catch {
+    // 错误已由拦截器提示
+  }
+}
+
+onMounted(() => {
+  load()
+  loadProjects()
+})
 </script>
 
 <template>
@@ -109,6 +231,47 @@ onMounted(load)
         <NButton type="primary" :loading="saving" @click="handleSave">保存</NButton>
       </NSpace>
     </NCard>
+
+    <NCard title="项目展示" :bordered="false">
+      <template #header-extra>
+        <NButton size="small" type="primary" @click="openCreateProject">新增项目</NButton>
+      </template>
+      <NDataTable
+        :columns="projectColumns"
+        :data="projects"
+        :loading="projectLoading"
+        :row-key="(row: ProfileProject) => row.id"
+        :scroll-x="760"
+        size="small"
+      />
+    </NCard>
+
+    <NModal v-model:show="showProjectModal" preset="card" :title="isEditProject ? '编辑项目' : '新增项目'" style="width: 520px; max-width: 90vw">
+      <NSpace vertical :size="16">
+        <NFormItem label="项目名" required>
+          <NInput v-model:value="projectForm.name" placeholder="如：数学游戏" :maxlength="100" />
+        </NFormItem>
+        <NFormItem label="线上地址">
+          <NInput v-model:value="projectForm.siteUrl" placeholder="https://example.com" :maxlength="500" />
+        </NFormItem>
+        <NFormItem label="源码地址">
+          <NInput v-model:value="projectForm.sourceUrl" placeholder="https://github.com/xxx/xxx" :maxlength="500" />
+        </NFormItem>
+        <NFormItem label="简介">
+          <NInput
+            v-model:value="projectForm.description"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 5 }"
+            placeholder="1-2 句项目简介"
+            :maxlength="500"
+          />
+        </NFormItem>
+        <NSpace justify="end">
+          <NButton @click="showProjectModal = false">取消</NButton>
+          <NButton type="primary" :loading="projectSaving" @click="handleSaveProject">保存</NButton>
+        </NSpace>
+      </NSpace>
+    </NModal>
   </div>
 </template>
 

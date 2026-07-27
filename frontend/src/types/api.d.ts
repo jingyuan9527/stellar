@@ -221,6 +221,16 @@ export interface Profile {
   updateTime: string
 }
 
+export interface ProfileProject {
+  id: number
+  name: string
+  siteUrl: string | null
+  sourceUrl: string | null
+  description: string | null
+  createTime: string
+  updateTime: string
+}
+
 export interface AiUsageDailyPoint {
   date: string
   tokens: number

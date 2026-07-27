@@ -185,6 +185,25 @@ COMMENT ON COLUMN sys_profile.title IS '头衔(如 全栈开发 / 运维)';
 COMMENT ON COLUMN sys_profile.about IS '关于我富文本(HTML,前端 v-html 渲染)';
 COMMENT ON COLUMN sys_profile.location IS '所在地';
 
+-- 个人项目展示表（about 页公开展示，多条）
+CREATE TABLE IF NOT EXISTS sys_profile_project (
+    id           BIGSERIAL PRIMARY KEY,
+    name         VARCHAR(100) NOT NULL,
+    site_url     VARCHAR(500),
+    source_url   VARCHAR(500),
+    description  VARCHAR(500),
+    create_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  sys_profile_project IS '个人项目展示(about 页公开)';
+COMMENT ON COLUMN sys_profile_project.id IS '主键';
+COMMENT ON COLUMN sys_profile_project.name IS '项目名';
+COMMENT ON COLUMN sys_profile_project.site_url IS '线上地址(可空,为空则不展示访问按钮)';
+COMMENT ON COLUMN sys_profile_project.source_url IS '源码地址(如 GitHub,可空)';
+COMMENT ON COLUMN sys_profile_project.description IS '简介(1-2 句)';
+COMMENT ON COLUMN sys_profile_project.create_time IS '创建时间';
+COMMENT ON COLUMN sys_profile_project.update_time IS '更新时间';
+
 -- AI token 消费记录表（计费/统计用）
 CREATE TABLE IF NOT EXISTS sys_ai_usage (
     id                BIGSERIAL PRIMARY KEY,

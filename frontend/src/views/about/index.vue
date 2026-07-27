@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NCard, NButton, NImage, NSpace, NTag } from 'naive-ui'
-import { getPublicProfile } from '@/api/profile'
-import type { Profile } from '@/types/api'
+import { NCard, NButton, NImage, NSpace, NTag, NGrid, NGridItem } from 'naive-ui'
+import { getPublicProfile, getPublicProfileProjects } from '@/api/profile'
+import type { Profile, ProfileProject } from '@/types/api'
 
 const profile = ref<Profile | null>(null)
+const projects = ref<ProfileProject[]>([])
 
 const skills = computed(() =>
   profile.value?.skills
@@ -42,7 +43,18 @@ async function load() {
   }
 }
 
-onMounted(load)
+async function loadProjects() {
+  try {
+    projects.value = await getPublicProfileProjects()
+  } catch {
+    // 错误已由拦截器提示
+  }
+}
+
+onMounted(() => {
+  load()
+  loadProjects()
+})
 </script>
 
 <template>
@@ -102,6 +114,45 @@ onMounted(load)
           >{{ t }}</NTag>
         </NSpace>
       </NCard>
+    </section>
+
+    <!-- 项目展示 -->
+    <section v-if="projects.length" class="section">
+      <h2 class="section-title">项目展示</h2>
+      <NGrid :x-gap="16" :y-gap="16" :cols="1" responsive="screen" item-responsive>
+        <NGridItem
+          v-for="p in projects"
+          :key="p.id"
+          span="1 m:1 l:2"
+        >
+          <NCard :bordered="false" class="project-card">
+            <div class="project-body">
+              <div class="project-head">
+                <h3 class="project-name">{{ p.name }}</h3>
+                <p v-if="p.description" class="project-desc">{{ p.description }}</p>
+              </div>
+              <NSpace :size="8" class="project-actions">
+                <NButton
+                  v-if="p.siteUrl"
+                  size="small"
+                  type="primary"
+                  tag="a"
+                  :href="p.siteUrl"
+                  target="_blank"
+                >访问线上</NButton>
+                <NButton
+                  v-if="p.sourceUrl"
+                  size="small"
+                  secondary
+                  tag="a"
+                  :href="p.sourceUrl"
+                  target="_blank"
+                >查看源码</NButton>
+              </NSpace>
+            </div>
+          </NCard>
+        </NGridItem>
+      </NGrid>
     </section>
 
     <!-- 联系方式 -->
@@ -203,6 +254,39 @@ onMounted(load)
   font-size: 14px;
 }
 
+.project-card :deep(.n-card__content) {
+  padding: 20px 24px;
+}
+
+.project-body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.project-head {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-name {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+
+.project-desc {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.7;
+  line-height: 1.6;
+}
+
+.project-actions {
+  flex-shrink: 0;
+}
+
 @media (max-width: 768px) {
   .hero {
     flex-direction: column;
@@ -213,6 +297,10 @@ onMounted(load)
   }
   .hero-name {
     font-size: 26px;
+  }
+  .project-body {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>
