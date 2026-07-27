@@ -76,11 +76,6 @@ onMounted(loadStats)
           <h2>{{ greeting }}，{{ authStore.userInfo?.nickname || '用户' }} 👋</h2>
           <p>Stellar 个人实验沉淀池 · AI token 消费看板</p>
         </div>
-        <div class="welcome-icon">
-          <NIcon size="64" color="#18a058">
-            <component :is="iconMap.grid" />
-          </NIcon>
-        </div>
       </div>
     </NCard>
 
