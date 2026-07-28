@@ -177,9 +177,10 @@ async function handleDownload(row: TtsRecord) {
   try {
     const blob = await getTtsRecordAudio(row.id)
     const url = URL.createObjectURL(blob)
+    const ext = row.audioFormat === 'wav' ? 'wav' : 'mp3'
     const a = document.createElement('a')
     a.href = url
-    a.download = `tts_${row.id}_${row.voice}.mp3`
+    a.download = `tts_${row.id}_${row.voice}.${ext}`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)

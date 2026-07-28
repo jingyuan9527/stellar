@@ -29,19 +29,40 @@ public class TtsRecordService {
     private final SysUserMapper sysUserMapper;
 
     /**
-     * 保存合成记录。
+     * 保存 Edge TTS 合成记录（audio_format=mp3）。
      */
     public void save(TtsRequest request, byte[] audio) {
+        save(buildRecord(request.getText(), request.getVoice(),
+                request.getRate(), request.getPitch(), request.getVolume(),
+                audio, "mp3"));
+    }
+
+    /**
+     * 保存 AI TTS 合成记录（audio_format=wav）。
+     * <p>AI TTS 无 rate/pitch/volume 概念（风格由自然语言指令控制），均记默认值。
+     */
+    public void saveAiTts(String text, String voice, byte[] audio) {
+        save(buildRecord(text, voice, 1.0, 1.0, 1.0, audio, "wav"));
+    }
+
+    private TtsRecord buildRecord(String text, String voice,
+                                   Double rate, Double pitch, Double volume,
+                                   byte[] audio, String audioFormat) {
         TtsRecord record = new TtsRecord();
-        record.setText(request.getText());
-        record.setVoice(request.getVoice());
-        record.setRate(request.getRate());
-        record.setPitch(request.getPitch());
-        record.setVolume(request.getVolume());
+        record.setText(text);
+        record.setVoice(voice);
+        record.setRate(rate);
+        record.setPitch(pitch);
+        record.setVolume(volume);
         record.setAudioData(audio);
         record.setFileSize((long) audio.length);
+        record.setAudioFormat(audioFormat);
         record.setOperator(getCurrentUsername());
         record.setCreateTime(LocalDateTime.now());
+        return record;
+    }
+
+    private void save(TtsRecord record) {
         ttsRecordMapper.insert(record);
     }
 
@@ -60,17 +81,17 @@ public class TtsRecordService {
     }
 
     /**
-     * 按主键获取音频数据。
+     * 按主键获取音频数据及其格式（试听/下载时按格式设 Content-Type）。
      */
-    public byte[] getAudio(Long id) {
+    public TtsRecord getAudio(Long id) {
         TtsRecord record = ttsRecordMapper.selectOne(
                 new LambdaQueryWrapper<TtsRecord>()
-                        .select(TtsRecord::getAudioData)
+                        .select(TtsRecord::getAudioData, TtsRecord::getAudioFormat)
                         .eq(TtsRecord::getId, id));
         if (record == null || record.getAudioData() == null) {
             throw new BusinessException("音频数据不存在");
         }
-        return record.getAudioData();
+        return record;
     }
 
     /**

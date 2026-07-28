@@ -88,6 +88,10 @@ COMMENT ON COLUMN tts_record.deleted IS '逻辑删除: 0未删 1已删';
 CREATE INDEX IF NOT EXISTS idx_tts_record_create_time ON tts_record (create_time DESC);
 CREATE INDEX IF NOT EXISTS idx_tts_record_operator ON tts_record (operator);
 
+-- 扩展：音频格式字段，区分 Edge(mp3) 与 AI TTS(wav)，试听/下载时按格式设 Content-Type
+ALTER TABLE tts_record ADD COLUMN IF NOT EXISTS audio_format VARCHAR(10) DEFAULT 'mp3';
+COMMENT ON COLUMN tts_record.audio_format IS '音频格式: mp3(Edge TTS) / wav(AI TTS)';
+
 -- AI 配置表（项目级单一配置）
 CREATE TABLE IF NOT EXISTS sys_ai_config (
     id          BIGSERIAL PRIMARY KEY,

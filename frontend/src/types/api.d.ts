@@ -66,6 +66,7 @@ export interface TtsRecord {
   pitch: number
   volume: number
   fileSize: number
+  audioFormat: string
   operator: string
   createTime: string
 }

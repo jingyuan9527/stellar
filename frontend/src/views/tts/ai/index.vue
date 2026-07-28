@@ -1,56 +1,181 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
-  NCard, NSpace, NButton, NIcon, NSelect, NInput, NSlider, NTag,
+  NCard, NSpace, NButton, NIcon, NSelect, NInput, NTag,
   NEmpty, NAlert, useMessage,
 } from 'naive-ui'
-import type { SelectOption } from 'naive-ui'
+import type { SelectGroupOption, SelectOption } from 'naive-ui'
 import { iconMap } from '@/utils/icons'
+import { useAuthStore } from '@/store/auth'
+import { synthesizeAiTts, getTtsRecordPage, getTtsRecordAudio } from '@/api/tts'
+import { getAiModelsByType } from '@/api/ai'
+import type { AiModel, TtsRecord } from '@/types/api'
+import { mimoVoiceOptions } from '@/constants/tts-voices'
+import { formatTime } from '@/utils/format'
 
+const router = useRouter()
 const message = useMessage()
+const authStore = useAuthStore()
 
-const text = ref('欢迎使用 AI 语音合成，输入文本后选择音色与情感风格即可生成富有表现力的语音。')
-const modelValue = ref('standard')
-const emotionValue = ref('neutral')
-const rate = ref(1)
-const pitch = ref(1)
-const volume = ref(1)
+const text = ref('欢迎使用 AI 语音合成，输入文本后选择音色与风格指令，即可生成富有表现力的神经网络语音。')
+const modelId = ref<number | null>(null)
+const voiceValue = ref('冰糖')
+const style = ref('')
 const generating = ref(false)
+const audioUrl = ref<string | null>(null)
 
-const modelOptions: SelectOption[] = [
-  { label: '标准女声', value: 'standard' },
-  { label: '标准男声', value: 'standard-m' },
-  { label: '温柔女声', value: 'gentle' },
-  { label: '磁性男声', value: 'magnetic' },
-  { label: '童声', value: 'child' },
-]
+const models = ref<AiModel[]>([])
+const modelsLoading = ref(false)
 
-const emotionOptions: SelectOption[] = [
-  { label: '平静', value: 'neutral' },
-  { label: '欢快', value: 'happy' },
-  { label: '悲伤', value: 'sad' },
-  { label: '愤怒', value: 'angry' },
-  { label: '惊讶', value: 'surprise' },
-]
+const voiceOptions: Array<SelectGroupOption | SelectOption> = mimoVoiceOptions
 
 const charCount = computed(() => text.value.length)
-const canGenerate = computed(() => text.value.trim().length > 0)
+const canGenerate = computed(
+  () => text.value.trim().length > 0 && modelId.value !== null && !generating.value,
+)
+const hasModel = computed(() => models.value.length > 0)
 
-function handleGenerate() {
-  if (!canGenerate.value) {
-    message.warning('请输入需要合成的文本')
+function formatFileSize(bytes?: number): string {
+  if (!bytes) return '-'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+async function loadModels() {
+  modelsLoading.value = true
+  try {
+    const list = await getAiModelsByType('AUDIO')
+    models.value = list
+    const def = list.find((m) => m.isDefault === 1)
+    modelId.value = def ? def.id : (list[0]?.id ?? null)
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    modelsLoading.value = false
+  }
+}
+
+const modelOptions = computed<SelectOption[]>(() =>
+  models.value.map((m) => ({
+    label: m.providerName ? `${m.model}（${m.providerName}）` : m.model,
+    value: m.id,
+  })),
+)
+
+// ===== 最近合成 =====
+const recentRecords = ref<TtsRecord[]>([])
+const historyLoadingId = ref<number | null>(null)
+
+async function loadRecentRecords() {
+  try {
+    const res = await getTtsRecordPage({ pageNum: 1, pageSize: 5 })
+    recentRecords.value = res.records
+  } catch {
+    // 静默失败
+  }
+}
+
+function revokeAudioUrl() {
+  if (audioUrl.value) {
+    URL.revokeObjectURL(audioUrl.value)
+    audioUrl.value = null
+  }
+}
+
+async function handleGenerate() {
+  if (!canGenerate.value) return
+  if (!authStore.isLogin) {
+    message.warning('AI 语音合成需登录后使用')
     return
   }
+  revokeAudioUrl()
   generating.value = true
-  message.info('AI 语音合成服务尚未接入，敬请期待')
-  setTimeout(() => {
+  try {
+    const blob = await synthesizeAiTts({
+      modelId: modelId.value!,
+      text: text.value,
+      voice: voiceValue.value as string,
+      style: style.value.trim() || undefined,
+    })
+    audioUrl.value = URL.createObjectURL(blob)
+    message.success('AI 语音合成成功')
+    loadRecentRecords()
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
     generating.value = false
-  }, 800)
+  }
+}
+
+async function handlePlayFromHistory(row: TtsRecord) {
+  historyLoadingId.value = row.id
+  revokeAudioUrl()
+  try {
+    const blob = await getTtsRecordAudio(row.id)
+    audioUrl.value = URL.createObjectURL(blob)
+    message.success('已加载历史音频')
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    historyLoadingId.value = null
+  }
+}
+
+async function handleDownloadFromHistory(row: TtsRecord) {
+  historyLoadingId.value = row.id
+  try {
+    const blob = await getTtsRecordAudio(row.id)
+    const url = URL.createObjectURL(blob)
+    const ext = row.audioFormat === 'wav' ? 'wav' : 'mp3'
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `tts_${row.id}_${row.voice}.${ext}`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    message.success('下载成功')
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    historyLoadingId.value = null
+  }
+}
+
+function handleDownload() {
+  if (!audioUrl.value) return
+  const a = document.createElement('a')
+  a.href = audioUrl.value
+  a.download = `ai_tts_${voiceValue.value}_${Date.now()}.wav`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 }
 
 function handleClear() {
   text.value = ''
+  style.value = ''
+  revokeAudioUrl()
 }
+
+function goToHistory() {
+  router.push('/tts/history')
+}
+
+function goToAiConfig() {
+  router.push('/system/ai-config')
+}
+
+onMounted(() => {
+  loadModels()
+  if (authStore.isLogin) loadRecentRecords()
+})
+
+onBeforeUnmount(() => {
+  revokeAudioUrl()
+})
 </script>
 
 <template>
@@ -59,12 +184,18 @@ function handleClear() {
       <template #header-extra>
         <NTag type="info" size="small" round>
           <template #icon><NIcon><component :is="iconMap.sparkles" /></NIcon></template>
-          神经网络语音
+          MiMo-V2.5-TTS
         </NTag>
       </template>
       <NSpace vertical :size="16">
         <NAlert type="info" :bordered="false">
-          AI 语音合成基于深度神经网络模型，可生成富有情感表现力的高质量语音。该功能需接入后端 AI 服务，当前为界面预览。
+          基于 MiMo-V2.5-TTS 神经网络语音合成，支持多种预置音色与自然语言风格控制，可生成富有情感表现力的高质量语音。
+        </NAlert>
+
+        <NAlert v-if="!hasModel && !modelsLoading" type="warning" :bordered="false">
+          暂无可用 AUDIO 类型模型，请先在
+          <NButton text type="primary" @click="goToAiConfig">AI 配置</NButton>
+          中添加供应商与 AUDIO 模型（如 mimo-v2.5-tts）。
         </NAlert>
 
         <div class="form-row">
@@ -72,7 +203,7 @@ function handleClear() {
           <NInput
             v-model:value="text"
             type="textarea"
-            placeholder="请输入需要合成语音的文本"
+            placeholder="请输入需要合成语音的文本（放在 assistant 消息，即实际播报内容）"
             :autosize="{ minRows: 5, maxRows: 12 }"
             maxlength="2000"
             show-count
@@ -81,45 +212,40 @@ function handleClear() {
 
         <div class="form-grid">
           <div class="form-row">
-            <span class="form-label">音色模型</span>
+            <span class="form-label">AI 模型</span>
             <NSelect
-              v-model:value="modelValue"
+              v-model:value="modelId"
               :options="modelOptions"
+              :loading="modelsLoading"
+              placeholder="选择 AUDIO 类型模型"
+              filterable
               style="width: 100%"
             />
           </div>
           <div class="form-row">
-            <span class="form-label">情感风格</span>
+            <span class="form-label">预置音色</span>
             <NSelect
-              v-model:value="emotionValue"
-              :options="emotionOptions"
+              v-model:value="voiceValue"
+              :options="voiceOptions"
+              placeholder="选择音色"
+              filterable
               style="width: 100%"
             />
           </div>
         </div>
 
-        <div class="params">
-          <div class="param-item">
-            <div class="param-head">
-              <span>语速</span>
-              <NTag size="small" :bordered="false">{{ rate.toFixed(1) }}</NTag>
-            </div>
-            <NSlider v-model:value="rate" :min="0.5" :max="2" :step="0.1" />
-          </div>
-          <div class="param-item">
-            <div class="param-head">
-              <span>音调</span>
-              <NTag size="small" :bordered="false">{{ pitch.toFixed(1) }}</NTag>
-            </div>
-            <NSlider v-model:value="pitch" :min="0" :max="2" :step="0.1" />
-          </div>
-          <div class="param-item">
-            <div class="param-head">
-              <span>音量</span>
-              <NTag size="small" :bordered="false">{{ volume.toFixed(1) }}</NTag>
-            </div>
-            <NSlider v-model:value="volume" :min="0" :max="1" :step="0.1" />
-          </div>
+        <div class="form-row">
+          <span class="form-label">
+            风格指令（可选）
+            <NTag size="tiny" :bordered="false" type="info">放 user 消息</NTag>
+          </span>
+          <NInput
+            v-model:value="style"
+            type="textarea"
+            placeholder="用自然语言描述风格，如：用轻快上扬的语调，语速稍快，带着激动与小骄傲。也可留空。"
+            :autosize="{ minRows: 2, maxRows: 5 }"
+            maxlength="500"
+          />
         </div>
 
         <NSpace>
@@ -130,7 +256,11 @@ function handleClear() {
             @click="handleGenerate"
           >
             <template #icon><NIcon><component :is="iconMap.sparkles" /></NIcon></template>
-            生成语音
+            {{ generating ? '合成中...' : '生成语音' }}
+          </NButton>
+          <NButton :disabled="!audioUrl" @click="handleDownload">
+            <template #icon><NIcon><component :is="iconMap.download" /></NIcon></template>
+            下载 WAV
           </NButton>
           <NButton @click="handleClear">
             <template #icon><NIcon><component :is="iconMap.trash" /></NIcon></template>
@@ -141,7 +271,10 @@ function handleClear() {
     </NCard>
 
     <NCard title="音频预览" :bordered="false">
-      <NEmpty description="生成后将在此处播放音频">
+      <div v-if="audioUrl" class="audio-player">
+        <audio :src="audioUrl" controls style="width: 100%" />
+      </div>
+      <NEmpty v-else description="合成后将在此处播放音频">
         <template #icon>
           <NIcon size="48" color="#999">
             <component :is="iconMap.volume" />
@@ -150,12 +283,60 @@ function handleClear() {
       </NEmpty>
     </NCard>
 
+    <NCard v-if="authStore.isLogin" title="最近合成" :bordered="false">
+      <template #header-extra>
+        <NButton text type="primary" @click="goToHistory">
+          查看全部
+          <template #icon><NIcon><component :is="iconMap.expand" /></NIcon></template>
+        </NButton>
+      </template>
+      <NEmpty v-if="!recentRecords.length" description="暂无合成记录" size="small" />
+      <NSpace v-else vertical :size="8">
+        <div v-for="row in recentRecords" :key="row.id" class="recent-item">
+          <div class="recent-info">
+            <span class="recent-text">{{ row.text.length > 40 ? row.text.slice(0, 40) + '...' : row.text }}</span>
+            <NSpace size="small" align="center" style="margin-top: 4px">
+              <NTag size="tiny" :type="row.audioFormat === 'wav' ? 'info' : 'success'" :bordered="false">
+                {{ row.audioFormat === 'wav' ? 'AI' : 'Edge' }}
+              </NTag>
+              <NTag size="tiny" type="info" :bordered="false">{{ row.voice }}</NTag>
+              <span class="recent-meta">{{ formatTime(row.createTime) }}</span>
+              <span class="recent-meta">{{ formatFileSize(row.fileSize) }}</span>
+            </NSpace>
+          </div>
+          <NSpace size="small">
+            <NButton
+              size="tiny"
+              text
+              type="primary"
+              :loading="historyLoadingId === row.id"
+              @click="handlePlayFromHistory(row)"
+            >
+              <template #icon><NIcon><component :is="iconMap.play" /></NIcon></template>
+              试听
+            </NButton>
+            <NButton
+              size="tiny"
+              text
+              type="info"
+              :disabled="historyLoadingId === row.id"
+              @click="handleDownloadFromHistory(row)"
+            >
+              <template #icon><NIcon><component :is="iconMap.download" /></NIcon></template>
+              下载
+            </NButton>
+          </NSpace>
+        </div>
+      </NSpace>
+    </NCard>
+
     <NCard title="使用说明" :bordered="false">
       <ul class="tips">
-        <li>AI 语音合成支持多种音色模型与情感风格，可生成富有表现力的语音。</li>
-        <li>情感风格会影响语音的语气与情绪，例如欢快、悲伤、愤怒等。</li>
-        <li>语速范围 0.5 ~ 2.0，音调范围 0 ~ 2.0，音量范围 0 ~ 1.0，默认均为 1.0。</li>
-        <li>当前文本长度：<b>{{ charCount }}</b> / 2000 字。</li>
+        <li>本功能调用 MiMo-V2.5-TTS 神经网络语音合成，需在「系统管理 → AI 配置」配置 AUDIO 类型模型。</li>
+        <li>合成文本放在 assistant 消息（实际播报内容）；风格指令放在 user 消息，用自然语言描述语气、语速、情绪等。</li>
+        <li>预置音色涵盖中文（冰糖/茉莉/苏打/白桦）与英文（Mia/Chloe/Milo/Dean），也可选 mimo_default 随集群默认。</li>
+        <li>也可在合成文本开头加标签控制风格，如 (慵懒)再让我睡五分钟。或用自然语言指令更细腻地刻画风格。</li>
+        <li>AI 语音合成需登录，合成音频为 WAV 格式，自动记入合成历史。当前文本长度：<b>{{ charCount }}</b> / 2000 字。</li>
       </ul>
     </NCard>
   </div>
@@ -177,6 +358,9 @@ function handleClear() {
 .form-label {
   font-size: 14px;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .form-grid {
@@ -185,23 +369,36 @@ function handleClear() {
   gap: 16px;
 }
 
-.params {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-}
-
-.param-item {
+.audio-player {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
-.param-head {
+.recent-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 13px;
+  gap: 12px;
+}
+
+.recent-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.recent-text {
+  font-size: 14px;
+  line-height: 1.5;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-meta {
+  font-size: 12px;
+  color: var(--n-text-color-3, #999);
 }
 
 .tips {
@@ -218,11 +415,6 @@ function handleClear() {
 @media (max-width: 768px) {
   .form-grid {
     grid-template-columns: 1fr;
-  }
-
-  .params {
-    grid-template-columns: 1fr;
-    gap: 16px;
   }
 }
 </style>

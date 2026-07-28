@@ -5,10 +5,12 @@ import com.stellar.annotation.Log;
 import com.stellar.common.Result;
 import com.stellar.common.annotation.PublicAccess;
 import com.stellar.common.annotation.RateLimit;
+import com.stellar.dto.AiTtsRequest;
 import com.stellar.dto.TtsRecordQueryDTO;
 import com.stellar.dto.TtsRequest;
 import com.stellar.entity.TtsRecord;
 import com.stellar.enums.OperationType;
+import com.stellar.service.AiTtsService;
 import com.stellar.service.TtsRecordService;
 import com.stellar.service.TtsService;
 import jakarta.validation.Valid;
@@ -39,6 +41,7 @@ public class TtsController {
 
     private final TtsService ttsService;
     private final TtsRecordService ttsRecordService;
+    private final AiTtsService aiTtsService;
 
     /**
      * Edge TTS 语音合成，返回 MP3 音频流，同时保存合成记录。
@@ -85,16 +88,53 @@ public class TtsController {
     }
 
     /**
+     * AI 语音合成（MiMo-V2.5-TTS），返回 WAV 音频流，同时保存合成记录。
+     * <p>需登录（不加 @PublicAccess），AUDIO 类型模型按 token 计费。
+     */
+    @PostMapping("/ai/synthesize")
+    @Log(title = "AI语音合成", type = OperationType.OTHER)
+    public ResponseEntity<byte[]> aiSynthesize(@Valid @RequestBody AiTtsRequest request) {
+        byte[] audio = aiTtsService.synthesize(
+                request.getModelId(),
+                request.getText(),
+                request.getVoice(),
+                request.getStyle()
+        );
+
+        // 保存合成记录（失败不影响合成结果）
+        try {
+            ttsRecordService.saveAiTts(request.getText(), request.getVoice(), audio);
+        } catch (Exception e) {
+            log.warn("保存 AI 语音合成记录失败: {}", e.getMessage(), e);
+        }
+
+        String fileName = URLEncoder.encode("AI语音合成", StandardCharsets.UTF_8);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, "audio/wav")
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=" + fileName + ".wav")
+                .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(audio.length))
+                .body(audio);
+    }
+
+    /**
      * 按记录 ID 获取音频数据（公共墙，游客可试听/下载）。
+     * <p>按记录的 audio_format 设 Content-Type（Edge=mp3，AI=wav）。
      */
     @PublicAccess
     @GetMapping("/record/{id}/audio")
     public ResponseEntity<byte[]> recordAudio(@PathVariable Long id) {
-        byte[] audio = ttsRecordService.getAudio(id);
+        TtsRecord record = ttsRecordService.getAudio(id);
+        String format = record.getAudioFormat() != null ? record.getAudioFormat() : "mp3";
+        boolean isWav = "wav".equals(format);
+        String contentType = isWav ? "audio/wav" : "audio/mpeg";
+        String ext = isWav ? "wav" : "mp3";
+        byte[] audio = record.getAudioData();
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_TYPE, "audio/mpeg")
+                .header(HttpHeaders.CONTENT_TYPE, contentType)
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "inline; filename=tts_" + id + ".mp3")
+                        "inline; filename=tts_" + id + "." + ext)
                 .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, must-revalidate")
                 .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(audio.length))
                 .body(audio);

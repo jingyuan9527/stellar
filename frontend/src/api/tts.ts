@@ -21,6 +21,25 @@ export function synthesizeEdgeTts(data: TtsSynthesizeParams): Promise<Blob> {
     .then((res) => res as unknown as Blob)
 }
 
+export interface AiTtsParams {
+  modelId: number
+  text: string
+  voice: string
+  style?: string
+}
+
+/**
+ * 调用 AI TTS（MiMo-V2.5-TTS）合成语音，返回 WAV Blob。需登录。
+ */
+export function synthesizeAiTts(data: AiTtsParams): Promise<Blob> {
+  return service
+    .post('/tts/ai/synthesize', data, {
+      responseType: 'blob',
+      timeout: 120000,
+    })
+    .then((res) => res as unknown as Blob)
+}
+
 /**
  * 分页查询合成历史。
  */

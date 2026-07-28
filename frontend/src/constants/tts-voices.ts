@@ -63,10 +63,52 @@ export const ttsVoiceMap: Record<string, string> = Object.fromEntries(
   ttsVoiceGroups.flatMap((g) => g.children).map((v) => [v.value, v.label]),
 )
 
-/** 根据 voice value 获取中文标签 */
+/** 根据 voice value 获取中文标签（先查 Edge 音色，再查 MiMo 音色） */
 export function getVoiceLabel(value: string): string {
-  return ttsVoiceMap[value] || value
+  return ttsVoiceMap[value] || mimoVoiceMap[value] || value
 }
 
 /** 用于 NSelect 的 options（类型兼容） */
 export const ttsVoiceOptions = ttsVoiceGroups as unknown as SelectGroupOption[]
+
+/** MiMo-V2.5-TTS 预置音色分组（用于 AI 语音合成页 NSelect） */
+export const mimoVoiceGroups: TtsVoiceGroup[] = [
+  {
+    type: 'group',
+    label: '中文音色',
+    key: 'group-mimo-zh',
+    children: [
+      { label: '冰糖（女声）', value: '冰糖' },
+      { label: '茉莉（女声）', value: '茉莉' },
+      { label: '苏打（男声）', value: '苏打' },
+      { label: '白桦（男声）', value: '白桦' },
+    ],
+  },
+  {
+    type: 'group',
+    label: '英文音色',
+    key: 'group-mimo-en',
+    children: [
+      { label: 'Mia（女声）', value: 'Mia' },
+      { label: 'Chloe（女声）', value: 'Chloe' },
+      { label: 'Milo（男声）', value: 'Milo' },
+      { label: 'Dean（男声）', value: 'Dean' },
+    ],
+  },
+  {
+    type: 'group',
+    label: '默认',
+    key: 'group-mimo-default',
+    children: [
+      { label: 'MiMo 默认（随集群）', value: 'mimo_default' },
+    ],
+  },
+]
+
+/** MiMo 音色 value → 标签 映射 */
+export const mimoVoiceMap: Record<string, string> = Object.fromEntries(
+  mimoVoiceGroups.flatMap((g) => g.children).map((v) => [v.value, v.label]),
+)
+
+/** 用于 NSelect 的 MiMo 音色 options */
+export const mimoVoiceOptions = mimoVoiceGroups as unknown as SelectGroupOption[]

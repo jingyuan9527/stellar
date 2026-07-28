@@ -42,6 +42,9 @@ public class TtsRecord {
     /** 音频文件大小（字节） */
     private Long fileSize;
 
+    /** 音频格式: mp3(Edge TTS) / wav(AI TTS) */
+    private String audioFormat;
+
     /** 操作人用户名 */
     private String operator;
 
