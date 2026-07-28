@@ -10,6 +10,7 @@ import {
   pageKnowledgeChunks, addKnowledgeDocument, uploadKnowledgeDocument,
   deleteKnowledgeChunk, rebuildKnowledgeBase,
 } from '@/api/chat'
+import { formatTime } from '@/utils/format'
 import { getAiModelsByType } from '@/api/ai'
 import type { AiKnowledgeBase, AiKnowledgeChunk, AiModel } from '@/types/api'
 
@@ -28,10 +29,7 @@ const embeddingOptions = () => embeddingModels.value.map((m) => ({
   label: m.providerName ? `${m.model} (${m.providerName})` : m.model,
 }))
 
-function formatTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 const kbColumns: DataTableColumns<AiKnowledgeBase> = [
   { title: 'ID', key: 'id', width: 70 },

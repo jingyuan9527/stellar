@@ -7,6 +7,7 @@ import {
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import { getAiTemplatePage, createAiTemplate, updateAiTemplate, deleteAiTemplate, resetAiTemplate } from '@/api/ai'
 import type { AiTemplate, AiTemplateQuery } from '@/types/api'
+import { formatTime } from '@/utils/format'
 
 const message = useMessage()
 
@@ -33,10 +34,7 @@ const platformOptions: SelectOption[] = Object.entries(platformLabels).map(([v, 
   label: l,
 }))
 
-function formatTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 const columns: DataTableColumns<AiTemplate> = [
   { title: 'ID', key: 'id', width: 70 },

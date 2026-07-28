@@ -10,6 +10,7 @@ import { createAiImage, deleteAiImage, getAiImagePage, getAiModelsByType } from 
 import { useAuthStore } from '@/store/auth'
 import { useAiNotifyStore, type AiNotifyMessage } from '@/store/aiNotify'
 import type { AiModel, AiImageTask } from '@/types/api'
+import { formatTime } from '@/utils/format'
 
 const message = useMessage()
 const authStore = useAuthStore()
@@ -61,10 +62,7 @@ const ratioOptions = [
   { value: '21:9', label: '21:9 超宽' },
 ]
 
-function formatTime(s?: string | null): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 const columns: DataTableColumns<AiImageTask> = [
   { title: '请求时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },

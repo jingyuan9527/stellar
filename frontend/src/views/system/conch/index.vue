@@ -10,6 +10,7 @@ import {
   deleteConchAnswer, toggleConchAnswerEnabled, getConchRecordPage,
   getConchAnswerAudio,
 } from '@/api/conch'
+import { formatTime } from '@/utils/format'
 import { uploadFile } from '@/api/file'
 import { getSetting, setSetting } from '@/api/ai'
 import type { ConchAnswer, ConchAnswerQuery, ConchRecord } from '@/types/api'
@@ -52,10 +53,7 @@ const enabledOptions: SelectOption[] = [
   { value: 0, label: '禁用' },
 ]
 
-function formatTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 const currentAudioId = ref<number | null>(null)
 const currentAudioUrl = ref<string | null>(null)

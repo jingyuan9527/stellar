@@ -9,6 +9,7 @@ import AiGeneratorLayout from '../components/AiGeneratorLayout.vue'
 import { createAiVideo, deleteAiVideo, getAiVideoPage, getAiModelsByType } from '@/api/ai'
 import { useAiNotifyStore, type AiNotifyMessage } from '@/store/aiNotify'
 import type { AiModel, AiVideoHistory } from '@/types/api'
+import { formatTime } from '@/utils/format'
 
 const message = useMessage()
 const aiNotifyStore = useAiNotifyStore()
@@ -67,10 +68,7 @@ const durationMap: Record<string, { numFrames: number; frameRate: number }> = {
   '10': { numFrames: 241, frameRate: 24 },
 }
 
-function formatTime(s?: string | null): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 const columns: DataTableColumns<AiVideoHistory> = [
   { title: '请求时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },

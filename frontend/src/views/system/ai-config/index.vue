@@ -28,10 +28,7 @@ function typeLabel(t: string): string {
   return modelTypeOptions.find((o) => o.value === t)?.label ?? t
 }
 
-function formatTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 // ===== 供应商 =====
 const providers = ref<AiProvider[]>([])

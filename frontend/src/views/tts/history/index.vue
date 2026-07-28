@@ -10,6 +10,7 @@ import { getTtsRecordPage, getTtsRecordAudio, deleteTtsRecord } from '@/api/tts'
 import type { TtsRecord, TtsRecordQuery } from '@/types/api'
 import { iconMap } from '@/utils/icons'
 import { getVoiceLabel, ttsVoiceOptions } from '@/constants/tts-voices'
+import { formatTime } from '@/utils/format'
 import { useAuthStore } from '@/store/auth'
 
 const message = useMessage()
@@ -29,10 +30,7 @@ const loading = ref(false)
 const tableData = ref<TtsRecord[]>([])
 const total = ref(0)
 
-function formatTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 function formatFileSize(bytes?: number): string {
   if (!bytes) return '-'

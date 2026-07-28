@@ -10,6 +10,7 @@ import {
   createMemory, pageAllChatSessions,
 } from '@/api/chat'
 import { getUserList } from '@/api/user'
+import { formatTime } from '@/utils/format'
 import type { AiMemory, AiChatSessionAdmin, SysUser } from '@/types/api'
 
 const message = useMessage()
@@ -27,10 +28,7 @@ const pagination = reactive({
   onUpdatePageSize: (size: number) => { pagination.pageSize = size; pagination.page = 1; loadData() },
 })
 
-function formatTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 const columns: DataTableColumns<AiMemory> = [
   { title: 'ID', key: 'id', width: 70 },

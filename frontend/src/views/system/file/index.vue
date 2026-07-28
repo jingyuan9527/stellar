@@ -9,6 +9,7 @@ import type { DataTableColumns, SelectOption } from 'naive-ui'
 import { getFilePage, deleteFile, deleteFileBatch } from '@/api/file'
 import type { SysFile, SysFileQuery } from '@/types/api'
 import { iconMap } from '@/utils/icons'
+import { formatTime } from '@/utils/format'
 
 const message = useMessage()
 
@@ -90,7 +91,7 @@ const columns: DataTableColumns<SysFile> = [
     title: '上传者', key: 'uploaderName', width: 120,
     render: (row) => row.uploaderName || h('span', { style: 'color:#999' }, '-'),
   },
-  { title: '上传时间', key: 'createTime', width: 170 },
+  { title: '上传时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },
   {
     title: '操作', key: 'actions', width: 130, fixed: 'right',
     render: (row) => h(NSpace, { size: 0 },
@@ -270,7 +271,7 @@ onMounted(loadData)
             <NDescriptionsItem label="MIME">{{ detail.contentType || '-' }}</NDescriptionsItem>
             <NDescriptionsItem label="大小">{{ formatSize(detail.size) }}</NDescriptionsItem>
             <NDescriptionsItem label="上传者">{{ detail.uploaderName || '-' }}</NDescriptionsItem>
-            <NDescriptionsItem label="上传时间">{{ detail.createTime }}</NDescriptionsItem>
+            <NDescriptionsItem label="上传时间">{{ formatTime(detail.createTime) }}</NDescriptionsItem>
           </NDescriptions>
         </template>
       </NDrawerContent>

@@ -10,16 +10,14 @@ import {
   deletePersona, resetPersona,
 } from '@/api/chat'
 import type { AiPersona } from '@/types/api'
+import { formatTime } from '@/utils/format'
 
 const message = useMessage()
 
 const loading = ref(false)
 const tableData = ref<AiPersona[]>([])
 
-function formatTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 const columns: DataTableColumns<AiPersona> = [
   { title: 'ID', key: 'id', width: 70 },

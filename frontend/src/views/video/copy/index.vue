@@ -10,6 +10,7 @@ import CopyResultDetail from '../components/CopyResultDetail.vue'
 import { useCoverStore } from '../store/cover'
 import { useApiConfigStore } from '../store/apiConfig'
 import { useUIStore } from '../store/ui'
+import { formatTime } from '@/utils/format'
 import ApiSettingsModal from '../components/ApiSettingsModal.vue'
 import { buildPrompt, parseCopyResult } from '../lib/llm'
 import {
@@ -87,10 +88,7 @@ const pagination = reactive({
   },
 })
 
-function formatTime(s?: string | null): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 const columns: DataTableColumns<AiChatRecord> = [
   { title: '请求时间', key: 'requestTime', width: 170, render: (row) => formatTime(row.requestTime) },

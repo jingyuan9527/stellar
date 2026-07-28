@@ -9,6 +9,7 @@ import type { DataTableColumns, SelectOption } from 'naive-ui'
 import { getLogPage, getLogDetail, exportLogs } from '@/api/log'
 import type { SysLog, SysLogQuery } from '@/types/api'
 import { iconMap } from '@/utils/icons'
+import { formatTime } from '@/utils/format'
 
 const message = useMessage()
 
@@ -44,10 +45,7 @@ const opTypeColor: Record<string, string> = {
   DELETE: 'error', QUERY: 'default', EXPORT: 'info', OTHER: 'default',
 }
 
-function formatTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 const columns: DataTableColumns<SysLog> = [
   { title: 'ID', key: 'id', width: 70 },
@@ -67,7 +65,7 @@ const columns: DataTableColumns<SysLog> = [
   },
   { title: 'IP', key: 'ip', width: 130 },
   { title: '耗时(ms)', key: 'duration', width: 90 },
-  { title: '操作时间', key: 'createTime', width: 170 },
+  { title: '操作时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },
   {
     title: '操作', key: 'actions', width: 80, fixed: 'right',
     render: (row) => h(NButton, { size: 'small', text: true, onClick: () => viewDetail(row.id) },
@@ -241,7 +239,7 @@ onMounted(loadData)
           </NDescriptionsItem>
           <NDescriptionsItem label="IP">{{ detail.ip }}</NDescriptionsItem>
           <NDescriptionsItem label="耗时">{{ detail.duration }} ms</NDescriptionsItem>
-          <NDescriptionsItem label="操作时间">{{ detail.createTime }}</NDescriptionsItem>
+          <NDescriptionsItem label="操作时间">{{ formatTime(detail.createTime) }}</NDescriptionsItem>
           <NDescriptionsItem label="请求参数">
             <pre class="log-pre">{{ detail.params }}</pre>
           </NDescriptionsItem>

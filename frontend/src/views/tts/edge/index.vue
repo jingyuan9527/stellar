@@ -10,6 +10,7 @@ import { iconMap } from '@/utils/icons'
 import { useAuthStore } from '@/store/auth'
 import { synthesizeEdgeTts, getTtsRecordPage, getTtsRecordAudio } from '@/api/tts'
 import type { TtsRecord } from '@/types/api'
+import { formatTime } from '@/utils/format'
 import { ttsVoiceOptions, getVoiceLabel } from '@/constants/tts-voices'
 
 const router = useRouter()
@@ -36,10 +37,7 @@ const canSynthesize = computed(
 const recentRecords = ref<TtsRecord[]>([])
 const historyLoadingId = ref<number | null>(null)
 
-function formatTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(5, 16)
-}
+
 
 function formatFileSize(bytes?: number): string {
   if (!bytes) return '-'

@@ -7,6 +7,7 @@ import {
 import { useUIStore } from '../store/ui'
 import { useCoverDraftsStore } from '../store/coverDrafts'
 import { useCoverStore } from '../store/cover'
+import { formatTime } from '@/utils/format'
 
 const uiStore = useUIStore()
 const draftsStore = useCoverDraftsStore()
@@ -44,9 +45,7 @@ function handleRename(id: string, oldName: string) {
   }
 }
 
-function formatTime(ts: number) {
-  return new Date(ts).toLocaleString()
-}
+
 </script>
 
 <template>

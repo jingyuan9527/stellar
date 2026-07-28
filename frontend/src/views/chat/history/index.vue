@@ -7,6 +7,7 @@ import {
 import type { DataTableColumns } from 'naive-ui'
 import { pageAllChatSessions, getChatMessagesAdmin, deleteChatSessionAdmin } from '@/api/chat'
 import type { AiChatSessionAdmin, AiChatMessage } from '@/types/api'
+import { formatTime } from '@/utils/format'
 
 const message = useMessage()
 
@@ -23,10 +24,7 @@ const pagination = reactive({
   onUpdatePageSize: (size: number) => { pagination.pageSize = size; pagination.page = 1; loadData() },
 })
 
-function formatTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 const columns: DataTableColumns<AiChatSessionAdmin> = [
   { title: 'ID', key: 'id', width: 70 },

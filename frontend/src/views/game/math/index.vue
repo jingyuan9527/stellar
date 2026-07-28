@@ -5,6 +5,7 @@ import { useAuthStore } from '@/store/auth'
 import { submitGameScore, getGameTopScores } from '@/api/game'
 import type { GameScore } from '@/types/api'
 import { iconMap } from '@/utils/icons'
+import { formatTime } from '@/utils/format'
 
 const message = useMessage()
 const authStore = useAuthStore()
@@ -342,14 +343,11 @@ const waitHint = computed(() => {
   return ''
 })
 
-function formatTime(ms: number): string {
+function formatDuration(ms: number): string {
   return Math.round(ms / 1000).toString()
 }
 
-function formatCreateTime(s?: string): string {
-  if (!s) return ''
-  return s.replace('T', ' ').slice(0, 19)
-}
+
 
 onMounted(() => {
   // 登录用户默认填昵称
@@ -406,7 +404,7 @@ onBeforeUnmount(() => {
             <span class="rank-score">{{ item.score }} 分</span>
             <span class="rank-time">{{ item.totalTime }}s</span>
             <span class="rank-acc">{{ item.accuracy.toFixed(1) }}%</span>
-            <span class="rank-date">{{ formatCreateTime(item.createTime) }}</span>
+            <span class="rank-date">{{ formatTime(item.createTime) }}</span>
           </div>
         </div>
       </NCard>
@@ -502,7 +500,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="stat-item">
             <span class="stat-label">用时</span>
-            <span class="stat-value time">{{ result ? formatTime(result.totalTime) : 0 }} 秒</span>
+            <span class="stat-value time">{{ result ? formatDuration(result.totalTime) : 0 }} 秒</span>
           </div>
         </div>
 
@@ -554,7 +552,7 @@ onBeforeUnmount(() => {
             <span class="rank-score">{{ item.score }} 分</span>
             <span class="rank-time">{{ item.totalTime }}s</span>
             <span class="rank-acc">{{ item.accuracy.toFixed(1) }}%</span>
-            <span class="rank-date">{{ formatCreateTime(item.createTime) }}</span>
+            <span class="rank-date">{{ formatTime(item.createTime) }}</span>
           </div>
         </div>
       </NCard>

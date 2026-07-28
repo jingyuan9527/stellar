@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { NCard, NDescriptions, NDescriptionsItem, NAvatar, NTag } from 'naive-ui'
 import { useAuthStore } from '@/store/auth'
 import { useThemeStore } from '@/store/theme'
+import { formatTime } from '@/utils/format'
 
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
@@ -33,8 +34,8 @@ const user = computed(() => authStore.userInfo)
             {{ user?.status === 1 ? '启用' : '禁用' }}
           </NTag>
         </NDescriptionsItem>
-        <NDescriptionsItem label="创建时间">{{ user?.createTime }}</NDescriptionsItem>
-        <NDescriptionsItem label="更新时间">{{ user?.updateTime }}</NDescriptionsItem>
+        <NDescriptionsItem label="创建时间">{{ formatTime(user?.createTime) }}</NDescriptionsItem>
+        <NDescriptionsItem label="更新时间">{{ formatTime(user?.updateTime) }}</NDescriptionsItem>
       </NDescriptions>
     </NCard>
   </div>
