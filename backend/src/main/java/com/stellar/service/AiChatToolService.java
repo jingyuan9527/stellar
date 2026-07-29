@@ -2,7 +2,6 @@ package com.stellar.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.stellar.entity.SysFile;
 import com.stellar.mapper.SysFileMapper;
 import com.stellar.vo.AiResolvedConfig;
@@ -215,23 +214,18 @@ public class AiChatToolService {
         }
     }
 
+    /** 工具结果回传 LLM：用自然语言描述，避免 LLM 直接复制 JSON 作为回复 */
     private String buildSuccessContent(String type, Long fileId, String voice) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("status", "success");
-        node.put("type", type);
-        node.put("fileId", fileId);
-        node.put("url", "/file/" + fileId);
-        if (voice != null) {
-            node.put("voice", voice);
+        if ("image".equals(type)) {
+            return "图片已成功生成，用户可在消息中直接查看。请用自然语言简要告知用户结果。";
         }
-        return node.toString();
+        return "语音已成功合成，用户可在消息中直接收听。请用自然语言简要告知用户结果。";
     }
 
     private String buildErrorContent(String toolName, String error) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("status", "failed");
-        node.put("tool", toolName);
-        node.put("error", error);
-        return node.toString();
+        if ("generate_image".equals(toolName)) {
+            return "图片生成失败：" + error + "。请用自然语言向用户致歉并说明原因。";
+        }
+        return "语音合成失败：" + error + "。请用自然语言向用户致歉并说明原因。";
     }
 }
