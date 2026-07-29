@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.stellar.common.BusinessException;
 import com.stellar.dto.AiImageHistoryQueryDTO;
 import com.stellar.entity.SysAiImageTask;
+import com.stellar.entity.SysFile;
 import com.stellar.mapper.SysAiImageTaskMapper;
 import com.stellar.mapper.SysFileMapper;
 import com.stellar.vo.AiImageTaskVO;
@@ -34,6 +35,7 @@ public class AiImageService {
     private final SysAiImageTaskMapper taskMapper;
     private final SysFileMapper fileMapper;
     private final AiImageTaskWorker worker;
+    private final SysAiUsageService sysAiUsageService;
 
     /**
      * 创建图片生成任务：校验模型 → 落库（generating）→ 异步生成 → 返回 taskId。
@@ -60,6 +62,71 @@ public class AiImageService {
         log.info("[AI图片] 异步任务已创建 taskId={} model={} providerId={}", task.getId(), cfg.model(), cfg.providerId());
         worker.doGenerateAsync(task.getId());
         return task.getId();
+    }
+
+    /**
+     * 同步生成图片（聊天工具调用路径）：调供应商生成 → 存 sys_file → 写 sys_ai_image_task(completed) → 返回 fileId。
+     * <p>与 {@link #createTask} 异步任务模式不同，本方法同步阻塞等待生成完成
+     * （在 SSE 流式回调线程跑，不阻塞 servlet 线程）。
+     * <p>使用 IMAGE 默认模型 + size=1K + ratio=1:1 固定参数（prompt 由 LLM 决定）。
+     * <p>不发 SSE 通知（聊天页有自己的进度提示，避免图片页重复弹抽屉）。
+     *
+     * @param prompt 图片提示词
+     * @return sys_file.id（用于挂 ai_chat_message.attachment_file_id）
+     * @throws BusinessException 生成失败（task 已标 failed，异常向上抛由 ToolService 捕获）
+     */
+    public Long generateImageSync(String prompt) {
+        AiResolvedConfig cfg = aiModelService.resolveDefaultConfig("IMAGE");
+        String subjectType = getSubjectType();
+        String subjectId = getSubjectId();
+
+        SysAiImageTask task = new SysAiImageTask();
+        task.setModelId(cfg.modelId());
+        task.setProviderId(cfg.providerId());
+        task.setSubjectType(subjectType);
+        task.setSubjectId(subjectId);
+        task.setPrompt(prompt);
+        task.setSize("1K");
+        task.setRatio("1:1");
+        task.setStatus("generating");
+        task.setCreateTime(LocalDateTime.now());
+        task.setUpdateTime(LocalDateTime.now());
+        taskMapper.insert(task);
+
+        try {
+            log.info("[AI图片] 聊天工具同步生成开始 taskId={} model={}", task.getId(), cfg.model());
+            byte[] imageBytes = worker.generateImageBytes(cfg, prompt, "1K", "1:1");
+
+            SysFile file = new SysFile();
+            String name = prompt.length() > 20 ? prompt.substring(0, 20) : prompt;
+            file.setOriginalName(name + ".png");
+            file.setExt("png");
+            file.setContentType("image/png");
+            file.setSize((long) imageBytes.length);
+            file.setData(imageBytes);
+            file.setCreateTime(LocalDateTime.now());
+            fileMapper.insert(file);
+
+            task.setStatus("completed");
+            task.setFileId(file.getId());
+            task.setUpdateTime(LocalDateTime.now());
+            taskMapper.updateById(task);
+
+            int promptTokens = prompt.length();
+            sysAiUsageService.record(subjectType, subjectId,
+                    cfg.providerId(), cfg.model(), cfg.modelType(),
+                    promptTokens, 0, promptTokens, "estimate");
+
+            log.info("[AI图片] 聊天工具同步生成完成 taskId={} fileId={} size={}", task.getId(), file.getId(), imageBytes.length);
+            return file.getId();
+        } catch (Exception e) {
+            log.error("[AI图片] 聊天工具同步生成失败 taskId={}: {}", task.getId(), e.getMessage(), e);
+            task.setStatus("failed");
+            task.setErrorMsg(e instanceof BusinessException ? e.getMessage() : "图片生成失败: " + e.getMessage());
+            task.setUpdateTime(LocalDateTime.now());
+            taskMapper.updateById(task);
+            throw e instanceof BusinessException be ? be : new BusinessException("图片生成失败: " + e.getMessage());
+        }
     }
 
     /**

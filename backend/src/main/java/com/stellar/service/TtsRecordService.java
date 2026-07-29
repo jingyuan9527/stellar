@@ -45,6 +45,14 @@ public class TtsRecordService {
         save(buildRecord(text, voice, 1.0, 1.0, 1.0, audio, "wav"));
     }
 
+    /**
+     * 保存聊天工具调用的 TTS 合成记录（聊天 function calling 触发的语音合成）。
+     * <p>audioFormat 由调用方按实际引擎传：AI=wav，Edge=mp3。operator 取当前登录用户名。
+     */
+    public void saveChatTts(String text, String voice, byte[] audio, String audioFormat) {
+        save(buildRecord(text, voice, 1.0, 1.0, 1.0, audio, audioFormat));
+    }
+
     private TtsRecord buildRecord(String text, String voice,
                                    Double rate, Double pitch, Double volume,
                                    byte[] audio, String audioFormat) {

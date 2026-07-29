@@ -478,6 +478,12 @@ SELECT 'conch_ai_enabled',
        '神奇海螺AI匹配开关: 0关闭(纯随机) 1开启(AI语义匹配)', NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM sys_setting WHERE setting_key = 'conch_ai_enabled');
 
+-- chat_tts_engine → sys_setting（聊天 TTS 引擎开关，用户未选音色时兜底；ai=优先AI失败降级Edge，edge=直接Edge）
+INSERT INTO sys_setting (setting_key, setting_value, description, create_time, update_time)
+SELECT 'chat_tts_engine', 'ai',
+       '聊天TTS引擎: ai(优先AI失败降级Edge) / edge(直接Edge); 用户在聊天页选了具体音色则覆盖此开关', NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM sys_setting WHERE setting_key = 'chat_tts_engine');
+
 -- sys_ai_usage 扩展：关联供应商与模型类型，便于按类型/供应商统计
 ALTER TABLE sys_ai_usage ADD COLUMN IF NOT EXISTS provider_id BIGINT;
 ALTER TABLE sys_ai_usage ADD COLUMN IF NOT EXISTS model_type VARCHAR(32);
@@ -662,6 +668,12 @@ COMMENT ON COLUMN ai_chat_message.content IS '消息内容';
 COMMENT ON COLUMN ai_chat_message.tokens IS '该条消息token数(可空)';
 COMMENT ON COLUMN ai_chat_message.create_time IS '创建时间';
 CREATE INDEX IF NOT EXISTS idx_ai_chat_message_session ON ai_chat_message (session_id, create_time ASC);
+
+-- ai_chat_message 扩展：工具调用产物（图片/音频）附件，聊天 function calling 生成后挂在 assistant 消息上
+ALTER TABLE ai_chat_message ADD COLUMN IF NOT EXISTS attachment_type VARCHAR(16);
+ALTER TABLE ai_chat_message ADD COLUMN IF NOT EXISTS attachment_file_id BIGINT;
+COMMENT ON COLUMN ai_chat_message.attachment_type IS '附件类型: image/audio (NULL=纯文本消息)';
+COMMENT ON COLUMN ai_chat_message.attachment_file_id IS '附件文件ID(引用 sys_file.id)';
 
 -- AI 长期记忆表（定期整理会话为事实陈述，按账号，对话时注入 system prompt）
 CREATE TABLE IF NOT EXISTS ai_memory (

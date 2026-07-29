@@ -417,6 +417,12 @@ export interface AiChatMessage {
   content: string
   tokens: number | null
   createTime: string
+  /** 附件类型: image/audio (聊天 function calling 工具产物)，无附件为 null */
+  attachmentType: 'image' | 'audio' | null
+  /** 附件文件ID (引用 sys_file.id) */
+  attachmentFileId: number | null
+  /** 附件访问 URL (/file/{id})，后端实体 getter 计算输出 */
+  attachmentUrl: string | null
 }
 
 export interface AiMemory {

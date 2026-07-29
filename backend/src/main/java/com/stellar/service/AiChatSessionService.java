@@ -12,6 +12,7 @@ import com.stellar.mapper.AiChatMessageMapper;
 import com.stellar.mapper.AiChatSessionMapper;
 import com.stellar.mapper.AiPersonaMapper;
 import com.stellar.mapper.SysUserMapper;
+import com.stellar.vo.AiChatResult;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,6 +47,7 @@ public class AiChatSessionService {
     private final AiKnowledgeService knowledgeService;
     private final AiMemoryService memoryService;
     private final AiChatService aiChatService;
+    private final AiChatToolService aiChatToolService;
 
     private static final int HISTORY_LIMIT = 20;
     private static final int RAG_TOP_K = 4;
@@ -156,8 +158,10 @@ public class AiChatSessionService {
 
     /**
      * 多轮流式聊天。存 user 消息 → 组装 messages（人设+RAG+记忆+历史）→ 流式 → 完成存 assistant。
+     * <p>登录用户带 tools（function calling：画图/TTS），assistant 消息可能带附件；
+     * 游客纯文本无 tools。
      */
-    public SseEmitter streamChat(Long sessionId, String userMessage, Long modelId) {
+    public SseEmitter streamChat(Long sessionId, String userMessage, Long modelId, String voice) {
         AiChatSession session = checkOwnership(sessionId);
         if (!StringUtils.hasText(userMessage)) {
             throw new BusinessException("消息不能为空");
@@ -175,7 +179,27 @@ public class AiChatSessionService {
         // 2. 组装 messages
         List<Map<String, String>> messages = buildMessages(session, userMessage);
 
-        // 3. 流式（完成回调落 assistant 消息 + 更新会话）
+        // 3. 流式
+        if (StpUtil.isLogin()) {
+            // 登录：带 tools（function calling），落 assistant 消息含附件
+            List<Map<String, Object>> messagesObj = messages.stream()
+                    .map(m -> new HashMap<String, Object>(m))
+                    .collect(Collectors.toList());
+            return aiChatService.streamMultiChatWithTools(messagesObj, modelId,
+                    aiChatToolService.getToolDefinitions(), voice, ar -> {
+                        AiChatMessage aMsg = new AiChatMessage();
+                        aMsg.setSessionId(sessionId);
+                        aMsg.setRole("assistant");
+                        aMsg.setContent(ar.content() == null ? "" : ar.content());
+                        aMsg.setTokens(ar.content() == null ? 0 : ar.content().length());
+                        aMsg.setAttachmentType(ar.attachmentType());
+                        aMsg.setAttachmentFileId(ar.attachmentFileId());
+                        aMsg.setCreateTime(LocalDateTime.now());
+                        messageMapper.insert(aMsg);
+                        updateSessionTitle(session, userMessage);
+                    });
+        }
+        // 游客：纯文本，无 tools
         return aiChatService.streamMultiChat(messages, modelId, fullText -> {
             AiChatMessage aMsg = new AiChatMessage();
             aMsg.setSessionId(sessionId);
@@ -184,15 +208,18 @@ public class AiChatSessionService {
             aMsg.setTokens(fullText == null ? 0 : fullText.length());
             aMsg.setCreateTime(LocalDateTime.now());
             messageMapper.insert(aMsg);
-
-            // 首轮用用户消息截断生成标题
-            if ("新对话".equals(session.getTitle())) {
-                String t = userMessage.length() > 20 ? userMessage.substring(0, 20) + "…" : userMessage;
-                session.setTitle(t);
-            }
-            session.setUpdateTime(LocalDateTime.now());
-            sessionMapper.updateById(session);
+            updateSessionTitle(session, userMessage);
         });
+    }
+
+    /** 首轮用用户消息截断生成标题；每轮更新会话时间 */
+    private void updateSessionTitle(AiChatSession session, String userMessage) {
+        if ("新对话".equals(session.getTitle())) {
+            String t = userMessage.length() > 20 ? userMessage.substring(0, 20) + "…" : userMessage;
+            session.setTitle(t);
+        }
+        session.setUpdateTime(LocalDateTime.now());
+        sessionMapper.updateById(session);
     }
 
     // ===== 内部 =====

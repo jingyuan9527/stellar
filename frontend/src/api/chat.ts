@@ -85,11 +85,14 @@ export async function streamChat(
   onDelta: (full: string) => void,
   signal: AbortSignal,
   modelId?: number | null,
+  voice?: string | null,
+  onStatus?: (status: string) => void,
 ): Promise<string> {
   const authStore = useAuthStore()
   const base = import.meta.env.VITE_API_BASE_URL
   const body: Record<string, string | number> = { sessionId, userMessage }
   if (modelId) body.modelId = modelId
+  if (voice) body.voice = voice
   const res = await fetch(`${base}/ai/chat/session/stream`, {
     method: 'POST',
     headers: {
@@ -114,7 +117,7 @@ export async function streamChat(
       const trimmed = line.trim()
       if (!trimmed.startsWith('data:')) continue
       const data = trimmed.slice(5).trim()
-      let json: { content?: string; done?: boolean; error?: string }
+      let json: { content?: string; done?: boolean; error?: string; status?: string }
       try {
         json = JSON.parse(data)
       } catch {
@@ -122,6 +125,10 @@ export async function streamChat(
       }
       if (json.done) return full
       if (json.error) throw new Error(json.error)
+      if (json.status) {
+        onStatus?.(json.status)
+        continue
+      }
       if (json.content) {
         full += json.content
         onDelta(full)

@@ -129,12 +129,14 @@ public class AiChatSessionController {
 
     /**
      * 多轮流式聊天（对游客开放，按 IP 单日限流 20 次）。
+     * <p>登录用户带 tools（画图/TTS function calling）；游客纯文本。
+     * voice 为 TTS 音色（仅登录用户工具调用生效）。
      */
     @PublicAccess
     @RateLimit(daily = 20)
     @PostMapping("/session/stream")
     @Log(title = "AI聊天", type = OperationType.OTHER)
     public SseEmitter streamChat(@Valid @RequestBody AiChatStreamDTO dto) {
-        return sessionService.streamChat(dto.getSessionId(), dto.getUserMessage(), dto.getModelId());
+        return sessionService.streamChat(dto.getSessionId(), dto.getUserMessage(), dto.getModelId(), dto.getVoice());
     }
 }

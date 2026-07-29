@@ -122,7 +122,21 @@ onMounted(loadData)
           <template v-for="m in drawerMessages" :key="m.id">
             <div v-if="m.role !== 'system'" class="msg-row" :class="m.role">
               <div class="msg-role">{{ m.role === 'user' ? '用户' : 'AI' }}</div>
-              <div class="bubble">{{ m.content }}</div>
+              <div class="bubble">
+                <img
+                  v-if="m.attachmentType === 'image' && m.attachmentUrl"
+                  :src="m.attachmentUrl"
+                  class="msg-image"
+                  loading="lazy"
+                />
+                <audio
+                  v-else-if="m.attachmentType === 'audio' && m.attachmentUrl"
+                  :src="m.attachmentUrl"
+                  controls
+                  class="msg-audio"
+                />
+                <span v-if="m.content" class="msg-text">{{ m.content }}</span>
+              </div>
             </div>
           </template>
           <NEmpty v-if="drawerMessages.length === 0" description="无消息" />
@@ -168,6 +182,18 @@ onMounted(loadData)
   word-break: break-word;
   line-height: 1.6;
   font-size: 13px;
+}
+.msg-image {
+  max-width: 100%;
+  border-radius: 8px;
+  display: block;
+  margin-bottom: 8px;
+}
+.msg-audio {
+  width: 100%;
+  max-width: 260px;
+  display: block;
+  margin-bottom: 8px;
 }
 .msg-row.user .bubble {
   background: rgba(100, 150, 255, 0.15);

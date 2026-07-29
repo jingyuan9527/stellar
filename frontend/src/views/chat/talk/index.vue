@@ -9,6 +9,7 @@ import {
   clearMyChatSessions, streamChat, listEnabledPersonas, listKnowledgeBases,
 } from '@/api/chat'
 import { getAiModelsByType as _getModels } from '@/api/ai'
+import { chatVoiceOptions } from '@/constants/tts-voices'
 import type { AiChatSession, AiChatMessage, AiPersona, AiKnowledgeBase, AiModel } from '@/types/api'
 
 const authStore = useAuthStore()
@@ -44,6 +45,10 @@ const streaming = ref(false)
 const abortRef = ref<AbortController | null>(null)
 // 流式 assistant 消息（本地乐观渲染）
 const streamingContent = ref('')
+// 流式进度状态（generating_image/generating_audio），工具执行期间显示进度提示
+const streamingStatus = ref('')
+// TTS 音色（仅登录用户工具调用生效；用户选了具体音色则按音色所属引擎走覆盖系统开关）
+const ttsVoice = ref<string | null>(null)
 
 const messageListRef = ref<HTMLElement | null>(null)
 
@@ -175,8 +180,12 @@ async function send() {
 
   // 乐观：本地先追加 user + 空 assistant
   const now = new Date().toISOString()
-  messages.value.push({ id: 0, sessionId: currentSessionId.value, role: 'user', content: text, tokens: null, createTime: now })
+  messages.value.push({
+    id: 0, sessionId: currentSessionId.value, role: 'user', content: text,
+    tokens: null, createTime: now, attachmentType: null, attachmentFileId: null, attachmentUrl: null,
+  })
   streamingContent.value = ''
+  streamingStatus.value = ''
   input.value = ''
   streaming.value = true
   const ac = new AbortController()
@@ -189,6 +198,8 @@ async function send() {
       (delta) => { streamingContent.value = delta },
       ac.signal,
       authStore.isLogin ? modelId.value : null,
+      authStore.isLogin ? ttsVoice.value : null,
+      (status) => { streamingStatus.value = status },
     )
     // 流式完成：先把 assistant 乐观加入消息列表，再关 streaming 行——
     // 让回答从 streaming 行无缝衔接到消息流，避免“消失再重现”的闪烁
@@ -199,9 +210,13 @@ async function send() {
       content: streamingContent.value,
       tokens: null,
       createTime: new Date().toISOString(),
+      attachmentType: null,
+      attachmentFileId: null,
+      attachmentUrl: null,
     })
     streaming.value = false
     streamingContent.value = ''
+    streamingStatus.value = ''
     if (currentSessionId.value) {
       await selectSession(currentSessionId.value)
     }
@@ -209,6 +224,7 @@ async function send() {
   } catch (e) {
     streaming.value = false
     streamingContent.value = ''
+    streamingStatus.value = ''
     if ((e as Error).name !== 'AbortError') {
       message.error('请求失败: ' + (e as Error).message)
     }
@@ -308,6 +324,17 @@ onMounted(() => {
             clearable
           />
         </div>
+        <div v-if="authStore.isLogin" class="header-field">
+          <span class="field-label">TTS音色</span>
+          <NSelect
+            v-model:value="ttsVoice"
+            :options="chatVoiceOptions"
+            size="small"
+            style="width: 160px"
+            clearable
+            placeholder="按系统开关"
+          />
+        </div>
         <span class="header-hint">人设/知识库将用于新对话</span>
       </header>
 
@@ -318,14 +345,34 @@ onMounted(() => {
         <template v-for="m in messages" :key="m.id">
           <div v-if="m.role !== 'system'" class="msg-row" :class="m.role">
             <div class="msg-role">{{ m.role === 'user' ? '我' : 'AI' }}</div>
-            <div class="bubble">{{ m.content }}</div>
+            <div class="bubble">
+              <img
+                v-if="m.attachmentType === 'image' && m.attachmentUrl"
+                :src="m.attachmentUrl"
+                class="msg-image"
+                loading="lazy"
+              />
+              <audio
+                v-else-if="m.attachmentType === 'audio' && m.attachmentUrl"
+                :src="m.attachmentUrl"
+                controls
+                class="msg-audio"
+              />
+              <span v-if="m.content" class="msg-text">{{ m.content }}</span>
+            </div>
           </div>
         </template>
         <div v-if="streaming" class="msg-row assistant">
           <div class="msg-role">AI</div>
           <div class="bubble">
             <span v-if="streamingContent">{{ streamingContent }}</span>
-            <span v-else class="typing">正在思考…</span>
+            <span v-else class="typing">{{
+              streamingStatus === 'generating_image'
+                ? '正在生成图片…'
+                : streamingStatus === 'generating_audio'
+                  ? '正在合成语音…'
+                  : '正在思考…'
+            }}</span>
           </div>
         </div>
         <NEmpty v-if="!loadingMessages && messages.length === 0 && !streaming" description="开始一段新对话" style="margin: auto" />
@@ -476,6 +523,18 @@ onMounted(() => {
   word-break: break-word;
   line-height: 1.6;
   font-size: 14px;
+}
+.msg-image {
+  max-width: 100%;
+  border-radius: 8px;
+  display: block;
+  margin-bottom: 8px;
+}
+.msg-audio {
+  width: 100%;
+  max-width: 280px;
+  display: block;
+  margin-bottom: 8px;
 }
 .msg-row.user .bubble {
   background: rgba(100, 150, 255, 0.15);

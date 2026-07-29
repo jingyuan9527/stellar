@@ -97,8 +97,10 @@ public class AiImageTaskWorker {
 
     /**
      * 调供应商图片生成接口，返回图片字节数组（b64 解码或 url 下载）。
+     * <p>由 {@link AiImageService#generateImageSync} 同步调用（聊天工具调用路径），
+     * 亦由 {@link #doGenerateAsync} 异步调用（图片页路径）。
      */
-    private byte[] generateImageBytes(AiResolvedConfig cfg, String prompt, String size, String ratio) throws Exception {
+    public byte[] generateImageBytes(AiResolvedConfig cfg, String prompt, String size, String ratio) throws Exception {
         String url = cfg.endpoint().replaceAll("/+$", "") + "/v1/images/generations";
         String sz = StringUtils.hasText(size) ? size : "1K";
         String rt = StringUtils.hasText(ratio) ? ratio : "1:1";

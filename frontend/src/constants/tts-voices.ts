@@ -112,3 +112,8 @@ export const mimoVoiceMap: Record<string, string> = Object.fromEntries(
 
 /** 用于 NSelect 的 MiMo 音色 options */
 export const mimoVoiceOptions = mimoVoiceGroups as unknown as SelectGroupOption[]
+
+/** 聊天页 TTS 音色下拉（合并 Edge + MiMo 分组）。
+ * 用户选了具体音色则按音色所属引擎走（覆盖系统开关 chat_tts_engine）；
+ * 用户未选（clear）则按系统开关 + 对应默认音色兜底。 */
+export const chatVoiceOptions = [...ttsVoiceOptions, ...mimoVoiceOptions]
