@@ -72,13 +72,13 @@ public class AiImageService {
      * <p>不发 SSE 通知（聊天页有自己的进度提示，避免图片页重复弹抽屉）。
      *
      * @param prompt 图片提示词
+     * @param subjectType 主体类型（account/ip，由调用方在同步阶段捕获传入，避免异步线程无 web 上下文）
+     * @param subjectId 主体 ID
      * @return sys_file.id（用于挂 ai_chat_message.attachment_file_id）
      * @throws BusinessException 生成失败（task 已标 failed，异常向上抛由 ToolService 捕获）
      */
-    public Long generateImageSync(String prompt) {
+    public Long generateImageSync(String prompt, String subjectType, String subjectId) {
         AiResolvedConfig cfg = aiModelService.resolveDefaultOrFirstEnabled("IMAGE");
-        String subjectType = getSubjectType();
-        String subjectId = getSubjectId();
 
         SysAiImageTask task = new SysAiImageTask();
         task.setModelId(cfg.modelId());

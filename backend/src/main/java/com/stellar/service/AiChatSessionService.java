@@ -296,6 +296,12 @@ public class AiChatSessionService {
                 log.warn("[AI聊天] RAG 检索失败 session={}: {}", session.getId(), e.getMessage());
             }
         }
+        // 工具调用引导（仅登录用户，登录才暴露 tools；引导 LLM 主动识别意图调用工具）
+        if ("account".equals(session.getSubjectType())) {
+            sb.append("你具备以下能力，请主动识别用户意图并调用对应工具，不要只用文字回复代替：\n");
+            sb.append("- 用户想要图片/画作/视觉图像时，调用 generate_image 工具\n");
+            sb.append("- 用户想要语音/朗读/听到声音时，调用 synthesize_speech 工具\n\n");
+        }
         return sb.toString().trim();
     }
 

@@ -676,7 +676,7 @@ public class AiChatService {
                 usage[2] = usageNode.path("total_tokens").asInt(0);
                 hasUsage = true;
             }
-            recordUsageObject(cfg, model, messages, msgNode.path("content").asText(""), hasUsage, usage);
+            recordUsageObject(cfg, model, messages, msgNode.path("content").asText(""), hasUsage, usage, subjectType, subjectId);
             return json;
         } catch (BusinessException e) {
             throw e;
@@ -781,7 +781,7 @@ public class AiChatService {
                                 usage1[2] = usageNode.path("total_tokens").asInt(0);
                                 hasUsage1 = true;
                             }
-                            recordUsageObject(cfg, model, messages, firstMsg.path("content").asText(""), hasUsage1, usage1);
+                            recordUsageObject(cfg, model, messages, firstMsg.path("content").asText(""), hasUsage1, usage1, subjectType, subjectId);
 
                             if (!toolCallsNode.isArray() || toolCallsNode.isEmpty()) {
                                 // 无 tool_calls：直接把 content 一次性流式转发
@@ -801,7 +801,7 @@ public class AiChatService {
                             if (toolCallsNode.size() > 1) {
                                 log.warn("AI 聊天工具判定: LLM 返回 {} 个 tool_calls，仅执行第一个", toolCallsNode.size());
                             }
-                            ToolResult toolResult = aiChatToolService.execute(toolCall, voice);
+                            ToolResult toolResult = aiChatToolService.execute(toolCall, voice, subjectType, subjectId);
                             log.info("AI 聊天工具执行: name={}, toolCallId={}, attachmentType={}, attachmentFileId={}",
                                     toolCall.path("function").path("name").asText(""),
                                     toolResult.toolCallId(),
@@ -828,7 +828,7 @@ public class AiChatService {
                             emitter.send(SseEmitter.event().data(Map.of("status", status), MediaType.APPLICATION_JSON));
 
                             // 第二次流式（不带 tools，避免无限循环）
-                            doSecondStream(emitter, url, cfg, model, secondMessages, onComplete, toolResult);
+                            doSecondStream(emitter, url, cfg, model, secondMessages, onComplete, toolResult, subjectType, subjectId);
                         } catch (Exception e) {
                             log.error("AI 聊天工具判定处理失败: {}", e.getMessage(), e);
                             sendError(emitter, e.getMessage());
@@ -851,7 +851,7 @@ public class AiChatService {
     /** 第二次流式调用（工具执行后），不带 tools，转发流式分片 + done + onComplete(最终文本,附件) */
     private void doSecondStream(SseEmitter emitter, String url, AiResolvedConfig cfg, String model,
                                 List<Map<String, Object>> messages, Consumer<AiChatResult> onComplete,
-                                ToolResult toolResult) {
+                                ToolResult toolResult, String subjectType, String subjectId) {
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("model", model);
@@ -907,7 +907,7 @@ public class AiChatService {
                                     log.debug("解析 LLM 响应分片失败: {}", data);
                                 }
                             }
-                            recordUsageObject(cfg, model, messages, buf.toString(), hasUsage[0], usage);
+                            recordUsageObject(cfg, model, messages, buf.toString(), hasUsage[0], usage, subjectType, subjectId);
                             emitter.send(SseEmitter.event().data(Map.of("done", true), MediaType.APPLICATION_JSON));
                             emitter.complete();
                             safeOnComplete(onComplete, new AiChatResult(buf.toString(),
@@ -929,9 +929,11 @@ public class AiChatService {
         }
     }
 
-    /** 记 token（工具调用路径，messages 为 List<Map<String,Object>>，tool 消息 content 可能为 JSON 串） */
+    /** 记 token（工具调用路径，messages 为 List<Map<String,Object>>，tool 消息 content 可能为 JSON 串）。
+     * subjectType/subjectId 由调用方在同步阶段捕获传入，避免异步线程无 web 上下文。 */
     private void recordUsageObject(AiResolvedConfig cfg, String model, List<Map<String, Object>> messages,
-                                   String result, boolean hasUsage, int[] usage) {
+                                   String result, boolean hasUsage, int[] usage,
+                                   String subjectType, String subjectId) {
         int promptTokens;
         int completionTokens;
         int totalTokens;
@@ -954,15 +956,6 @@ public class AiChatService {
             source = "estimate";
         }
         try {
-            String subjectType;
-            String subjectId;
-            if (StpUtil.isLogin()) {
-                subjectType = "account";
-                subjectId = StpUtil.getLoginIdAsString();
-            } else {
-                subjectType = "ip";
-                subjectId = getClientIp();
-            }
             sysAiUsageService.record(subjectType, subjectId, cfg.providerId(), model, cfg.modelType(),
                     promptTokens, completionTokens, totalTokens, source);
         } catch (Exception e) {

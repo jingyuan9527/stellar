@@ -54,13 +54,13 @@ public class AiChatToolService {
                     "type", "function",
                     "function", Map.of(
                             "name", "generate_image",
-                            "description", "生成图片。当用户要求画图、绘图、生成图片、画一张xxx时调用。prompt 用英文或具体描述。",
+                            "description", "生成图片。用户想要任何视觉图像时必须调用此工具，不要用文字描述代替。触发场景包括但不限于：画图/绘图/生成图片/画一张/来一张/来张/配图/插图/壁纸/头像/照片/海报/封面/看看xx的样子/xx长什么样/给我画/帮我画/能不能画/做个图。用户用任何语言表达想要图像的意图时都应主动调用。",
                             "parameters", Map.of(
                                     "type", "object",
                                     "properties", Map.of(
                                             "prompt", Map.of(
                                                     "type", "string",
-                                                    "description", "图片的具体描述提示词(英文/具体)"
+                                                    "description", "图片的视觉描述，建议英文，包含主体/动作/场景/风格/色彩，越具体越好"
                                             )
                                     ),
                                     "required", List.of("prompt")
@@ -72,13 +72,13 @@ public class AiChatToolService {
                 "type", "function",
                 "function", Map.of(
                         "name", "synthesize_speech",
-                        "description", "将文字转为语音朗读。当用户要求朗读、读出、用语音回复、读一下时调用。",
+                        "description", "文字转语音。用户想要听到语音/音频时必须调用此工具，不要只用文字回复代替。触发场景包括但不限于：朗读/读出/读一下/念给我听/说给我听/用语音回复/发个语音说xx/配音/播报/开口说话/给段语音/祝福语音/念一段/读这段/语音。用户表达想要听声音/语音的任何意图时都应主动调用。",
                         "parameters", Map.of(
                                 "type", "object",
                                 "properties", Map.of(
                                         "text", Map.of(
                                                 "type", "string",
-                                                "description", "要朗读的文字内容"
+                                                "description", "要朗读的完整文字内容"
                                         )
                                 ),
                                 "required", List.of("text")
@@ -93,8 +93,10 @@ public class AiChatToolService {
      *
      * @param toolCall LLM 响应 choices[0].message.tool_calls[i] 节点
      * @param voice    前端传入的音色（可空），用户选了具体音色则按音色所属引擎走覆盖系统开关
+     * @param subjectType 主体类型（account/ip，调用方在同步阶段捕获传入，异步线程无 web 上下文）
+     * @param subjectId 主体 ID
      */
-    public ToolResult execute(JsonNode toolCall, String voice) {
+    public ToolResult execute(JsonNode toolCall, String voice, String subjectType, String subjectId) {
         String toolCallId = toolCall.path("id").asText("");
         String name = toolCall.path("function").path("name").asText("");
         String argsStr = toolCall.path("function").path("arguments").asText("{}");
@@ -107,8 +109,8 @@ public class AiChatToolService {
         }
         try {
             return switch (name) {
-                case "generate_image" -> generateImage(toolCallId, args.path("prompt").asText(""));
-                case "synthesize_speech" -> synthesizeSpeech(toolCallId, args.path("text").asText(""), voice);
+                case "generate_image" -> generateImage(toolCallId, args.path("prompt").asText(""), subjectType, subjectId);
+                case "synthesize_speech" -> synthesizeSpeech(toolCallId, args.path("text").asText(""), voice, subjectType, subjectId);
                 default -> {
                     log.warn("[AI工具] 未知工具: {}", name);
                     yield new ToolResult(toolCallId, buildErrorContent(name, "未知工具"), null, null);
@@ -120,12 +122,12 @@ public class AiChatToolService {
         }
     }
 
-    private ToolResult generateImage(String toolCallId, String prompt) {
+    private ToolResult generateImage(String toolCallId, String prompt, String subjectType, String subjectId) {
         if (!StringUtils.hasText(prompt)) {
             return new ToolResult(toolCallId, buildErrorContent("generate_image", "prompt 不能为空"), null, null);
         }
         try {
-            Long fileId = aiImageService.generateImageSync(prompt);
+            Long fileId = aiImageService.generateImageSync(prompt, subjectType, subjectId);
             log.info("[AI工具] 画图成功 fileId={} prompt={}", fileId, prompt.length() > 50 ? prompt.substring(0, 50) + "..." : prompt);
             return new ToolResult(toolCallId, buildSuccessContent("image", fileId, null), "image", fileId);
         } catch (Exception e) {
@@ -134,7 +136,7 @@ public class AiChatToolService {
         }
     }
 
-    private ToolResult synthesizeSpeech(String toolCallId, String text, String voice) {
+    private ToolResult synthesizeSpeech(String toolCallId, String text, String voice, String subjectType, String subjectId) {
         if (!StringUtils.hasText(text)) {
             return new ToolResult(toolCallId, buildErrorContent("synthesize_speech", "text 不能为空"), null, null);
         }
