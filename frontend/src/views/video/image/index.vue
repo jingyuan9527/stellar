@@ -11,10 +11,12 @@ import { useAuthStore } from '@/store/auth'
 import { useAiNotifyStore, type AiNotifyMessage } from '@/store/aiNotify'
 import type { AiModel, AiImageTask } from '@/types/api'
 import { formatTime } from '@/utils/format'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
 const authStore = useAuthStore()
 const aiNotifyStore = useAiNotifyStore()
+const isMobile = useIsMobile()
 
 const models = ref<AiModel[]>([])
 const modelId = ref<number | null>(null)
@@ -64,7 +66,7 @@ const ratioOptions = [
 
 
 
-const columns: DataTableColumns<AiImageTask> = [
+const allColumns: DataTableColumns<AiImageTask> = [
   { title: '请求时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },
   { title: '提示词', key: 'prompt', ellipsis: { tooltip: true } },
   {
@@ -104,6 +106,15 @@ const columns: DataTableColumns<AiImageTask> = [
     }),
   },
 ]
+
+const columns = computed<DataTableColumns<AiImageTask>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => {
+        const key = (c as { key?: string }).key
+        return key !== 'updateTime' && key !== 'durationMs'
+      })
+    : allColumns,
+)
 
 const pagination = reactive({
   page: 1,
@@ -252,8 +263,8 @@ onBeforeUnmount(() => {
           <div>
             <div class="field-label">尺寸档位 / 宽高比</div>
             <NSpace>
-              <NSelect v-model:value="size" :options="sizeOptions" style="width: 160px" />
-              <NSelect v-model:value="ratio" :options="ratioOptions" style="width: 160px" />
+            <NSelect v-model:value="size" :options="sizeOptions" class="size-select" />
+            <NSelect v-model:value="ratio" :options="ratioOptions" class="size-select" />
             </NSpace>
           </div>
 
@@ -331,8 +342,12 @@ onBeforeUnmount(() => {
 }
 
 .drawer-img {
-  width: 100%;
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
   border-radius: 4px;
+  display: block;
+  margin: 0 auto;
 }
 
 .drawer-prompt {
@@ -340,5 +355,15 @@ onBeforeUnmount(() => {
   opacity: 0.8;
   line-height: 1.6;
   word-break: break-word;
+}
+
+.size-select {
+  width: 160px;
+}
+
+@media (max-width: 768px) {
+  .size-select {
+    width: 100%;
+  }
 }
 </style>

@@ -12,6 +12,7 @@ import { useApiConfigStore } from '../store/apiConfig'
 import { useUIStore } from '../store/ui'
 import { formatTime } from '@/utils/format'
 import ApiSettingsModal from '../components/ApiSettingsModal.vue'
+import { useIsMobile } from '@/composables/useBreakpoint'
 import { buildPrompt, parseCopyResult } from '../lib/llm'
 import {
   getAiModelsByType, getAiTemplatePage, streamAiChat,
@@ -26,6 +27,7 @@ const coverStore = useCoverStore()
 const authStore = useAuthStore()
 const apiConfigStore = useApiConfigStore()
 const uiStore = useUIStore()
+const isMobile = useIsMobile()
 
 // ===== 模板 =====
 const templates = ref<AiTemplate[]>([])
@@ -90,7 +92,7 @@ const pagination = reactive({
 
 
 
-const columns: DataTableColumns<AiChatRecord> = [
+const allColumns: DataTableColumns<AiChatRecord> = [
   { title: '请求时间', key: 'requestTime', width: 170, render: (row) => formatTime(row.requestTime) },
   { title: '提示词', key: 'prompt', ellipsis: { tooltip: true } },
   {
@@ -121,6 +123,15 @@ const columns: DataTableColumns<AiChatRecord> = [
     }),
   },
 ]
+
+const columns = computed<DataTableColumns<AiChatRecord>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => {
+        const key = (c as { key?: string }).key
+        return key !== 'responseTime' && key !== 'durationMs'
+      })
+    : allColumns,
+)
 
 const rowProps = (row: AiChatRecord) => ({
   style: 'cursor: pointer',

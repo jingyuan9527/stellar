@@ -185,6 +185,8 @@ onMounted(loadData)
 }
 .msg-image {
   max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
   border-radius: 8px;
   display: block;
   margin-bottom: 8px;

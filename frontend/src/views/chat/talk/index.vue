@@ -4,6 +4,7 @@ import {
   NSpace, NButton, NInput, NSelect, NEmpty, NAlert, NPopconfirm, NSpin, useMessage,
 } from 'naive-ui'
 import { useAuthStore } from '@/store/auth'
+import { useIsMobile } from '@/composables/useBreakpoint'
 import {
   listMyChatSessions, createChatSession, getChatMessages, deleteChatSession,
   clearMyChatSessions, streamChat, listEnabledPersonas, listKnowledgeBases,
@@ -14,6 +15,8 @@ import type { AiChatSession, AiChatMessage, AiPersona, AiKnowledgeBase, AiModel 
 
 const authStore = useAuthStore()
 const message = useMessage()
+const isMobile = useIsMobile()
+const sessionCollapsed = ref(true)
 
 // ===== 会话 =====
 const sessions = ref<AiChatSession[]>([])
@@ -259,11 +262,14 @@ onMounted(() => {
 
 <template>
   <div class="chat-page">
-    <aside class="session-panel">
+    <aside class="session-panel" :class="{ collapsed: isMobile && sessionCollapsed }">
       <div class="session-panel-header">
         <NButton size="small" type="primary" block @click="newSession">+ 新建对话</NButton>
+        <NButton v-if="isMobile" size="small" quaternary block @click="sessionCollapsed = !sessionCollapsed">
+          {{ sessionCollapsed ? '展开会话列表' : '收起会话列表' }}
+        </NButton>
       </div>
-      <div class="session-list">
+      <div v-show="!isMobile || !sessionCollapsed" class="session-list">
         <div
           v-for="s in sessions"
           :key="s.id"
@@ -281,7 +287,7 @@ onMounted(() => {
         </div>
         <NEmpty v-if="sessions.length === 0" description="暂无会话" size="small" />
       </div>
-      <div class="session-panel-footer">
+      <div v-show="!isMobile || !sessionCollapsed" class="session-panel-footer">
         <NPopconfirm @positive-click="handleClearSessions">
           <template #trigger>
             <NButton size="small" block quaternary type="error" :disabled="sessions.length === 0">清空全部</NButton>
@@ -526,6 +532,8 @@ onMounted(() => {
 }
 .msg-image {
   max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
   border-radius: 8px;
   display: block;
   margin-bottom: 8px;
@@ -564,7 +572,10 @@ onMounted(() => {
   }
   .session-panel {
     width: 100%;
-    max-height: 160px;
+    max-height: 200px;
+  }
+  .session-panel.collapsed {
+    max-height: none;
   }
   .chat-header {
     gap: 8px;
@@ -578,6 +589,12 @@ onMounted(() => {
   }
   .msg-row {
     max-width: 95%;
+  }
+  .message-list {
+    padding: 12px;
+  }
+  .input-area {
+    padding: 8px 12px 12px;
   }
 }
 </style>

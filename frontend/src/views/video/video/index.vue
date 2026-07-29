@@ -10,9 +10,11 @@ import { createAiVideo, deleteAiVideo, getAiVideoPage, getAiModelsByType } from 
 import { useAiNotifyStore, type AiNotifyMessage } from '@/store/aiNotify'
 import type { AiModel, AiVideoHistory } from '@/types/api'
 import { formatTime } from '@/utils/format'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
 const aiNotifyStore = useAiNotifyStore()
+const isMobile = useIsMobile()
 
 const models = ref<AiModel[]>([])
 const modelId = ref<number | null>(null)
@@ -70,7 +72,7 @@ const durationMap: Record<string, { numFrames: number; frameRate: number }> = {
 
 
 
-const columns: DataTableColumns<AiVideoHistory> = [
+const allColumns: DataTableColumns<AiVideoHistory> = [
   { title: '请求时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },
   { title: '提示词', key: 'prompt', ellipsis: { tooltip: true } },
   {
@@ -103,6 +105,15 @@ const columns: DataTableColumns<AiVideoHistory> = [
     }),
   },
 ]
+
+const columns = computed<DataTableColumns<AiVideoHistory>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => {
+        const key = (c as { key?: string }).key
+        return key !== 'updateTime' && key !== 'durationMs'
+      })
+    : allColumns,
+)
 
 const pagination = reactive({
   page: 1,
@@ -255,13 +266,13 @@ onBeforeUnmount(() => {
           </div>
 
           <NSpace>
-            <div>
+            <div class="size-field">
               <div class="field-label">画面比例</div>
-              <NSelect v-model:value="ratio" :options="ratioOptions" style="width: 150px" />
+              <NSelect v-model:value="ratio" :options="ratioOptions" class="size-select" />
             </div>
-            <div>
+            <div class="size-field">
               <div class="field-label">时长</div>
-              <NSelect v-model:value="duration" :options="durationOptions" style="width: 170px" />
+              <NSelect v-model:value="duration" :options="durationOptions" class="size-select" />
             </div>
           </NSpace>
 
@@ -349,5 +360,18 @@ onBeforeUnmount(() => {
   opacity: 0.8;
   line-height: 1.6;
   word-break: break-word;
+}
+
+.size-select {
+  width: 160px;
+}
+
+@media (max-width: 768px) {
+  .size-select {
+    width: 100%;
+  }
+  .size-field {
+    width: 100%;
+  }
 }
 </style>

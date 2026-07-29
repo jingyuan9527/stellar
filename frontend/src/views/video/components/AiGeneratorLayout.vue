@@ -76,6 +76,7 @@ const resolvedWidth = computed(() => (isMobile.value ? '100%' : props.drawerWidt
 @media (max-width: 1023px) {
   .ai-gen-layout {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .ai-gen-aside {
