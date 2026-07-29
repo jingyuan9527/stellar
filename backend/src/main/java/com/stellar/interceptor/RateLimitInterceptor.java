@@ -3,6 +3,7 @@ package com.stellar.interceptor;
 import com.stellar.common.BusinessException;
 import com.stellar.common.ResultCode;
 import com.stellar.common.annotation.RateLimit;
+import com.stellar.interceptor.WebUtils;
 import com.stellar.service.RateLimitService;
 import cn.dev33.satoken.stp.StpUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -41,28 +42,11 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if (StpUtil.isLogin()) {
             return true;
         }
-        String ip = getClientIp(request);
+        String ip = WebUtils.getClientIp(request);
         int result = rateLimitService.tryIncr(ip, rateLimit.daily());
         if (result < 0) {
             throw new BusinessException(ResultCode.TOO_MANY_REQUESTS);
         }
         return true;
-    }
-
-    /**
-     * 解析客户端真实 IP，穿透代理头。
-     */
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip != null && !ip.isBlank()) {
-            ip = ip.split(",")[0].trim();
-        }
-        if (ip == null || ip.isBlank()) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (ip == null || ip.isBlank()) {
-            ip = request.getRemoteAddr();
-        }
-        return ip;
     }
 }

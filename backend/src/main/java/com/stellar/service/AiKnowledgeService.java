@@ -12,7 +12,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -34,6 +36,7 @@ public class AiKnowledgeService {
     private final AiKnowledgeChunkMapper chunkMapper;
     private final AiEmbeddingService embeddingService;
     private final JdbcTemplate jdbcTemplate;
+    private final PlatformTransactionManager transactionManager;
 
     private static final int CHUNK_SIZE = 500;
     private static final int CHUNK_OVERLAP = 50;
@@ -114,13 +117,26 @@ public class AiKnowledgeService {
     /**
      * 添加文档：分块 + 入库 + 向量化。
      */
-    @Transactional(rollbackFor = Exception.class)
     public int addDocument(Long kbId, String text, String sourceName) {
         AiKnowledgeBase kb = getKb(kbId);
         List<String> pieces = chunk(text, CHUNK_SIZE, CHUNK_OVERLAP);
         if (pieces.isEmpty()) {
             throw new BusinessException("文档分块为空");
         }
+        // 分块入库放在独立事务，提交后再做外部向量化——避免长网络调用占用 DB 连接、拖住事务
+        // 用 TransactionTemplate 编程式事务而非 @Transactional：insertChunks 是 private 自调用，
+        // Spring AOP 代理无法拦截，注解不生效
+        List<AiKnowledgeChunk> inserted = new TransactionTemplate(transactionManager)
+                .execute(status -> insertChunks(kbId, pieces, sourceName));
+        // 批量向量化回填 embedding 列（失败不阻断分块入库，仅日志告警）
+        vectorizeChunks(kb, inserted);
+        refreshChunkCount(kbId);
+        log.info("[知识库] 添加文档 kbId={} source={} chunks={}", kbId, sourceName, inserted.size());
+        return inserted.size();
+    }
+
+    /** 分块持久化（由调用方通过 TransactionTemplate 包裹，保证全成功或全回滚）。 */
+    private List<AiKnowledgeChunk> insertChunks(Long kbId, List<String> pieces, String sourceName) {
         List<AiKnowledgeChunk> inserted = new ArrayList<>();
         int idx = 0;
         for (String piece : pieces) {
@@ -134,17 +150,13 @@ public class AiKnowledgeService {
             chunkMapper.insert(c);
             inserted.add(c);
         }
-        // 批量向量化回填 embedding 列（失败不阻断分块入库，仅日志告警）
-        vectorizeChunks(kb, inserted);
-        refreshChunkCount(kbId);
-        log.info("[知识库] 添加文档 kbId={} source={} chunks={}", kbId, sourceName, inserted.size());
-        return inserted.size();
+        return inserted;
     }
 
     /**
      * 重建索引：对知识库所有分块重新向量化（模型变更或补未向量化的分块时用）。
+     * <p>无原子性需求（向量化失败已 best-effort 捕获），不包裹事务，避免长网络调用占用 DB 连接。
      */
-    @Transactional(rollbackFor = Exception.class)
     public void rebuild(Long kbId) {
         AiKnowledgeBase kb = getKb(kbId);
         List<AiKnowledgeChunk> all = chunkMapper.selectList(
