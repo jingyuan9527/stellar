@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NModal, NCheckboxGroup, NCheckbox, NSpace, NEmpty, useMessage } from 'naive-ui'
+import { NModal, NButton, NCheckboxGroup, NCheckbox, NSpace, NEmpty, useMessage } from 'naive-ui'
 import { useUIStore } from '../store/ui'
 import { useCoverStore } from '../store/cover'
 import { useCoverDraftsStore } from '../store/coverDrafts'
@@ -31,7 +31,7 @@ function handleOk() {
   if (checked.value.includes('cover')) coverStore.reset()
   if (checked.value.includes('drafts')) draftsStore.clear()
   message.success('已清空选中数据')
-  return true
+  show.value = false
 }
 </script>
 
@@ -41,10 +41,6 @@ function handleOk() {
     preset="card"
     title="清空缓存"
     :style="{ width: '440px' }"
-    positive-text="清空"
-    negative-text="取消"
-    :positive-button-props="{ type: 'error' }"
-    @positive-click="handleOk"
   >
     <p style="margin-bottom: 12px">选择要清空的数据（默认全选）：</p>
     <NCheckboxGroup v-model:value="checked">
@@ -58,5 +54,11 @@ function handleOk() {
       </NSpace>
     </NCheckboxGroup>
     <NEmpty v-if="ALL.length === 0" description="无可清空数据" />
+    <template #footer>
+      <NSpace justify="end">
+        <NButton @click="show = false">取消</NButton>
+        <NButton type="error" @click="handleOk">清空</NButton>
+      </NSpace>
+    </template>
   </NModal>
 </template>

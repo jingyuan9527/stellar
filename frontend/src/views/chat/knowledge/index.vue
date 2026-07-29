@@ -162,6 +162,7 @@ async function handleSaveKb() {
       })
     }
     message.success('已保存')
+    kbEditShow.value = false
     loadKbs()
   } catch {
     // 错误已由拦截器提示
@@ -322,9 +323,6 @@ onMounted(() => {
       preset="card"
       :title="kbEditing?.id ? '编辑知识库' : '新增知识库'"
       :style="{ width: '560px' }"
-      positive-text="保存"
-      negative-text="取消"
-      @positive-click="handleSaveKb"
     >
       <NSpace v-if="kbEditing" vertical :size="16">
         <NFormItem label="名称">
@@ -342,6 +340,12 @@ onMounted(() => {
           />
         </NFormItem>
       </NSpace>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="kbEditShow = false">取消</NButton>
+          <NButton type="primary" @click="handleSaveKb">保存</NButton>
+        </NSpace>
+      </template>
     </NModal>
 
     <NModal
@@ -349,10 +353,6 @@ onMounted(() => {
       preset="card"
       title="添加文档"
       :style="{ width: '640px' }"
-      positive-text="分块入库"
-      negative-text="取消"
-      :positive-button-props="{ loading: docAdding }"
-      @positive-click="handleAddDoc"
     >
       <NSpace vertical :size="16">
         <NFormItem label="来源名称">
@@ -367,6 +367,12 @@ onMounted(() => {
           />
         </NFormItem>
       </NSpace>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="docShow = false">取消</NButton>
+          <NButton type="primary" :loading="docAdding" @click="handleAddDoc">分块入库</NButton>
+        </NSpace>
+      </template>
     </NModal>
   </div>
 </template>

@@ -208,9 +208,6 @@ onMounted(loadData)
       preset="card"
       :title="editing?.id ? '编辑模板' : '新增模板'"
       :style="{ width: '680px' }"
-      positive-text="保存"
-      negative-text="取消"
-      @positive-click="handleSave"
     >
       <NSpace v-if="editing" vertical :size="16">
         <NFormItem label="名称">
@@ -228,6 +225,12 @@ onMounted(loadData)
           />
         </NFormItem>
       </NSpace>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="editShow = false">取消</NButton>
+          <NButton type="primary" @click="handleSave">保存</NButton>
+        </NSpace>
+      </template>
     </NModal>
   </div>
 </template>

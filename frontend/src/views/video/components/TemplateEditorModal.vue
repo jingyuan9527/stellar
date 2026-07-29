@@ -135,9 +135,6 @@ function handleReset(id: string) {
     preset="card"
     :title="editing?.id ? '编辑模板' : '新增模板'"
     :style="{ width: '680px' }"
-    positive-text="保存"
-    negative-text="取消"
-    @positive-click="save"
   >
     <NSpace v-if="editing" vertical :size="16">
       <div>
@@ -158,6 +155,12 @@ function handleReset(id: string) {
         />
       </div>
     </NSpace>
+    <template #footer>
+      <NSpace justify="end">
+        <NButton @click="formShow = false">取消</NButton>
+        <NButton type="primary" @click="save">保存</NButton>
+      </NSpace>
+    </template>
   </NModal>
 </template>
 

@@ -71,11 +71,11 @@ async function handleTest() {
 function handleSave() {
   if (!formData.value.model?.trim()) {
     message.warning('请输入或拉取模型')
-    return false
+    return
   }
   apiStore.update(formData.value)
   message.success('API 配置已保存')
-  return true
+  show.value = false
 }
 </script>
 
@@ -85,9 +85,6 @@ function handleSave() {
     preset="card"
     title="API 设置"
     :style="{ width: '560px' }"
-    positive-text="保存"
-    negative-text="取消"
-    @positive-click="handleSave"
   >
     <NForm label-placement="top">
       <NFormItem label="接口地址">
@@ -120,6 +117,12 @@ function handleSave() {
       测试连通（发送一条测试请求）
     </NButton>
     <p class="hint">API Key 存于浏览器本地，仅适合个人使用；多人共享需自建代理后端。</p>
+    <template #footer>
+      <NSpace justify="end">
+        <NButton @click="show = false">取消</NButton>
+        <NButton type="primary" @click="handleSave">保存</NButton>
+      </NSpace>
+    </template>
   </NModal>
 </template>
 

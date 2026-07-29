@@ -132,6 +132,7 @@ async function handleSave() {
       })
     }
     message.success('已保存')
+    editShow.value = false
     loadData()
   } catch {
     // 错误已由拦截器提示
@@ -184,9 +185,6 @@ onMounted(loadData)
       preset="card"
       :title="editing?.id ? '编辑人设' : '新增人设'"
       :style="{ width: '680px' }"
-      positive-text="保存"
-      negative-text="取消"
-      @positive-click="handleSave"
     >
       <NSpace v-if="editing" vertical :size="16">
         <NFormItem label="名称">
@@ -210,6 +208,12 @@ onMounted(loadData)
           <NSwitch :value="editing.enabled === 1" @update:value="(v: boolean) => editing!.enabled = v ? 1 : 0" />
         </NFormItem>
       </NSpace>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="editShow = false">取消</NButton>
+          <NButton type="primary" @click="handleSave">保存</NButton>
+        </NSpace>
+      </template>
     </NModal>
   </div>
 </template>

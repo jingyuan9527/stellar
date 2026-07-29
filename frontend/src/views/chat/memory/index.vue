@@ -87,6 +87,7 @@ async function handleSave() {
   try {
     await updateMemory(editing.value.id, editing.value.content)
     message.success('已保存')
+    editShow.value = false
     loadData()
   } catch {
     // 错误已由拦截器提示
@@ -250,9 +251,6 @@ onMounted(() => {
       preset="card"
       title="编辑记忆"
       :style="{ width: '560px' }"
-      positive-text="保存"
-      negative-text="取消"
-      @positive-click="handleSave"
     >
       <NFormItem label="内容">
         <NInput
@@ -262,6 +260,12 @@ onMounted(() => {
           :autosize="{ minRows: 4, maxRows: 10 }"
         />
       </NFormItem>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="editShow = false">取消</NButton>
+          <NButton type="primary" @click="handleSave">保存</NButton>
+        </NSpace>
+      </template>
     </NModal>
 
     <NModal
@@ -269,10 +273,6 @@ onMounted(() => {
       preset="card"
       title="新增长期记忆"
       :style="{ width: '520px' }"
-      positive-text="保存"
-      negative-text="取消"
-      :positive-button-props="{ loading: adding }"
-      @positive-click="handleAdd"
     >
       <NSpace vertical :size="16">
         <NFormItem label="用户">
@@ -292,6 +292,12 @@ onMounted(() => {
           />
         </NFormItem>
       </NSpace>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="addShow = false">取消</NButton>
+          <NButton type="primary" :loading="adding" @click="handleAdd">保存</NButton>
+        </NSpace>
+      </template>
     </NModal>
 
     <NModal
