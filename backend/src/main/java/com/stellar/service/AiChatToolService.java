@@ -206,10 +206,9 @@ public class AiChatToolService {
 
     private boolean imageToolAvailable() {
         try {
-            aiModelService.resolveDefaultConfig("IMAGE");
-            return true;
+            return !aiModelService.listEnabledByType("IMAGE").isEmpty();
         } catch (Exception e) {
-            log.debug("[AI工具] IMAGE 默认模型未配置，generate_image 工具不暴露");
+            log.debug("[AI工具] 查询 IMAGE 模型失败，generate_image 工具不暴露");
             return false;
         }
     }

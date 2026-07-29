@@ -76,7 +76,7 @@ public class AiImageService {
      * @throws BusinessException 生成失败（task 已标 failed，异常向上抛由 ToolService 捕获）
      */
     public Long generateImageSync(String prompt) {
-        AiResolvedConfig cfg = aiModelService.resolveDefaultConfig("IMAGE");
+        AiResolvedConfig cfg = aiModelService.resolveDefaultOrFirstEnabled("IMAGE");
         String subjectType = getSubjectType();
         String subjectId = getSubjectId();
 

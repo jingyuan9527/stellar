@@ -239,6 +239,23 @@ public class AiModelService {
         return resolveConfig(m.getId());
     }
 
+    /**
+     * 取某类型的默认模型；无默认则取第一个启用的（供聊天工具调用等不显式选模型的场景用）。
+     * <p>resolveDefaultConfig 要求 is_default=1，但管理员可能配了模型却没设默认，
+     * 此方法兜底取第一个启用的，避免工具因"未设默认"而不暴露。
+     */
+    public AiResolvedConfig resolveDefaultOrFirstEnabled(String modelType) {
+        try {
+            return resolveDefaultConfig(modelType);
+        } catch (Exception ignored) {
+        }
+        List<AiModelVO> models = listEnabledByType(modelType);
+        if (models.isEmpty()) {
+            throw new BusinessException("未配置 " + modelType + " 类型的可用模型");
+        }
+        return resolveConfig(models.get(0).getId());
+    }
+
     private AiModelVO toVO(SysAiModel m, String providerName) {
         AiModelVO vo = new AiModelVO();
         vo.setId(m.getId());
