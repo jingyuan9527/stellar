@@ -49,7 +49,8 @@ public class AiChatToolService {
      */
     public List<Map<String, Object>> getToolDefinitions() {
         List<Map<String, Object>> tools = new ArrayList<>();
-        if (imageToolAvailable()) {
+        boolean imageAvailable = imageToolAvailable();
+        if (imageAvailable) {
             tools.add(Map.of(
                     "type", "function",
                     "function", Map.of(
@@ -85,6 +86,7 @@ public class AiChatToolService {
                         )
                 )
         ));
+        log.info("[AI工具] 暴露工具 count={} imageAvailable={}", tools.size(), imageAvailable);
         return tools;
     }
 

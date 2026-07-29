@@ -745,6 +745,11 @@ public class AiChatService {
 
             log.info("AI 聊天工具判定: model={}, msgCount={}, tools={}, subject={}:{}",
                     model, messages.size(), tools != null ? tools.size() : 0, subjectType, subjectId);
+            if (tools != null && !tools.isEmpty()) {
+                log.info("AI 聊天工具判定请求体含 tools，tool_choice=auto");
+            } else {
+                log.warn("AI 聊天工具判定请求体不含 tools（为空），LLM 不知道有工具可用");
+            }
 
             final Long providerId = cfg.providerId();
             final String modelType = cfg.modelType();
