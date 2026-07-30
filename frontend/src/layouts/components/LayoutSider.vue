@@ -8,7 +8,7 @@ import LayoutMenu from './LayoutMenu.vue'
 const themeStore = useThemeStore()
 
 function renderLogoIcon() {
-  return h(NIcon, { size: 26, color: '#18a058' }, { default: () => h(iconMap.grid) })
+  return h(NIcon, { size: 26, color: themeStore.primaryColor }, { default: () => h(iconMap.grid) })
 }
 </script>
 

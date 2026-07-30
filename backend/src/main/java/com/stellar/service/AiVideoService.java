@@ -54,6 +54,7 @@ public class AiVideoService {
     private final SysAiVideoTaskMapper videoTaskMapper;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final ExternalCallLogger externalCallLogger;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -71,6 +72,10 @@ public class AiVideoService {
         }
 
         String url = cfg.endpoint().replaceAll("/+$", "") + "/v1/videos";
+        long start = System.currentTimeMillis();
+        String callParams = "model=" + cfg.model() + ", providerId=" + cfg.providerId()
+                + ", promptLen=" + (prompt == null ? 0 : prompt.length())
+                + ", ratio=" + dto.getRatio() + ", duration=" + dto.getDuration();
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("model", cfg.model());
@@ -139,11 +144,17 @@ public class AiVideoService {
                 log.warn("视频任务本地留痕失败: {}", e.getMessage(), e);
             }
 
+            externalCallLogger.success("AI视频创建", url, callParams + ", videoId=" + vo.getVideoId(),
+                    System.currentTimeMillis() - start);
             log.info("AI 视频任务已创建: videoId={}, status={}", vo.getVideoId(), vo.getStatus());
             return vo;
         } catch (BusinessException e) {
+            externalCallLogger.failure("AI视频创建", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             throw e;
         } catch (Exception e) {
+            externalCallLogger.failure("AI视频创建", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             log.error("AI 视频创建异常: {}", e.getMessage(), e);
             throw new BusinessException("视频创建失败: " + e.getMessage());
         }
@@ -159,6 +170,8 @@ public class AiVideoService {
             throw new BusinessException("该模型不是视频生成类型");
         }
         String url = cfg.endpoint().replaceAll("/+$", "") + "/agnesapi?video_id=" + videoId;
+        long start = System.currentTimeMillis();
+        String callParams = "model=" + cfg.model() + ", providerId=" + cfg.providerId() + ", videoId=" + videoId;
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
@@ -211,10 +224,16 @@ public class AiVideoService {
             } else if ("failed".equals(taskStatus)) {
                 updateLocalFailed(videoId);
             }
+            externalCallLogger.success("AI视频查询", url, callParams + ", status=" + taskStatus,
+                    System.currentTimeMillis() - start);
             return vo;
         } catch (BusinessException e) {
+            externalCallLogger.failure("AI视频查询", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             throw e;
         } catch (Exception e) {
+            externalCallLogger.failure("AI视频查询", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             log.error("AI 视频查询异常: {}", e.getMessage(), e);
             throw new BusinessException("视频查询失败: " + e.getMessage());
         }

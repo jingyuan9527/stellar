@@ -60,7 +60,7 @@ onBeforeUnmount(() => {
     <NDrawer v-model:show="mobileSiderShow" placement="left" :width="240" class="mobile-sider">
       <NDrawerContent :native-scrollbar="false">
         <div class="mobile-logo">
-          <NIcon size="26" color="#18a058">
+          <NIcon size="26" :color="themeStore.primaryColor">
             <component :is="iconMap.grid" />
           </NIcon>
           <span class="mobile-logo-text">Stellar Admin</span>

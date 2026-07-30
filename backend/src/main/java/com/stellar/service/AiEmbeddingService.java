@@ -30,6 +30,7 @@ public class AiEmbeddingService {
 
     private final AiModelService aiModelService;
     private final ObjectMapper objectMapper;
+    private final ExternalCallLogger externalCallLogger;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -53,6 +54,8 @@ public class AiEmbeddingService {
                 ? aiModelService.resolveConfig(modelId)
                 : aiModelService.resolveDefaultConfig("EMBEDDING");
         String url = cfg.endpoint().replaceAll("/+$", "") + "/v1/embeddings";
+        long start = System.currentTimeMillis();
+        String callParams = "model=" + cfg.model() + ", providerId=" + cfg.providerId() + ", count=" + texts.size();
 
         try {
             Map<String, Object> body = new HashMap<>();
@@ -96,12 +99,19 @@ public class AiEmbeddingService {
                 }
                 result.add(vec);
             }
+            externalCallLogger.success("Embedding", url, callParams + ", resultCount=" + result.size()
+                    + ", dim=" + (result.isEmpty() ? 0 : result.get(0).length),
+                    System.currentTimeMillis() - start);
             log.info("[Embedding] 响应 count={} dim={}", result.size(),
                     result.isEmpty() ? 0 : result.get(0).length);
             return result;
         } catch (BusinessException e) {
+            externalCallLogger.failure("Embedding", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             throw e;
         } catch (Exception e) {
+            externalCallLogger.failure("Embedding", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             log.error("[Embedding] 调用失败: {}", e.getMessage(), e);
             throw new BusinessException("向量化调用失败: " + e.getMessage());
         }

@@ -1,6 +1,7 @@
 package com.stellar.service;
 
 import com.stellar.common.BusinessException;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +37,7 @@ import java.util.concurrent.TimeoutException;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class TtsService {
 
     private static final String TRUSTED_CLIENT_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
@@ -58,6 +60,8 @@ public class TtsService {
             .ofPattern("EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'",
                     Locale.US)
             .withZone(ZoneOffset.UTC);
+
+    private final ExternalCallLogger externalCallLogger;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -89,19 +93,31 @@ public class TtsService {
         log.info("语音合成开始: voice={}, chunks={}, totalChars={}",
                 voice, chunks.size(), text.length());
 
-        ByteArrayOutputStream audio = new ByteArrayOutputStream();
-        for (int i = 0; i < chunks.size(); i++) {
-            log.debug("合成第 {}/{} 段", i + 1, chunks.size());
-            byte[] chunkAudio = synthesizeChunk(chunks.get(i), voice, rateStr, pitchStr, volumeStr);
-            audio.write(chunkAudio, 0, chunkAudio.length);
-        }
+        long start = System.currentTimeMillis();
+        String callParams = "voice=" + voice + ", chunks=" + chunks.size()
+                + ", totalChars=" + text.length() + ", rate=" + rateStr
+                + ", pitch=" + pitchStr + ", volume=" + volumeStr;
+        try {
+            ByteArrayOutputStream audio = new ByteArrayOutputStream();
+            for (int i = 0; i < chunks.size(); i++) {
+                log.debug("合成第 {}/{} 段", i + 1, chunks.size());
+                byte[] chunkAudio = synthesizeChunk(chunks.get(i), voice, rateStr, pitchStr, volumeStr);
+                audio.write(chunkAudio, 0, chunkAudio.length);
+            }
 
-        if (audio.size() == 0) {
-            throw new BusinessException("语音合成失败：未收到音频数据");
-        }
+            if (audio.size() == 0) {
+                throw new BusinessException("语音合成失败：未收到音频数据");
+            }
 
-        log.info("语音合成完成: {} bytes", audio.size());
-        return audio.toByteArray();
+            externalCallLogger.success("Edge TTS", WSS_URL, callParams + ", resultBytes=" + audio.size(),
+                    System.currentTimeMillis() - start);
+            log.info("语音合成完成: {} bytes", audio.size());
+            return audio.toByteArray();
+        } catch (Exception e) {
+            externalCallLogger.failure("Edge TTS", WSS_URL, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
+            throw e;
+        }
     }
 
     /**

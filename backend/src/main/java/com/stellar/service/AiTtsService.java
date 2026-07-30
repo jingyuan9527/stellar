@@ -39,6 +39,7 @@ public class AiTtsService {
     private final AiModelService aiModelService;
     private final ObjectMapper objectMapper;
     private final SysAiUsageService sysAiUsageService;
+    private final ExternalCallLogger externalCallLogger;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -88,6 +89,11 @@ public class AiTtsService {
             subjectId = getClientIp();
         }
 
+        long start = System.currentTimeMillis();
+        String callParams = "model=" + model + ", providerId=" + cfg.providerId()
+                + ", voice=" + voice + ", textLen=" + text.length()
+                + ", styleLen=" + (style == null ? 0 : style.length())
+                + ", subject=" + subjectType + ":" + subjectId;
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("model", model);
@@ -147,12 +153,19 @@ public class AiTtsService {
                     cfg.providerId(), model, cfg.modelType(),
                     promptTokens, completionTokens, totalTokens, source);
 
+            externalCallLogger.success("AI TTS", url, callParams + ", resultBytes=" + audio.length
+                    + ", tokens=" + promptTokens + "/" + completionTokens + "/" + totalTokens + "/" + source,
+                    System.currentTimeMillis() - start);
             log.info("AI TTS 响应完成: {} bytes, tokens={}/{}/{} source={}",
                     audio.length, promptTokens, completionTokens, totalTokens, source);
             return audio;
         } catch (BusinessException e) {
+            externalCallLogger.failure("AI TTS", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             throw e;
         } catch (Exception e) {
+            externalCallLogger.failure("AI TTS", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             log.error("AI TTS 调用失败: {}", e.getMessage(), e);
             throw new BusinessException("AI 语音合成失败: " + e.getMessage());
         }

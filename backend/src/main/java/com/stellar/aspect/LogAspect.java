@@ -79,10 +79,14 @@ public class LogAspect {
         } finally {
             sysLog.setDuration(System.currentTimeMillis() - start);
             sysLog.setCreateTime(LocalDateTime.now());
-            try {
-                sysLogService.saveLog(sysLog);
-            } catch (Exception ex) {
-                log.error("保存操作日志失败: {}", ex.getMessage(), ex);
+            // 查询类成功不落库（噪音），但查询报错（NPE/数据异常等）仍记录，便于第一时间发现 bug
+            boolean skip = logAnno.type() == OperationType.QUERY && sysLog.getStatus() != null && sysLog.getStatus() == 1;
+            if (!skip) {
+                try {
+                    sysLogService.saveLog(sysLog);
+                } catch (Exception ex) {
+                    log.error("保存操作日志失败: {}", ex.getMessage(), ex);
+                }
             }
         }
     }

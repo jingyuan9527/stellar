@@ -41,6 +41,7 @@ public class AiImageTaskWorker {
     private final SysAiUsageService sysAiUsageService;
     private final ObjectMapper objectMapper;
     private final AiNotifyPublisher publisher;
+    private final ExternalCallLogger externalCallLogger;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -104,6 +105,9 @@ public class AiImageTaskWorker {
         String url = cfg.endpoint().replaceAll("/+$", "") + "/v1/images/generations";
         String sz = StringUtils.hasText(size) ? size : "1K";
         String rt = StringUtils.hasText(ratio) ? ratio : "1:1";
+        long start = System.currentTimeMillis();
+        String callParams = "model=" + cfg.model() + ", providerId=" + cfg.providerId()
+                + ", size=" + sz + ", ratio=" + rt + ", promptLen=" + (prompt == null ? 0 : prompt.length());
 
         Map<String, Object> body = new HashMap<>();
         body.put("model", cfg.model());
@@ -121,31 +125,41 @@ public class AiImageTaskWorker {
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
                 .build();
 
-        HttpResponse<String> response = httpClient.send(request,
-                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        int status = response.statusCode();
-        String respBody = response.body();
-        if (status != 200) {
-            log.warn("AI 图片生成失败: status={}, providerId={}, body={}", status, cfg.providerId(), respBody);
-            throw new BusinessException(friendlyImageError(status, respBody));
-        }
+        try {
+            HttpResponse<String> response = httpClient.send(request,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            int status = response.statusCode();
+            String respBody = response.body();
+            if (status != 200) {
+                log.warn("AI 图片生成失败: status={}, providerId={}, body={}", status, cfg.providerId(), respBody);
+                throw new BusinessException(friendlyImageError(status, respBody));
+            }
 
-        JsonNode json = objectMapper.readTree(respBody);
-        JsonNode dataNode = json.path("data");
-        if (!dataNode.isArray() || dataNode.isEmpty()) {
-            throw new BusinessException("图片生成失败: 返回数据为空");
+            JsonNode json = objectMapper.readTree(respBody);
+            JsonNode dataNode = json.path("data");
+            if (!dataNode.isArray() || dataNode.isEmpty()) {
+                throw new BusinessException("图片生成失败: 返回数据为空");
+            }
+            String b64 = dataNode.path(0).path("b64_json").asText("");
+            byte[] bytes;
+            if (StringUtils.hasText(b64)) {
+                bytes = Base64.getDecoder().decode(b64);
+            } else {
+                String imgUrl = dataNode.path(0).path("url").asText("");
+                if (!StringUtils.hasText(imgUrl)) {
+                    throw new BusinessException("图片生成失败: 未返回图片数据");
+                }
+                bytes = downloadFile(imgUrl);
+                log.info("[AI图片] 供应商返回 URL，已下载 {} 字节", bytes.length);
+            }
+            externalCallLogger.success("AI图片", url, callParams + ", resultBytes=" + bytes.length,
+                    System.currentTimeMillis() - start);
+            return bytes;
+        } catch (Exception e) {
+            externalCallLogger.failure("AI图片", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
+            throw e;
         }
-        String b64 = dataNode.path(0).path("b64_json").asText("");
-        if (StringUtils.hasText(b64)) {
-            return Base64.getDecoder().decode(b64);
-        }
-        String imgUrl = dataNode.path(0).path("url").asText("");
-        if (!StringUtils.hasText(imgUrl)) {
-            throw new BusinessException("图片生成失败: 未返回图片数据");
-        }
-        byte[] bytes = downloadFile(imgUrl);
-        log.info("[AI图片] 供应商返回 URL，已下载 {} 字节", bytes.length);
-        return bytes;
     }
 
     private void markFailed(Long taskId, String msg) {

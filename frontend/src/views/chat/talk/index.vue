@@ -50,6 +50,7 @@ const abortRef = ref<AbortController | null>(null)
 const streamingContent = ref('')
 // 流式进度状态（generating_image/generating_audio），工具执行期间显示进度提示
 const streamingStatus = ref('')
+const streamError = ref('')
 // TTS 音色（仅登录用户工具调用生效；用户选了具体音色则按音色所属引擎走覆盖系统开关）
 const ttsVoice = ref<string | null>(null)
 
@@ -116,6 +117,7 @@ async function loadModels() {
 async function selectSession(id: number) {
   currentSessionId.value = id
   loadingMessages.value = true
+  streamError.value = ''
   try {
     messages.value = await getChatMessages(id)
     scrollToBottom()
@@ -189,6 +191,7 @@ async function send() {
   })
   streamingContent.value = ''
   streamingStatus.value = ''
+  streamError.value = ''
   input.value = ''
   streaming.value = true
   const ac = new AbortController()
@@ -226,13 +229,16 @@ async function send() {
     sessions.value = await listMyChatSessions()
   } catch (e) {
     streaming.value = false
-    streamingContent.value = ''
     streamingStatus.value = ''
-    if ((e as Error).name !== 'AbortError') {
-      message.error('请求失败: ' + (e as Error).message)
-    }
+    const aborted = (e as Error).name === 'AbortError'
     if (currentSessionId.value) {
       await selectSession(currentSessionId.value)
+    }
+    if (!aborted) {
+      streamError.value = (e as Error).message || '请求失败'
+      message.error('请求失败: ' + streamError.value)
+    } else {
+      streamingContent.value = ''
     }
   } finally {
     abortRef.value = null
@@ -398,6 +404,13 @@ onMounted(() => {
                   ? '正在合成语音…'
                   : '正在思考…'
             }}</span>
+          </div>
+        </div>
+        <div v-if="streamError" class="msg-row assistant">
+          <div class="msg-role">AI</div>
+          <div class="bubble error">
+            <span class="error-title">回复失败</span>
+            <span class="error-detail">{{ streamError }}</span>
           </div>
         </div>
         <NEmpty v-if="!loadingMessages && messages.length === 0 && !streaming" description="开始一段新对话" style="margin: auto" />
@@ -574,6 +587,20 @@ onMounted(() => {
 .typing {
   opacity: 0.6;
   font-style: italic;
+}
+.bubble.error {
+  background: rgba(208, 48, 80, 0.12);
+  color: #d03050;
+}
+.error-title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.error-detail {
+  display: block;
+  font-size: 13px;
+  opacity: 0.85;
 }
 .msg-copy {
   margin-top: 4px;

@@ -52,6 +52,7 @@ public class AiChatService {
     private final SysAiUsageService sysAiUsageService;
     private final SysAiChatRecordService sysAiChatRecordService;
     private final AiChatToolService aiChatToolService;
+    private final ExternalCallLogger externalCallLogger;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -146,6 +147,9 @@ public class AiChatService {
             final Long providerId = cfg.providerId();
             final String finalModel = model;
             final boolean[] recorded = {false};
+            final String operator = finalSubjectType + ":" + finalSubjectId;
+            final String callParams = "model=" + finalModel + ", providerId=" + providerId
+                    + ", promptLen=" + prompt.length() + ", subject=" + operator;
 
             httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
                     .thenAccept(response -> {
@@ -153,6 +157,8 @@ public class AiChatService {
                             String errMsg = "LLM 返回错误: HTTP " + response.statusCode();
                             recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
                                     prompt, null, "failed", errMsg, requestTime, requestTimeMillis);
+                            externalCallLogger.failure("LLM流式", url, callParams, errMsg,
+                                    System.currentTimeMillis() - requestTimeMillis, operator);
                             sendError(emitter, errMsg);
                             return;
                         }
@@ -162,6 +168,8 @@ public class AiChatService {
                                     sr.hasUsage(), sr.usage(), finalSubjectType, finalSubjectId);
                             recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
                                     prompt, sr.content(), "success", null, requestTime, requestTimeMillis);
+                            externalCallLogger.success("LLM流式", url, callParams + ", resultLen=" + sr.content().length(),
+                                    System.currentTimeMillis() - requestTimeMillis, operator);
                             emitter.send(SseEmitter.event()
                                     .data(Map.of("done", true), MediaType.APPLICATION_JSON));
                             emitter.complete();
@@ -172,6 +180,8 @@ public class AiChatService {
                             log.info("流式响应结束: {}", e.getMessage());
                             recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
                                     prompt, null, "failed", e.getMessage(), requestTime, requestTimeMillis);
+                            externalCallLogger.failure("LLM流式", url, callParams, e.getMessage(),
+                                    System.currentTimeMillis() - requestTimeMillis, operator);
                             try {
                                 emitter.complete();
                             } catch (Exception ignored) {
@@ -182,6 +192,8 @@ public class AiChatService {
                         log.error("调用 LLM 失败: {}", e.getMessage(), e);
                         recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
                                 prompt, null, "failed", e.getMessage(), requestTime, requestTimeMillis);
+                        externalCallLogger.failure("LLM流式", url, callParams, e.getMessage(),
+                                System.currentTimeMillis() - requestTimeMillis, operator);
                         sendError(emitter, e.getMessage());
                         return null;
                     });
@@ -196,6 +208,9 @@ public class AiChatService {
         String url = chatCompletionsUrl(cfg);
         String model = cfg.model();
         Subject subject = currentSubject();
+        long start = System.currentTimeMillis();
+        String callParams = "model=" + model + ", providerId=" + cfg.providerId()
+                + ", promptLen=" + prompt.length() + ", subject=" + subject.type() + ":" + subject.id();
 
         try {
             Map<String, Object> body = new HashMap<>();
@@ -231,13 +246,19 @@ public class AiChatService {
             recordTokenUsage(cfg, model, prompt, content, usage != null, usage,
                     subject.type(), subject.id());
 
+            externalCallLogger.success("LLM非流式", url, callParams + ", resultLen=" + content.length(),
+                    System.currentTimeMillis() - start);
             log.info("AI 非流式响应完成 tokens={}/{}/{} source={}",
                     usage == null ? 0 : usage[0], usage == null ? 0 : usage[1],
                     usage == null ? 0 : usage[2], usage != null ? "usage" : "estimate");
             return content;
         } catch (BusinessException e) {
+            externalCallLogger.failure("LLM非流式", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             throw e;
         } catch (Exception e) {
+            externalCallLogger.failure("LLM非流式", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             log.error("AI 非流式调用失败: {}", e.getMessage(), e);
             throw new BusinessException("AI 调用失败: " + e.getMessage());
         }
@@ -267,9 +288,10 @@ public class AiChatService {
 
     private void sendError(SseEmitter emitter, String message) {
         try {
+            // 前端 fetch+ReadableStream 只解析默认 message 事件的 data；
+            // 历史上这里用了 name("error") 命名事件，导致错误被静默丢弃、页面只看到空白块
             emitter.send(SseEmitter.event()
-                    .name("error")
-                    .data(Map.of("error", message), MediaType.APPLICATION_JSON));
+                    .data(Map.of("error", message == null ? "AI 服务异常" : message), MediaType.APPLICATION_JSON));
             emitter.complete();
         } catch (Exception e) {
             emitter.completeWithError(e);
@@ -354,10 +376,18 @@ public class AiChatService {
 
             log.info("AI 多轮流式: model={}, msgCount={}, subject={}:{}", model, messages.size(), subject.type(), subject.id());
 
+            long requestTimeMillis = System.currentTimeMillis();
+            String operator = subject.type() + ":" + subject.id();
+            String callParams = "model=" + model + ", providerId=" + cfg.providerId()
+                    + ", msgCount=" + messages.size() + ", subject=" + operator;
+
             httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
                     .thenAccept(response -> {
                         if (response.statusCode() != 200) {
-                            sendError(emitter, "LLM 返回错误: HTTP " + response.statusCode());
+                            String errMsg = "LLM 返回错误: HTTP " + response.statusCode();
+                            externalCallLogger.failure("LLM多轮流式", url, callParams, errMsg,
+                                    System.currentTimeMillis() - requestTimeMillis, operator);
+                            sendError(emitter, errMsg);
                             return;
                         }
                         try (InputStream is = response.body()) {
@@ -371,16 +401,22 @@ public class AiChatService {
                                     log.warn("多轮流式 onComplete 回调失败（不影响流式）: {}", ce.getMessage());
                                 }
                             }
+                            externalCallLogger.success("LLM多轮流式", url, callParams + ", resultLen=" + sr.content().length(),
+                                    System.currentTimeMillis() - requestTimeMillis, operator);
                             emitter.send(SseEmitter.event().data(Map.of("done", true), MediaType.APPLICATION_JSON));
                             emitter.complete();
                             log.info("AI 多轮流式完成 tokens={}/{}/{}", sr.usage()[0], sr.usage()[1], sr.usage()[2]);
                         } catch (Exception e) {
                             log.info("多轮流式响应结束: {}", e.getMessage());
+                            externalCallLogger.failure("LLM多轮流式", url, callParams, e.getMessage(),
+                                    System.currentTimeMillis() - requestTimeMillis, operator);
                             try { emitter.complete(); } catch (Exception ignored) {}
                         }
                     })
                     .exceptionally(e -> {
                         log.error("调用 LLM 失败: {}", e.getMessage(), e);
+                        externalCallLogger.failure("LLM多轮流式", url, callParams, e.getMessage(),
+                                System.currentTimeMillis() - requestTimeMillis, operator);
                         sendError(emitter, e.getMessage());
                         return null;
                     });
@@ -394,6 +430,9 @@ public class AiChatService {
         String url = chatCompletionsUrl(cfg);
         String model = cfg.model();
         Subject subject = currentSubject();
+        long start = System.currentTimeMillis();
+        String callParams = "model=" + model + ", providerId=" + cfg.providerId()
+                + ", msgCount=" + messages.size() + ", subject=" + subject.type() + ":" + subject.id();
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("model", model);
@@ -420,12 +459,18 @@ public class AiChatService {
             int[] usage = parseUsage(json.path("usage"));
             recordTokenUsageForMessages(cfg, model, messages, content, usage != null, usage,
                     subject.type(), subject.id());
+            externalCallLogger.success("LLM非流式多消息", url, callParams + ", resultLen=" + content.length(),
+                    System.currentTimeMillis() - start);
             log.info("AI 非流式多消息完成 tokens={}/{}/{}",
                     usage == null ? 0 : usage[0], usage == null ? 0 : usage[1], usage == null ? 0 : usage[2]);
             return content;
         } catch (BusinessException e) {
+            externalCallLogger.failure("LLM非流式多消息", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             throw e;
         } catch (Exception e) {
+            externalCallLogger.failure("LLM非流式多消息", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             log.error("AI 非流式多消息调用失败: {}", e.getMessage(), e);
             throw new BusinessException("AI 调用失败: " + e.getMessage());
         }
@@ -451,6 +496,10 @@ public class AiChatService {
         String url = chatCompletionsUrl(cfg);
         String model = cfg.model();
         Subject subject = currentSubject();
+        long start = System.currentTimeMillis();
+        String callParams = "model=" + model + ", providerId=" + cfg.providerId()
+                + ", msgCount=" + messages.size() + ", tools=" + (tools != null ? tools.size() : 0)
+                + ", subject=" + subject.type() + ":" + subject.id();
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("model", model);
@@ -485,10 +534,17 @@ public class AiChatService {
             int[] usage = parseUsage(json.path("usage"));
             recordTokenUsageForMessages(cfg, model, messages, msgNode.path("content").asText(""),
                     usage != null, usage, subject.type(), subject.id());
+            externalCallLogger.success("LLM工具判定(非流式)", url, callParams
+                            + ", hasToolCalls=" + msgNode.path("tool_calls").isArray(),
+                    System.currentTimeMillis() - start);
             return json;
         } catch (BusinessException e) {
+            externalCallLogger.failure("LLM工具判定(非流式)", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             throw e;
         } catch (Exception e) {
+            externalCallLogger.failure("LLM工具判定(非流式)", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start);
             log.error("AI 工具判定调用失败: {}", e.getMessage(), e);
             throw new BusinessException("AI 调用失败: " + e.getMessage());
         }
@@ -550,12 +606,21 @@ public class AiChatService {
                 log.warn("AI 聊天工具判定请求体不含 tools（为空），LLM 不知道有工具可用");
             }
 
+            long firstStart = System.currentTimeMillis();
+            String operator = subject.type() + ":" + subject.id();
+            String firstCallParams = "model=" + model + ", providerId=" + cfg.providerId()
+                    + ", msgCount=" + messages.size() + ", tools=" + (tools != null ? tools.size() : 0)
+                    + ", subject=" + operator;
+
             httpClient.sendAsync(firstRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                     .thenAccept(firstResponse -> {
                         if (firstResponse.statusCode() != 200) {
                             // 上游错误体可能含用户内容，截断后记录，避免日志泄露
                             log.error("AI 聊天工具判定失败: HTTP {} body={}",
                                     firstResponse.statusCode(), truncate(firstResponse.body(), 200));
+                            externalCallLogger.failure("LLM工具判定", url, firstCallParams,
+                                    "HTTP " + firstResponse.statusCode(),
+                                    System.currentTimeMillis() - firstStart, operator);
                             sendError(emitter, "LLM 返回错误: HTTP " + firstResponse.statusCode());
                             safeOnComplete(onComplete, new AiChatResult(null, null, null));
                             return;
@@ -571,6 +636,10 @@ public class AiChatService {
                                     hasToolCalls,
                                     toolCallsNode.isArray() ? toolCallsNode.size() : 0,
                                     firstMsg.path("content").asText("").length());
+                            externalCallLogger.success("LLM工具判定", url, firstCallParams
+                                            + ", hasToolCalls=" + hasToolCalls
+                                            + ", toolCallsCount=" + (toolCallsNode.isArray() ? toolCallsNode.size() : 0),
+                                    System.currentTimeMillis() - firstStart, operator);
 
                             // 记第一次 token
                             int[] usage1 = parseUsage(firstJson.path("usage"));
@@ -625,12 +694,16 @@ public class AiChatService {
                             doSecondStream(emitter, url, cfg, model, secondMessages, onComplete, toolResult, subject.type(), subject.id());
                         } catch (Exception e) {
                             log.error("AI 聊天工具判定处理失败: {}", e.getMessage(), e);
+                            externalCallLogger.failure("LLM工具判定", url, firstCallParams, e.getMessage(),
+                                    System.currentTimeMillis() - firstStart, operator);
                             sendError(emitter, e.getMessage());
                             safeOnComplete(onComplete, new AiChatResult(null, null, null));
                         }
                     })
                     .exceptionally(e -> {
                         log.error("AI 聊天工具判定调用失败: {}", e.getMessage(), e);
+                        externalCallLogger.failure("LLM工具判定", url, firstCallParams, e.getMessage(),
+                                System.currentTimeMillis() - firstStart, operator);
                         sendError(emitter, e.getMessage());
                         safeOnComplete(onComplete, new AiChatResult(null, null, null));
                         return null;
@@ -664,10 +737,17 @@ public class AiChatService {
 
             log.info("AI 聊天第二次流式(工具后): model={}, msgCount={}", model, messages.size());
 
+            long start = System.currentTimeMillis();
+            String operator = subjectType + ":" + subjectId;
+            String callParams = "model=" + model + ", providerId=" + cfg.providerId()
+                    + ", msgCount=" + messages.size() + ", subject=" + operator;
+
             httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
                     .thenAccept(response -> {
                         if (response.statusCode() != 200) {
                             log.error("AI 聊天第二次流式失败: HTTP {}", response.statusCode());
+                            externalCallLogger.failure("LLM工具后流式", url, callParams,
+                                    "HTTP " + response.statusCode(), System.currentTimeMillis() - start, operator);
                             sendError(emitter, "LLM 返回错误: HTTP " + response.statusCode());
                             safeOnComplete(onComplete, new AiChatResult(null, toolResult.attachmentType(), toolResult.attachmentFileId()));
                             return;
@@ -676,6 +756,8 @@ public class AiChatService {
                             StreamResult sr = parseStream(is, emitter);
                             recordTokenUsageForMessages(cfg, model, messages, sr.content(),
                                     sr.hasUsage(), sr.usage(), subjectType, subjectId);
+                            externalCallLogger.success("LLM工具后流式", url, callParams + ", resultLen=" + sr.content().length(),
+                                    System.currentTimeMillis() - start, operator);
                             emitter.send(SseEmitter.event().data(Map.of("done", true), MediaType.APPLICATION_JSON));
                             emitter.complete();
                             safeOnComplete(onComplete, new AiChatResult(sr.content(),
@@ -683,11 +765,15 @@ public class AiChatService {
                             log.info("AI 聊天第二次流式完成 tokens={}/{}/{}", sr.usage()[0], sr.usage()[1], sr.usage()[2]);
                         } catch (Exception e) {
                             log.info("AI 聊天第二次流式响应结束: {}", e.getMessage());
+                            externalCallLogger.failure("LLM工具后流式", url, callParams, e.getMessage(),
+                                    System.currentTimeMillis() - start, operator);
                             try { emitter.complete(); } catch (Exception ignored) {}
                         }
                     })
                     .exceptionally(e -> {
                         log.error("AI 聊天第二次流式调用失败: {}", e.getMessage(), e);
+                        externalCallLogger.failure("LLM工具后流式", url, callParams, e.getMessage(),
+                                System.currentTimeMillis() - start, operator);
                         sendError(emitter, e.getMessage());
                         return null;
                     });
