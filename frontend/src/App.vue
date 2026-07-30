@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watchEffect } from 'vue'
 import { darkTheme, zhCN, dateZhCN, type GlobalThemeOverrides } from 'naive-ui'
 import { useThemeStore } from '@/store/theme'
 
@@ -14,6 +14,10 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => ({
     borderRadius: '6px',
   },
 }))
+
+watchEffect(() => {
+  document.documentElement.style.setProperty('--primary-color', themeStore.primaryColor)
+})
 </script>
 
 <template>

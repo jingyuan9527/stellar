@@ -243,6 +243,15 @@ function stop() {
   abortRef.value?.abort()
 }
 
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success('已复制')
+  } catch {
+    message.error('复制失败')
+  }
+}
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
@@ -366,6 +375,16 @@ onMounted(() => {
               />
               <span v-if="m.content" class="msg-text">{{ m.content }}</span>
             </div>
+            <NButton
+              v-if="m.content"
+              class="msg-copy"
+              size="tiny"
+              text
+              type="primary"
+              @click="copyText(m.content)"
+            >
+              复制
+            </NButton>
           </div>
         </template>
         <div v-if="streaming" class="msg-row assistant">
@@ -556,6 +575,15 @@ onMounted(() => {
   opacity: 0.6;
   font-style: italic;
 }
+.msg-copy {
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.msg-row:hover .msg-copy,
+.msg-copy:focus-visible {
+  opacity: 1;
+}
 .input-area {
   padding: 12px 16px 16px;
   border-top: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.15));
@@ -595,6 +623,9 @@ onMounted(() => {
   }
   .input-area {
     padding: 8px 12px 12px;
+  }
+  .msg-copy {
+    opacity: 1;
   }
 }
 </style>
