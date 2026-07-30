@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import {
   NCard, NSpace, NButton, NDataTable, NModal, NFormItem,
   NInput, NSelect, NPopconfirm, useMessage,
@@ -12,8 +12,10 @@ import {
 import { getUserList } from '@/api/user'
 import { formatTime } from '@/utils/format'
 import type { AiMemory, AiChatSessionAdmin, SysUser } from '@/types/api'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
+const isMobile = useIsMobile()
 
 // ===== 记忆列表 =====
 const loading = ref(false)
@@ -30,7 +32,7 @@ const pagination = reactive({
 
 
 
-const columns: DataTableColumns<AiMemory> = [
+const allColumns: DataTableColumns<AiMemory> = [
   { title: 'ID', key: 'id', width: 70 },
   {
     title: '内容', key: 'content', ellipsis: { tooltip: true },
@@ -55,6 +57,13 @@ const columns: DataTableColumns<AiMemory> = [
     }),
   },
 ]
+
+const mobileHiddenKeys = new Set(['id', 'sourceSessionId'])
+const columns = computed<DataTableColumns<AiMemory>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => !mobileHiddenKeys.has((c as { key?: string }).key ?? ''))
+    : allColumns,
+)
 
 async function loadData() {
   loading.value = true

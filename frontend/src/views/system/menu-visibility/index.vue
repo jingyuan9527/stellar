@@ -134,6 +134,7 @@ onMounted(loadData)
         :loading="loading"
         :row-key="(row: Row) => row.routeKey"
         :pagination="false"
+        :scroll-x="700"
         :bordered="false"
       />
     </NCard>

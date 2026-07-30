@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   NCard, NSpace, NInput, NSelect, NButton, NDataTable, NTag, NSwitch,
   NModal, NFormItem, NUpload, NPopconfirm, NTabs, NTabPane, useMessage,
@@ -14,8 +14,10 @@ import { formatTime } from '@/utils/format'
 import { uploadFile } from '@/api/file'
 import { getSetting, setSetting } from '@/api/ai'
 import type { ConchAnswer, ConchAnswerQuery, ConchRecord } from '@/types/api'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
+const isMobile = useIsMobile()
 
 // ===== AI 匹配开关 =====
 const conchAiEnabled = ref(1)
@@ -85,9 +87,9 @@ async function togglePlay(id: number) {
   }
 }
 
-const columns: DataTableColumns<ConchAnswer> = [
+const allColumns: DataTableColumns<ConchAnswer> = [
   { title: 'ID', key: 'id', width: 70 },
-  { title: '回答文本', key: 'answerText', width: 160 },
+  { title: '回答文本', key: 'answerText', width: 160, ellipsis: { tooltip: true } },
   {
     title: '匹配描述', key: 'matchDescription', ellipsis: { tooltip: true },
     render: (row) => row.matchDescription
@@ -124,6 +126,13 @@ const columns: DataTableColumns<ConchAnswer> = [
     }),
   },
 ]
+
+const mobileHiddenKeys = new Set(['id', 'createTime'])
+const columns = computed<DataTableColumns<ConchAnswer>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => !mobileHiddenKeys.has((c as { key?: string }).key ?? ''))
+    : allColumns,
+)
 
 async function loadData() {
   loading.value = true
@@ -246,7 +255,7 @@ const recordData = ref<ConchRecord[]>([])
 const recordTotal = ref(0)
 const recordPage = reactive({ pageNum: 1, pageSize: 10 })
 
-const recordColumns: DataTableColumns<ConchRecord> = [
+const allRecordColumns: DataTableColumns<ConchRecord> = [
   { title: 'ID', key: 'id', width: 70 },
   { title: '问题', key: 'questionText', ellipsis: { tooltip: true } },
   {
@@ -261,6 +270,13 @@ const recordColumns: DataTableColumns<ConchRecord> = [
   },
   { title: '时间', key: 'createTime', width: 160, render: (row) => formatTime(row.createTime) },
 ]
+
+const mobileHiddenRecordKeys = new Set(['id', 'userId'])
+const recordColumns = computed<DataTableColumns<ConchRecord>>(() =>
+  isMobile.value
+    ? allRecordColumns.filter((c) => !mobileHiddenRecordKeys.has((c as { key?: string }).key ?? ''))
+    : allRecordColumns,
+)
 
 async function loadRecords() {
   recordLoading.value = true
@@ -346,6 +362,7 @@ onMounted(() => {
               showSizePicker: false,
               onChange: handlePageChange,
             }"
+            :scroll-x="800"
             :bordered="false"
           />
 
@@ -366,6 +383,7 @@ onMounted(() => {
               showSizePicker: false,
               onChange: handleRecordPageChange,
             }"
+            :scroll-x="600"
             :bordered="false"
           />
         </NTabPane>

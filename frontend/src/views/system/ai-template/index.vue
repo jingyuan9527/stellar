@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import {
   NCard, NSpace, NInput, NSelect, NButton, NDataTable, NTag,
   NModal, NFormItem, NPopconfirm, useMessage,
@@ -8,8 +8,10 @@ import type { DataTableColumns, SelectOption } from 'naive-ui'
 import { getAiTemplatePage, createAiTemplate, updateAiTemplate, deleteAiTemplate, resetAiTemplate } from '@/api/ai'
 import type { AiTemplate, AiTemplateQuery } from '@/types/api'
 import { formatTime } from '@/utils/format'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
+const isMobile = useIsMobile()
 
 const query = reactive<AiTemplateQuery>({
   name: '',
@@ -36,7 +38,7 @@ const platformOptions: SelectOption[] = Object.entries(platformLabels).map(([v, 
 
 
 
-const columns: DataTableColumns<AiTemplate> = [
+const allColumns: DataTableColumns<AiTemplate> = [
   { title: 'ID', key: 'id', width: 70 },
   { title: '名称', key: 'name', width: 140 },
   {
@@ -72,6 +74,13 @@ const columns: DataTableColumns<AiTemplate> = [
     }),
   },
 ]
+
+const mobileHiddenKeys = new Set(['id', 'builtIn', 'updateTime'])
+const columns = computed<DataTableColumns<AiTemplate>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => !mobileHiddenKeys.has((c as { key?: string }).key ?? ''))
+    : allColumns,
+)
 
 async function loadData() {
   loading.value = true
@@ -199,6 +208,7 @@ onMounted(loadData)
           showSizePicker: false,
           onChange: handlePageChange,
         }"
+        :scroll-x="800"
         :bordered="false"
       />
     </NCard>

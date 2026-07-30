@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import {
   NCard, NSpace, NButton, NDataTable, NTag, NModal, NFormItem,
   NInput, NSelect, NUpload, NPopconfirm, NAlert, useMessage,
@@ -13,8 +13,10 @@ import {
 import { formatTime } from '@/utils/format'
 import { getAiModelsByType } from '@/api/ai'
 import type { AiKnowledgeBase, AiKnowledgeChunk, AiModel } from '@/types/api'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
+const isMobile = useIsMobile()
 
 // ===== 知识库列表 =====
 const kbLoading = ref(false)
@@ -31,7 +33,7 @@ const embeddingOptions = () => embeddingModels.value.map((m) => ({
 
 
 
-const kbColumns: DataTableColumns<AiKnowledgeBase> = [
+const allKbColumns: DataTableColumns<AiKnowledgeBase> = [
   { title: 'ID', key: 'id', width: 70 },
   { title: '名称', key: 'name', width: 160 },
   { title: '描述', key: 'description', ellipsis: { tooltip: true } },
@@ -62,6 +64,13 @@ const kbColumns: DataTableColumns<AiKnowledgeBase> = [
     }),
   },
 ]
+
+const mobileHiddenKbKeys = new Set(['id', 'updateTime'])
+const kbColumns = computed<DataTableColumns<AiKnowledgeBase>>(() =>
+  isMobile.value
+    ? allKbColumns.filter((c) => !mobileHiddenKbKeys.has((c as { key?: string }).key ?? ''))
+    : allKbColumns,
+)
 
 async function loadKbs() {
   kbLoading.value = true
@@ -181,7 +190,7 @@ const chunkPagination = reactive({
   onChange: (page: number) => { chunkPagination.page = page; loadChunks() },
 })
 
-const chunkColumns: DataTableColumns<AiKnowledgeChunk> = [
+const allChunkColumns: DataTableColumns<AiKnowledgeChunk> = [
   { title: '序号', key: 'chunkIndex', width: 70 },
   { title: '内容', key: 'chunkText', ellipsis: { tooltip: true } },
   { title: '来源', key: 'sourceName', width: 140, render: (row) => row.sourceName || '-' },
@@ -194,6 +203,13 @@ const chunkColumns: DataTableColumns<AiKnowledgeChunk> = [
     }),
   },
 ]
+
+const mobileHiddenChunkKeys = new Set(['tokenCount'])
+const chunkColumns = computed<DataTableColumns<AiKnowledgeChunk>>(() =>
+  isMobile.value
+    ? allChunkColumns.filter((c) => !mobileHiddenChunkKeys.has((c as { key?: string }).key ?? ''))
+    : allChunkColumns,
+)
 
 async function loadChunks() {
   if (!selectedKbId.value) return

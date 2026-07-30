@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import {
   NCard, NSpace, NInput, NSelect, NButton, NDataTable, NTag, NSwitch,
   NModal, NFormItem, NPopconfirm, NAlert, useMessage,
@@ -12,8 +12,10 @@ import {
   toggleAiModelEnabled, setAiModelDefault,
 } from '@/api/ai'
 import type { AiProvider, AiModel } from '@/types/api'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
+const isMobile = useIsMobile()
 
 // 模型类型选项（与后端字典 model_type 数据一致）
 const modelTypeOptions = [
@@ -114,7 +116,7 @@ async function handleTestProvider(id: number) {
   }
 }
 
-const providerColumns: DataTableColumns<AiProvider> = [
+const allProviderColumns: DataTableColumns<AiProvider> = [
   { title: 'ID', key: 'id', width: 60 },
   { title: '名称', key: 'name', width: 120 },
   { title: '接口地址', key: 'endpoint', ellipsis: { tooltip: true } },
@@ -143,6 +145,13 @@ const providerColumns: DataTableColumns<AiProvider> = [
     }),
   },
 ]
+
+const mobileHiddenProviderKeys = new Set(['id', 'apiKey'])
+const providerColumns = computed<DataTableColumns<AiProvider>>(() =>
+  isMobile.value
+    ? allProviderColumns.filter((c) => !mobileHiddenProviderKeys.has((c as { key?: string }).key ?? ''))
+    : allProviderColumns,
+)
 
 // 供应商编辑
 const providerEditShow = ref(false)
@@ -232,7 +241,7 @@ async function handleDeleteModel(id: number) {
   }
 }
 
-const modelColumns: DataTableColumns<AiModel> = [
+const allModelColumns: DataTableColumns<AiModel> = [
   { title: 'ID', key: 'id', width: 60 },
   { title: '模型名', key: 'model', ellipsis: { tooltip: true } },
   {
@@ -267,6 +276,13 @@ const modelColumns: DataTableColumns<AiModel> = [
     }),
   },
 ]
+
+const mobileHiddenModelKeys = new Set(['id', 'sortOrder'])
+const modelColumns = computed<DataTableColumns<AiModel>>(() =>
+  isMobile.value
+    ? allModelColumns.filter((c) => !mobileHiddenModelKeys.has((c as { key?: string }).key ?? ''))
+    : allModelColumns,
+)
 
 // 模型编辑
 const modelEditShow = ref(false)

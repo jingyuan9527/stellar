@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import {
   NCard, NForm, NFormItem, NInput, NSelect, NDatePicker, NButton, NSpace,
   NDataTable, NTag, NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem,
@@ -10,8 +10,10 @@ import { getLogPage, getLogDetail, exportLogs } from '@/api/log'
 import type { SysLog, SysLogQuery } from '@/types/api'
 import { iconMap } from '@/utils/icons'
 import { formatTime } from '@/utils/format'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
+const isMobile = useIsMobile()
 
 const query = reactive<SysLogQuery>({
   module: '',
@@ -47,7 +49,7 @@ const opTypeColor: Record<string, string> = {
 
 
 
-const columns: DataTableColumns<SysLog> = [
+const allColumns: DataTableColumns<SysLog> = [
   { title: 'ID', key: 'id', width: 70 },
   { title: '模块', key: 'module', width: 120 },
   {
@@ -72,6 +74,13 @@ const columns: DataTableColumns<SysLog> = [
       { icon: () => h(NIcon, null, { default: () => h(iconMap.eye) }), default: () => '详情' }),
   },
 ]
+
+const mobileHiddenKeys = new Set(['id', 'requestMethod', 'ip', 'duration'])
+const columns = computed<DataTableColumns<SysLog>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => !mobileHiddenKeys.has((c as { key?: string }).key ?? ''))
+    : allColumns,
+)
 
 const pagination = reactive({
   page: 1,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import {
   NCard, NSpace, NButton, NDataTable, NTag, NDrawer, NDrawerContent,
   NPopconfirm, NEmpty, useMessage,
@@ -8,8 +8,11 @@ import type { DataTableColumns } from 'naive-ui'
 import { pageAllChatSessions, getChatMessagesAdmin, deleteChatSessionAdmin } from '@/api/chat'
 import type { AiChatSessionAdmin, AiChatMessage } from '@/types/api'
 import { formatTime } from '@/utils/format'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
+const isMobile = useIsMobile()
+const drawerWidth = computed(() => (isMobile.value ? '100%' : 520))
 
 const loading = ref(false)
 const tableData = ref<AiChatSessionAdmin[]>([])
@@ -26,7 +29,7 @@ const pagination = reactive({
 
 
 
-const columns: DataTableColumns<AiChatSessionAdmin> = [
+const allColumns: DataTableColumns<AiChatSessionAdmin> = [
   { title: 'ID', key: 'id', width: 70 },
   { title: '标题', key: 'title', ellipsis: { tooltip: true } },
   {
@@ -55,6 +58,13 @@ const columns: DataTableColumns<AiChatSessionAdmin> = [
     }),
   },
 ]
+
+const mobileHiddenKeys = new Set(['id', 'updateTime'])
+const columns = computed<DataTableColumns<AiChatSessionAdmin>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => !mobileHiddenKeys.has((c as { key?: string }).key ?? ''))
+    : allColumns,
+)
 
 async function loadData() {
   loading.value = true
@@ -115,7 +125,7 @@ onMounted(loadData)
       />
     </NCard>
 
-    <NDrawer v-model:show="drawerShow" :width="520" placement="right">
+    <NDrawer v-model:show="drawerShow" :width="drawerWidth" placement="right">
       <NDrawerContent title="会话消息" closable>
         <div v-if="drawerLoading" style="text-align: center; padding: 40px">加载中…</div>
         <div v-else class="msg-stream">

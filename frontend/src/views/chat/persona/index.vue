@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import {
   NCard, NSpace, NInput, NButton, NDataTable, NTag, NSwitch,
   NModal, NFormItem, NPopconfirm, NInputNumber, useMessage,
@@ -11,15 +11,17 @@ import {
 } from '@/api/chat'
 import type { AiPersona } from '@/types/api'
 import { formatTime } from '@/utils/format'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
+const isMobile = useIsMobile()
 
 const loading = ref(false)
 const tableData = ref<AiPersona[]>([])
 
 
 
-const columns: DataTableColumns<AiPersona> = [
+const allColumns: DataTableColumns<AiPersona> = [
   { title: 'ID', key: 'id', width: 70 },
   { title: '名称', key: 'name', width: 140 },
   { title: '描述', key: 'description', ellipsis: { tooltip: true } },
@@ -62,6 +64,13 @@ const columns: DataTableColumns<AiPersona> = [
     }),
   },
 ]
+
+const mobileHiddenKeys = new Set(['id', 'systemPrompt', 'sortOrder', 'updateTime'])
+const columns = computed<DataTableColumns<AiPersona>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => !mobileHiddenKeys.has((c as { key?: string }).key ?? ''))
+    : allColumns,
+)
 
 async function loadData() {
   loading.value = true

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, h, onBeforeUnmount, reactive, ref } from 'vue'
 import {
   NCard, NForm, NFormItem, NInput, NSelect, NDatePicker, NButton, NSpace,
   NDataTable, NTag, NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem,
@@ -12,9 +12,11 @@ import { iconMap } from '@/utils/icons'
 import { getVoiceLabel, ttsVoiceOptions } from '@/constants/tts-voices'
 import { formatTime } from '@/utils/format'
 import { useAuthStore } from '@/store/auth'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
 const authStore = useAuthStore()
+const isMobile = useIsMobile()
 
 const query = reactive<TtsRecordQuery>({
   text: '',
@@ -47,7 +49,7 @@ function formatParams(rate?: number, pitch?: number, volume?: number): string {
   ].join(' / ')
 }
 
-const columns: DataTableColumns<TtsRecord> = [
+const allColumns: DataTableColumns<TtsRecord> = [
   { title: 'ID', key: 'id', width: 70 },
   { title: '合成时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },
   {
@@ -84,6 +86,13 @@ const columns: DataTableColumns<TtsRecord> = [
     },
   },
 ]
+
+const mobileHiddenKeys = new Set(['id', 'params', 'fileSize'])
+const columns = computed<DataTableColumns<TtsRecord>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => !mobileHiddenKeys.has((c as { key?: string }).key ?? ''))
+    : allColumns,
+)
 
 const pagination = reactive({
   page: 1,

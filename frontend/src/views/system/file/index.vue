@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import {
   NCard, NForm, NFormItem, NInput, NSelect, NDatePicker, NButton, NSpace,
   NDataTable, NTag, NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem,
@@ -10,8 +10,11 @@ import { getFilePage, deleteFile, deleteFileBatch } from '@/api/file'
 import type { SysFile, SysFileQuery } from '@/types/api'
 import { iconMap } from '@/utils/icons'
 import { formatTime } from '@/utils/format'
+import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
+const isMobile = useIsMobile()
+const drawerWidth = computed(() => (isMobile.value ? '100%' : 560))
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'm4a', 'aac', 'ogg'])
@@ -57,7 +60,7 @@ const typeOptions: SelectOption[] = [
   { label: '音频', value: 'audio' },
 ]
 
-const columns: DataTableColumns<SysFile> = [
+const allColumns: DataTableColumns<SysFile> = [
   { type: 'selection' },
   { title: 'ID', key: 'id', width: 70 },
   {
@@ -109,6 +112,13 @@ const columns: DataTableColumns<SysFile> = [
       }),
   },
 ]
+
+const mobileHiddenKeys = new Set(['id', 'uploaderName'])
+const columns = computed<DataTableColumns<SysFile>>(() =>
+  isMobile.value
+    ? allColumns.filter((c) => !mobileHiddenKeys.has((c as { key?: string }).key ?? ''))
+    : allColumns,
+)
 
 const pagination = reactive({
   page: 1,
@@ -213,7 +223,7 @@ onMounted(loadData)
           <NSelect v-model:value="query.fileType" :options="typeOptions" style="width: 120px" />
         </NFormItem>
         <NFormItem label="时间范围">
-          <NDatePicker v-model:value="timeRange" type="datetimerange" clearable style="width: 360px" />
+          <NDatePicker v-model:value="timeRange" type="datetimerange" clearable style="width: 100%; max-width: 360px" />
         </NFormItem>
         <NSpace>
           <NButton type="primary" @click="handleSearch">
@@ -252,7 +262,7 @@ onMounted(loadData)
       />
     </NCard>
 
-    <NDrawer v-model:show="detailShow" :width="560" placement="right">
+    <NDrawer v-model:show="detailShow" :width="drawerWidth" placement="right">
       <NDrawerContent title="文件详情" :native-scrollbar="false" closable>
         <template v-if="detail">
           <div class="preview-box">
