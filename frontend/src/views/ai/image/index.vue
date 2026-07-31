@@ -17,6 +17,7 @@ const message = useMessage()
 const authStore = useAuthStore()
 const aiNotifyStore = useAiNotifyStore()
 const isMobile = useIsMobile()
+let disposed = false
 
 const models = ref<AiModel[]>([])
 const modelId = ref<number | null>(null)
@@ -135,7 +136,9 @@ const pagination = reactive({
 
 async function loadModels() {
   try {
-    models.value = await getAiModelsByType('IMAGE')
+    const result = await getAiModelsByType('IMAGE')
+    if (disposed) return
+    models.value = result
     if (modelId.value === null && models.value.length > 0) {
       const def = models.value.find((m) => m.isDefault === 1)
       modelId.value = def?.id ?? models.value[0].id
@@ -146,15 +149,17 @@ async function loadModels() {
 }
 
 async function loadHistory() {
+  if (disposed) return
   historyLoading.value = true
   try {
     const res = await getAiImagePage({ pageNum: pagination.page, pageSize: pagination.pageSize })
+    if (disposed) return
     history.value = res.records
     pagination.itemCount = res.total
   } catch {
     // 错误已由拦截器提示
   } finally {
-    historyLoading.value = false
+    if (!disposed) historyLoading.value = false
   }
 }
 
@@ -180,19 +185,21 @@ async function handleCreate() {
       size: size.value,
       ratio: ratio.value,
     })
+    if (disposed) return
     generating.value = true
     message.success('任务已创建，正在生成...')
     await refreshHistory()
   } catch {
     // 错误已由拦截器提示
   } finally {
-    creating.value = false
+    if (!disposed) creating.value = false
   }
 }
 
 async function handleDelete(taskId: number) {
   try {
     await deleteAiImage(taskId)
+    if (disposed) return
     message.success('删除成功')
     await loadHistory()
   } catch {
@@ -201,12 +208,12 @@ async function handleDelete(taskId: number) {
 }
 
 function onTaskNotify(msg: AiNotifyMessage) {
-  if (msg.type !== 'image') return
+  if (disposed || msg.type !== 'image') return
   generating.value = false
   if (msg.status === 'completed') {
     message.success('图片生成完成')
     refreshHistory().then(() => {
-      if (history.value[0]) openDrawer(history.value[0])
+      if (!disposed && history.value[0]) openDrawer(history.value[0])
     })
   } else {
     message.error('图片生成失败')
@@ -217,12 +224,14 @@ function onTaskNotify(msg: AiNotifyMessage) {
 let offNotify: (() => void) | null = null
 
 onMounted(() => {
+  disposed = false
   loadModels()
   loadHistory()
   offNotify = aiNotifyStore.onTaskNotify(onTaskNotify)
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   if (offNotify) offNotify()
 })
 </script>

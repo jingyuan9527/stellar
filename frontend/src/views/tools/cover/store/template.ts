@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { Platform, PromptTemplate } from '../types'
 import { builtinTemplates } from '../lib/builtinTemplates'
+import { createDebouncedPersist } from './debouncedPersist'
 
 const STORAGE_KEY = 'stellar-video:templates'
 
@@ -60,7 +61,8 @@ export const useTemplateStore = defineStore('video-template', () => {
     templates.value = loadState()
   }
 
-  watch(templates, persist, { deep: true })
+  const debouncedPersist = createDebouncedPersist(persist)
+  watch(templates, debouncedPersist.schedule, { deep: true })
 
   return { templates, addTemplate, updateTemplate, deleteTemplate, resetBuiltin, resetToBuiltin, rehydrate }
 })

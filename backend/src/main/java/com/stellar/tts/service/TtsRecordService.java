@@ -1,14 +1,11 @@
 package com.stellar.tts.service;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.ai.entity.AiTask;
 import com.stellar.ai.mapper.AiTaskMapper;
 import com.stellar.common.BusinessException;
-import com.stellar.system.entity.SysUser;
-import com.stellar.system.mapper.SysUserMapper;
 import com.stellar.tts.dto.TtsRecordQueryDTO;
 import com.stellar.tts.dto.TtsRequest;
 import com.stellar.tts.entity.TtsRecord;
@@ -27,30 +24,30 @@ import java.util.Map;
 public class TtsRecordService {
 
     private final AiTaskMapper aiTaskMapper;
-    private final SysUserMapper sysUserMapper;
     private final ObjectMapper objectMapper;
 
-    public void save(TtsRequest request, byte[] audio) {
+    public void save(TtsRequest request, byte[] audio, String subjectType, String subjectId) {
         saveRecord(request.getText(), request.getVoice(),
                 request.getRate(), request.getPitch(), request.getVolume(),
-                audio, "mp3");
+                audio, "mp3", subjectType, subjectId);
     }
 
-    public void saveAiTts(String text, String voice, byte[] audio) {
-        saveRecord(text, voice, 1.0, 1.0, 1.0, audio, "wav");
+    public void saveAiTts(String text, String voice, byte[] audio, String subjectType, String subjectId) {
+        saveRecord(text, voice, 1.0, 1.0, 1.0, audio, "wav", subjectType, subjectId);
     }
 
-    public void saveChatTts(String text, String voice, byte[] audio, String audioFormat) {
-        saveRecord(text, voice, 1.0, 1.0, 1.0, audio, audioFormat);
+    public void saveChatTts(String text, String voice, byte[] audio, String audioFormat,
+                            String subjectType, String subjectId) {
+        saveRecord(text, voice, 1.0, 1.0, 1.0, audio, audioFormat, subjectType, subjectId);
     }
 
     private void saveRecord(String text, String voice,
-                            Double rate, Double pitch, Double volume,
-                            byte[] audio, String audioFormat) {
+                             Double rate, Double pitch, Double volume,
+                             byte[] audio, String audioFormat, String subjectType, String subjectId) {
         AiTask task = new AiTask();
         task.setTaskType("tts");
-        task.setSubjectType("account");
-        task.setSubjectId(getCurrentUsername());
+        task.setSubjectType(subjectType);
+        task.setSubjectId(subjectId);
         task.setPrompt(text);
         task.setStatus("success");
         task.setFileData(audio);
@@ -124,13 +121,4 @@ public class TtsRecordService {
         }
     }
 
-    private String getCurrentUsername() {
-        try {
-            Long userId = StpUtil.getLoginIdAsLong();
-            SysUser user = sysUserMapper.selectById(userId);
-            return user != null ? user.getUsername() : "anonymous";
-        } catch (Exception e) {
-            return "anonymous";
-        }
-    }
 }

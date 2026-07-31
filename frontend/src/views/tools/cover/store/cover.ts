@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { CoverState } from '../types'
+import { createDebouncedPersist } from './debouncedPersist'
 
 const STORAGE_KEY = 'stellar-video:cover-state'
 
@@ -59,7 +60,8 @@ export const useCoverStore = defineStore('video-cover', () => {
     state.value = loadState()
   }
 
-  watch(state, persist, { deep: true })
+  const debouncedPersist = createDebouncedPersist(persist)
+  watch(state, debouncedPersist.schedule, { deep: true })
 
   return { state, update, reset, rehydrate }
 })

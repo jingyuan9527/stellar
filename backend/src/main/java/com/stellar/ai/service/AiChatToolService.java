@@ -151,7 +151,7 @@ public class AiChatToolService {
         try {
             if (useEdge) {
                 byte[] audio = ttsService.synthesize(text, actualVoice, 1.0, 1.0, 1.0);
-                Long fileId = saveAudioFile(text, actualVoice, audio, "mp3", "audio/mpeg");
+                Long fileId = saveAudioFile(text, actualVoice, audio, "mp3", "audio/mpeg", subjectType, subjectId);
                 log.info("[AI工具] Edge TTS 成功 fileId={} voice={}", fileId, actualVoice);
                 return new ToolResult(toolCallId, buildSuccessContent("audio", fileId, actualVoice), "audio", fileId);
             }
@@ -159,13 +159,13 @@ public class AiChatToolService {
             try {
                 AiResolvedConfig audioCfg = aiModelService.resolveDefaultConfig("AUDIO");
                 byte[] audio = aiTtsService.synthesize(audioCfg.modelId(), text, actualVoice, null);
-                Long fileId = saveAudioFile(text, actualVoice, audio, "wav", "audio/wav");
+                Long fileId = saveAudioFile(text, actualVoice, audio, "wav", "audio/wav", subjectType, subjectId);
                 log.info("[AI工具] AI TTS 成功 fileId={} voice={}", fileId, actualVoice);
                 return new ToolResult(toolCallId, buildSuccessContent("audio", fileId, actualVoice), "audio", fileId);
             } catch (Exception aiEx) {
                 log.warn("[AI工具] AI TTS 失败，降级 Edge TTS: {}", aiEx.getMessage());
                 byte[] audio = ttsService.synthesize(text, EDGE_DEFAULT_VOICE, 1.0, 1.0, 1.0);
-                Long fileId = saveAudioFile(text, EDGE_DEFAULT_VOICE, audio, "mp3", "audio/mpeg");
+                Long fileId = saveAudioFile(text, EDGE_DEFAULT_VOICE, audio, "mp3", "audio/mpeg", subjectType, subjectId);
                 log.info("[AI工具] 降级 Edge TTS 成功 fileId={}", fileId);
                 return new ToolResult(toolCallId, buildSuccessContent("audio", fileId, EDGE_DEFAULT_VOICE), "audio", fileId);
             }
@@ -194,11 +194,13 @@ public class AiChatToolService {
 
     /** Edge 音色 value 形如 zh-CN-XiaoxiaoNeural（xx-Xx-XxxNeural），MiMo 音色为中文名/英文/mimo_default */
     private boolean isEdgeVoice(String voice) {
-        return voice != null && voice.matches("^[a-z]{2}-[A-Z][a-z]-\\w+Neural$");
+        return voice != null && voice.matches(
+                "^[a-z]{2,3}-[A-Z]{2}(?:-[a-z0-9]+)*-[A-Za-z][A-Za-z0-9]{0,63}Neural$");
     }
 
     /** 存 sys_file + 写 tts_record（让 TTS 历史页可见） */
-    private Long saveAudioFile(String text, String voice, byte[] audio, String ext, String contentType) {
+    private Long saveAudioFile(String text, String voice, byte[] audio, String ext, String contentType,
+                               String subjectType, String subjectId) {
         SysFile file = new SysFile();
         String name = text.length() > 20 ? text.substring(0, 20) : text;
         file.setOriginalName(name + "." + ext);
@@ -208,7 +210,7 @@ public class AiChatToolService {
         file.setData(audio);
         file.setCreateTime(LocalDateTime.now());
         fileMapper.insert(file);
-        ttsRecordService.saveChatTts(text, voice, audio, ext);
+        ttsRecordService.saveChatTts(text, voice, audio, ext, subjectType, subjectId);
         return file.getId();
     }
 

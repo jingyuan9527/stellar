@@ -185,6 +185,10 @@ public class AiChatSessionService {
                     .collect(Collectors.toList());
             return aiChatService.streamMultiChatWithTools(messagesObj, modelId,
                     aiChatToolService.getToolDefinitions(), voice, ar -> {
+                        if (!StringUtils.hasText(ar.content()) && ar.attachmentFileId() == null) {
+                            log.warn("[AI聊天] 工具流无文本且无附件，不保存 assistant sessionId={}", sessionId);
+                            return;
+                        }
                         AiChatMessage aMsg = new AiChatMessage();
                         aMsg.setSessionId(sessionId);
                         aMsg.setRole("assistant");
@@ -199,6 +203,10 @@ public class AiChatSessionService {
         }
         // 游客：纯文本，无 tools
         return aiChatService.streamMultiChat(messages, modelId, fullText -> {
+            if (!StringUtils.hasText(fullText)) {
+                log.warn("[AI聊天] 游客流返回空文本，不保存 assistant sessionId={}", sessionId);
+                return;
+            }
             AiChatMessage aMsg = new AiChatMessage();
             aMsg.setSessionId(sessionId);
             aMsg.setRole("assistant");

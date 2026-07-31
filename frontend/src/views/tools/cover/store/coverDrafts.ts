@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { CoverDraft, CoverState } from '../types'
+import { createDebouncedPersist } from './debouncedPersist'
 
 const STORAGE_KEY = 'stellar-video:cover-drafts'
 
@@ -50,7 +51,8 @@ export const useCoverDraftsStore = defineStore('video-cover-drafts', () => {
     drafts.value = loadState()
   }
 
-  watch(drafts, persist, { deep: true })
+  const debouncedPersist = createDebouncedPersist(persist)
+  watch(drafts, debouncedPersist.schedule, { deep: true })
 
   return { drafts, saveDraft, renameDraft, deleteDraft, clear, rehydrate }
 })

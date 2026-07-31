@@ -14,6 +14,8 @@ import com.stellar.tts.service.AiTtsService;
 import com.stellar.tts.service.TtsRecordService;
 import com.stellar.tts.service.TtsService;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
+import com.stellar.infra.SubjectUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -45,13 +47,14 @@ public class TtsController {
 
     /**
      * Edge TTS 语音合成，返回 MP3 音频流，同时保存合成记录。
-     * <p>对游客开放（edge 免费），受 IP 单日限流保护；游客合成记录 operator=anonymous。
+     * <p>对游客开放（edge 免费），受 IP 单日限流保护；记录主体按登录账号或游客 IP 保存。
      */
     @PublicAccess
     @RateLimit(daily = 20)
     @PostMapping("/edge/synthesize")
     @Log(title = "语音合成", type = OperationType.OTHER)
-    public ResponseEntity<byte[]> synthesize(@Valid @RequestBody TtsRequest request) {
+    public ResponseEntity<byte[]> synthesize(@Valid @RequestBody TtsRequest request,
+                                             HttpServletRequest servletRequest) {
         byte[] audio = ttsService.synthesize(
                 request.getText(),
                 request.getVoice(),
@@ -62,7 +65,8 @@ public class TtsController {
 
         // 保存合成记录（失败不影响合成结果）
         try {
-            ttsRecordService.save(request, audio);
+            ttsRecordService.save(request, audio, SubjectUtils.subjectType(),
+                    SubjectUtils.subjectId(servletRequest));
         } catch (Exception e) {
             log.warn("保存语音合成记录失败: {}", e.getMessage(), e);
         }
@@ -93,7 +97,8 @@ public class TtsController {
      */
     @PostMapping("/ai/synthesize")
     @Log(title = "AI语音合成", type = OperationType.OTHER)
-    public ResponseEntity<byte[]> aiSynthesize(@Valid @RequestBody AiTtsRequest request) {
+    public ResponseEntity<byte[]> aiSynthesize(@Valid @RequestBody AiTtsRequest request,
+                                               HttpServletRequest servletRequest) {
         byte[] audio = aiTtsService.synthesize(
                 request.getModelId(),
                 request.getText(),
@@ -103,7 +108,8 @@ public class TtsController {
 
         // 保存合成记录（失败不影响合成结果）
         try {
-            ttsRecordService.saveAiTts(request.getText(), request.getVoice(), audio);
+            ttsRecordService.saveAiTts(request.getText(), request.getVoice(), audio,
+                    SubjectUtils.subjectType(), SubjectUtils.subjectId(servletRequest));
         } catch (Exception e) {
             log.warn("保存 AI 语音合成记录失败: {}", e.getMessage(), e);
         }

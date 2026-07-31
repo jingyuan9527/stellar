@@ -23,6 +23,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
@@ -56,6 +57,8 @@ public class TtsService {
 
     /** 单段 SSML 文本的最大字节数（UTF-8 编码后） */
     private static final int MAX_TEXT_BYTES = 4096;
+    private static final Pattern EDGE_VOICE_PATTERN = Pattern.compile(
+            "^[a-z]{2,3}-[A-Z]{2}(?:-[a-z0-9]+)*-[A-Za-z][A-Za-z0-9]{0,63}Neural$");
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter
             .ofPattern("EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'",
@@ -82,14 +85,16 @@ public class TtsService {
         if (text == null || text.isBlank()) {
             throw new BusinessException("合成文本不能为空");
         }
+        if (voice == null || !EDGE_VOICE_PATTERN.matcher(voice).matches()) {
+            throw new BusinessException("Edge 音色格式无效");
+        }
 
         String rateStr = formatPercent(rate, 1.0);
         String pitchStr = formatPitch(pitch, 1.0);
         String volumeStr = formatPercent(volume, 1.0);
 
         String cleaned = removeIncompatibleChars(text);
-        String escaped = escapeXml(cleaned);
-        List<String> chunks = splitText(escaped);
+        List<String> chunks = splitText(cleaned);
 
         log.info("语音合成开始: voice={}, chunks={}, totalChars={}",
                 voice, chunks.size(), text.length());
@@ -102,7 +107,7 @@ public class TtsService {
             ByteArrayOutputStream audio = new ByteArrayOutputStream();
             for (int i = 0; i < chunks.size(); i++) {
                 log.debug("合成第 {}/{} 段", i + 1, chunks.size());
-                byte[] chunkAudio = synthesizeChunk(chunks.get(i), voice, rateStr, pitchStr, volumeStr);
+                byte[] chunkAudio = synthesizeChunk(escapeXml(chunks.get(i)), voice, rateStr, pitchStr, volumeStr);
                 audio.write(chunkAudio, 0, chunkAudio.length);
             }
 
@@ -218,8 +223,9 @@ public class TtsService {
     private String buildSsml(String escapedText, String voice,
                              String rate, String pitch, String volume) {
         return "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>"
-                + "<voice name='" + voice + "'>"
-                + "<prosody pitch='" + pitch + "' rate='" + rate + "' volume='" + volume + "'>"
+                + "<voice name='" + escapeXmlAttribute(voice) + "'>"
+                + "<prosody pitch='" + escapeXmlAttribute(pitch) + "' rate='" + escapeXmlAttribute(rate)
+                + "' volume='" + escapeXmlAttribute(volume) + "'>"
                 + escapedText
                 + "</prosody>"
                 + "</voice>"
@@ -268,6 +274,10 @@ public class TtsService {
         return s.replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;");
+    }
+
+    private String escapeXmlAttribute(String s) {
+        return escapeXml(s).replace("'", "&apos;").replace("\"", "&quot;");
     }
 
     /**

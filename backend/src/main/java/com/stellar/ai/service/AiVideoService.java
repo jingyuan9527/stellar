@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.common.BusinessException;
+import com.stellar.common.FileConstants;
+import com.stellar.infra.SafeUrlValidator;
 import com.stellar.ai.dto.AiVideoCreateDTO;
 import com.stellar.ai.dto.AiVideoHistoryQueryDTO;
 import com.stellar.ai.entity.AiTask;
@@ -27,10 +29,12 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.io.InputStream;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -59,6 +63,7 @@ public class AiVideoService {
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
     /**
@@ -165,7 +170,8 @@ public class AiVideoService {
         if (!"VIDEO".equals(cfg.modelType())) {
             throw new BusinessException("该模型不是视频生成类型");
         }
-        String url = cfg.endpoint().replaceAll("/+$", "") + "/agnesapi?video_id=" + videoId;
+        String encodedVideoId = URLEncoder.encode(videoId, StandardCharsets.UTF_8);
+        String url = cfg.endpoint().replaceAll("/+$", "") + "/agnesapi?video_id=" + encodedVideoId;
         long start = System.currentTimeMillis();
         String callParams = "model=" + cfg.model() + ", providerId=" + cfg.providerId() + ", videoId=" + videoId;
         try {
@@ -287,9 +293,7 @@ public class AiVideoService {
 
     private AiTask findLocalTask(String videoId) {
         try {
-            return aiTaskMapper.selectOne(new LambdaQueryWrapper<AiTask>()
-                    .eq(AiTask::getTaskType, "video")
-                    .like(AiTask::getExtra, "\"video_id\":\"" + videoId + "\""));
+            return aiTaskMapper.selectVideoTaskByVideoId(videoId);
         } catch (Exception e) {
             log.warn("查询本地视频任务失败 videoId={}: {}", videoId, e.getMessage(), e);
             return null;
@@ -390,19 +394,30 @@ public class AiVideoService {
      */
     private byte[] downloadFile(String url) {
         try {
+            URI uri = SafeUrlValidator.validatePublicHttpUrl(url, "视频下载地址");
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+                    .uri(uri)
                     .timeout(Duration.ofMinutes(3))
                     .GET()
                     .build();
-            HttpResponse<byte[]> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
             if (resp.statusCode() != 200) {
+                resp.body().close();
                 throw new BusinessException("下载视频失败: HTTP " + resp.statusCode());
             }
-            return resp.body();
+            long contentLength = resp.headers().firstValueAsLong("Content-Length").orElse(-1);
+            if (contentLength > FileConstants.GENERATED_VIDEO_MAX_BYTES) {
+                resp.body().close();
+                throw new BusinessException("下载视频超过大小限制");
+            }
+            try (InputStream input = resp.body()) {
+                return SafeUrlValidator.readLimited(input, FileConstants.GENERATED_VIDEO_MAX_BYTES, "下载视频");
+            }
         } catch (BusinessException e) {
+            log.warn("AI 视频下载被拒绝 url={} reason={}", url, e.getMessage(), e);
             throw e;
         } catch (Exception e) {
+            log.error("AI 视频下载异常 url={}: {}", url, e.getMessage(), e);
             throw new BusinessException("下载视频失败: " + e.getMessage());
         }
     }

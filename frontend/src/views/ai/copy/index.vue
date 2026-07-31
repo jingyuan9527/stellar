@@ -237,9 +237,13 @@ function sendToCover(title: string) {
   router.push('/tools/cover')
 }
 
-function copyText(text: string) {
-  navigator.clipboard.writeText(text)
-  message.success('已复制')
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success('已复制')
+  } catch {
+    message.error('复制失败')
+  }
 }
 
 async function handleDeleteHistory(id: number) {

@@ -33,6 +33,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import com.stellar.infra.ExternalCallLogger;
+import com.stellar.infra.SafeUrlValidator;
+import jakarta.annotation.Resource;
+import java.util.concurrent.Executor;
 
 /**
  * AI 聊天服务：流式（SseEmitter）+ 非流式，按 modelId 解析供应商配置发起请求。
@@ -54,6 +57,9 @@ public class AiChatService {
     private final AiTaskService aiTaskService;
     private final AiChatToolService aiChatToolService;
     private final ExternalCallLogger externalCallLogger;
+
+    @Resource(name = "aiToolExecutor")
+    private Executor aiToolExecutor;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -103,8 +109,9 @@ public class AiChatService {
                 && StringUtils.hasText(request.getApiKey())
                 && StringUtils.hasText(request.getModel())) {
             // 用户自带配置（前端 localStorage 临时传入，后端不持久化）
+            String endpoint = SafeUrlValidator.normalizePublicBaseUrl(request.getEndpoint(), "自定义 AI endpoint");
             return new AiResolvedConfig(null, null,
-                    request.getEndpoint(), request.getApiKey(), request.getModel(), "TEXT");
+                    endpoint, request.getApiKey(), request.getModel(), "TEXT");
         }
         if (request.getModelId() != null) {
             return aiModelService.resolveConfig(request.getModelId());
@@ -178,15 +185,17 @@ public class AiChatService {
                                     sr.usage()[0], sr.usage()[1], sr.usage()[2],
                                     sr.hasUsage() ? "usage" : "estimate");
                         } catch (Exception e) {
-                            log.info("流式响应结束: {}", e.getMessage());
+                            if (isClientDisconnect(e)) {
+                                log.warn("AI 流式客户端断开 subject={}:{} msg={}", finalSubjectType, finalSubjectId, e.getMessage());
+                                return;
+                            }
+                            log.error("AI 流式响应中断 model={} subject={}:{}: {}",
+                                    finalModel, finalSubjectType, finalSubjectId, e.getMessage(), e);
                             recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
                                     prompt, null, "failed", e.getMessage(), requestTime, requestTimeMillis);
                             externalCallLogger.failure("LLM流式", url, callParams, e.getMessage(),
                                     System.currentTimeMillis() - requestTimeMillis, operator);
-                            try {
-                                emitter.complete();
-                            } catch (Exception ignored) {
-                            }
+                            sendError(emitter, e.getMessage());
                         }
                     })
                     .exceptionally(e -> {
@@ -420,10 +429,14 @@ public class AiChatService {
                             emitter.complete();
                             log.info("AI 多轮流式完成 tokens={}/{}/{}", sr.usage()[0], sr.usage()[1], sr.usage()[2]);
                         } catch (Exception e) {
-                            log.info("多轮流式响应结束: {}", e.getMessage());
+                            if (isClientDisconnect(e)) {
+                                log.warn("AI 多轮流式客户端断开 subject={} msg={}", operator, e.getMessage());
+                                return;
+                            }
+                            log.error("AI 多轮流式响应中断 model={} subject={}: {}", model, operator, e.getMessage(), e);
                             externalCallLogger.failure("LLM多轮流式", url, callParams, e.getMessage(),
                                     System.currentTimeMillis() - requestTimeMillis, operator);
-                            try { emitter.complete(); } catch (Exception ignored) {}
+                            sendError(emitter, e.getMessage());
                         }
                     })
                     .exceptionally(e -> {
@@ -677,34 +690,8 @@ public class AiChatService {
                             if (toolCallsNode.size() > 1) {
                                 log.warn("AI 聊天工具判定: LLM 返回 {} 个 tool_calls，仅执行第一个", toolCallsNode.size());
                             }
-                            ToolResult toolResult = aiChatToolService.execute(toolCall, voice, subject.type(), subject.id());
-                            log.info("AI 聊天工具执行: name={}, toolCallId={}, attachmentType={}, attachmentFileId={}",
-                                    toolCall.path("function").path("name").asText(""),
-                                    toolResult.toolCallId(),
-                                    toolResult.attachmentType(),
-                                    toolResult.attachmentFileId());
-
-                            // messages 追加 [assistant(tool_call), tool(result)]
-                            List<Map<String, Object>> secondMessages = new ArrayList<>(messages);
-                            Map<String, Object> assistantToolMsg = new HashMap<>();
-                            assistantToolMsg.put("role", "assistant");
-                            assistantToolMsg.put("content", null);
-                            // tool_calls 原样回传（含 id/type/function）
-                            assistantToolMsg.put("tool_calls", objectMapper.convertValue(toolCall, Map.class));
-                            secondMessages.add(assistantToolMsg);
-                            Map<String, Object> toolMsg = new HashMap<>();
-                            toolMsg.put("role", "tool");
-                            toolMsg.put("tool_call_id", toolResult.toolCallId());
-                            toolMsg.put("content", toolResult.content());
-                            secondMessages.add(toolMsg);
-
-                            // 发进度事件
-                            String toolName = toolCall.path("function").path("name").asText("");
-                            String status = "generate_image".equals(toolName) ? "generating_image" : "generating_audio";
-                            emitter.send(SseEmitter.event().data(Map.of("status", status), MediaType.APPLICATION_JSON));
-
-                            // 第二次流式（不带 tools，避免无限循环）
-                            doSecondStream(emitter, url, cfg, model, secondMessages, onComplete, toolResult, subject.type(), subject.id());
+                            aiToolExecutor.execute(() -> executeToolAndContinue(toolCall, voice, subject, messages,
+                                    emitter, url, cfg, model, onComplete, firstCallParams, firstStart, operator));
                         } catch (Exception e) {
                             log.error("AI 聊天工具判定处理失败: {}", e.getMessage(), e);
                             externalCallLogger.failure("LLM工具判定", url, firstCallParams, e.getMessage(),
@@ -777,10 +764,14 @@ public class AiChatService {
                                     toolResult.attachmentType(), toolResult.attachmentFileId()));
                             log.info("AI 聊天第二次流式完成 tokens={}/{}/{}", sr.usage()[0], sr.usage()[1], sr.usage()[2]);
                         } catch (Exception e) {
-                            log.info("AI 聊天第二次流式响应结束: {}", e.getMessage());
+                            if (isClientDisconnect(e)) {
+                                log.warn("AI 工具后流式客户端断开 subject={} msg={}", operator, e.getMessage());
+                                return;
+                            }
+                            log.error("AI 工具后流式响应中断 model={} subject={}: {}", model, operator, e.getMessage(), e);
                             externalCallLogger.failure("LLM工具后流式", url, callParams, e.getMessage(),
                                     System.currentTimeMillis() - start, operator);
-                            try { emitter.complete(); } catch (Exception ignored) {}
+                            sendError(emitter, e.getMessage());
                         }
                     })
                     .exceptionally(e -> {
@@ -800,7 +791,10 @@ public class AiChatService {
 
     /** 拼接 OpenAI 兼容的 chat/completions 端点（去除 endpoint 末尾斜杠）。 */
     private String chatCompletionsUrl(AiResolvedConfig cfg) {
-        return cfg.endpoint().replaceAll("/+$", "") + "/v1/chat/completions";
+        String base = cfg.providerId() == null
+                ? SafeUrlValidator.normalizePublicBaseUrl(cfg.endpoint(), "自定义 AI endpoint")
+                : cfg.endpoint().replaceAll("/+$", "");
+        return base + "/v1/chat/completions";
     }
 
     /** 解析当前请求主体：登录按账号，游客按 IP（同步阶段调用，保证 web 上下文可用）。 */
@@ -836,8 +830,12 @@ public class AiChatService {
                             .path("delta").path("content").asText("");
                     if (!delta.isEmpty()) {
                         buf.append(delta);
-                        emitter.send(SseEmitter.event()
-                                .data(Map.of("content", delta), MediaType.APPLICATION_JSON));
+                        try {
+                            emitter.send(SseEmitter.event()
+                                    .data(Map.of("content", delta), MediaType.APPLICATION_JSON));
+                        } catch (IOException e) {
+                            throw new ClientDisconnectedException(e);
+                        }
                     }
                     JsonNode usageNode = json.path("usage");
                     if (!usageNode.isMissingNode() && usageNode.has("total_tokens")) {
@@ -847,6 +845,9 @@ public class AiChatService {
                         hasUsage[0] = true;
                     }
                 } catch (Exception e) {
+                    if (e instanceof ClientDisconnectedException disconnected) {
+                        throw disconnected;
+                    }
                     log.debug("解析 LLM 响应分片失败: {}", data);
                 }
             }
@@ -939,6 +940,71 @@ public class AiChatService {
             onComplete.accept(result);
         } catch (Exception e) {
             log.warn("onComplete 回调失败（不影响流式）: {}", e.getMessage());
+        }
+    }
+
+    private void executeToolAndContinue(JsonNode toolCall, String voice, Subject subject,
+                                        List<Map<String, Object>> messages, SseEmitter emitter,
+                                        String url, AiResolvedConfig cfg, String model,
+                                        Consumer<AiChatResult> onComplete, String callParams,
+                                        long start, String operator) {
+        try {
+            ToolResult toolResult = aiChatToolService.execute(toolCall, voice, subject.type(), subject.id());
+            log.info("AI 聊天工具执行: name={}, toolCallId={}, attachmentType={}, attachmentFileId={}",
+                    toolCall.path("function").path("name").asText(""), toolResult.toolCallId(),
+                    toolResult.attachmentType(), toolResult.attachmentFileId());
+            List<Map<String, Object>> secondMessages = new ArrayList<>(messages);
+            Map<String, Object> assistantToolMsg = new HashMap<>();
+            assistantToolMsg.put("role", "assistant");
+            assistantToolMsg.put("content", null);
+            assistantToolMsg.put("tool_calls", objectMapper.convertValue(toolCall, Map.class));
+            secondMessages.add(assistantToolMsg);
+            Map<String, Object> toolMsg = new HashMap<>();
+            toolMsg.put("role", "tool");
+            toolMsg.put("tool_call_id", toolResult.toolCallId());
+            toolMsg.put("content", toolResult.content());
+            secondMessages.add(toolMsg);
+            String toolName = toolCall.path("function").path("name").asText("");
+            String status = "generate_image".equals(toolName) ? "generating_image" : "generating_audio";
+            emitter.send(SseEmitter.event().data(Map.of("status", status), MediaType.APPLICATION_JSON));
+            doSecondStream(emitter, url, cfg, model, secondMessages, onComplete, toolResult,
+                    subject.type(), subject.id());
+        } catch (Exception e) {
+            if (isClientDisconnect(e)) {
+                log.warn("AI 工具执行后客户端断开 subject={} msg={}", operator, e.getMessage());
+                return;
+            }
+            log.error("AI 聊天工具执行链失败 model={} subject={}: {}", model, operator, e.getMessage(), e);
+            externalCallLogger.failure("LLM工具执行", url, callParams, e.getMessage(),
+                    System.currentTimeMillis() - start, operator);
+            sendError(emitter, e.getMessage());
+            safeOnComplete(onComplete, new AiChatResult(null, null, null));
+        }
+    }
+
+    private boolean isClientDisconnect(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof ClientDisconnectedException) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null) {
+                String lower = message.toLowerCase();
+                if (lower.contains("broken pipe") || lower.contains("connection reset")
+                        || lower.contains("async request not usable")
+                        || lower.contains("responsebodyemitter has already completed")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static final class ClientDisconnectedException extends IOException {
+        private ClientDisconnectedException(IOException cause) {
+            super(cause.getMessage(), cause);
         }
     }
 }

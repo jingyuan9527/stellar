@@ -7,6 +7,10 @@ import java.util.Set;
  */
 public final class FileConstants {
 
+    public static final long GENERATED_IMAGE_MAX_BYTES = 20L * 1024 * 1024;
+
+    public static final long GENERATED_VIDEO_MAX_BYTES = 200L * 1024 * 1024;
+
     /** 图片扩展名白名单 */
     public static final Set<String> IMAGE_EXT = Set.of(
             "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico");

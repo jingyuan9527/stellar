@@ -16,7 +16,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -40,6 +41,7 @@ public class AiMemoryService {
     private final SysUserMapper userMapper;
     private final AiChatService aiChatService;
     private final JdbcTemplate jdbcTemplate;
+    private final PlatformTransactionManager transactionManager;
 
     private static final int MAX_DIALOGUE_CHARS = 8000;
     private static final int RECENT_MEMORIES = 20;
@@ -115,7 +117,6 @@ public class AiMemoryService {
     /**
      * 手动触发某会话整理为记忆（不幂等检查，可重复）。
      */
-    @Transactional(rollbackFor = Exception.class)
     public int summarizeSession(Long sessionId) {
         AiChatSession session = sessionMapper.selectById(sessionId);
         if (session == null) {
@@ -193,24 +194,31 @@ public class AiMemoryService {
             log.error("[长期记忆] 摘要 LLM 调用失败 session={}: {}", session.getId(), e.getMessage(), e);
             throw new BusinessException("记忆摘要生成失败: " + e.getMessage());
         }
-        int count = 0;
+        List<String> facts = new ArrayList<>();
         if (result != null && !result.isBlank()) {
             for (String line : result.split("\n")) {
                 String fact = line.strip();
                 if (fact.isEmpty() || fact.startsWith("无") || "空".equals(fact)) {
                     continue;
                 }
+                facts.add(fact);
+            }
+        }
+        Integer count = new TransactionTemplate(transactionManager).execute(status -> {
+            int inserted = 0;
+            for (String fact : facts) {
                 AiMemory mem = new AiMemory();
                 mem.setUserId(userId);
                 mem.setContent(fact);
                 mem.setSourceSessionId(session.getId());
                 mem.setCreateTime(LocalDateTime.now());
                 memoryMapper.insert(mem);
-                count++;
+                inserted++;
             }
-        }
+            return inserted;
+        });
         log.info("[长期记忆] 会话 {} 整理出 {} 条记忆", session.getId(), count);
-        return count;
+        return count == null ? 0 : count;
     }
 
     private Page<Map<String, Object>> mapWithUsername(Page<AiMemory> page) {

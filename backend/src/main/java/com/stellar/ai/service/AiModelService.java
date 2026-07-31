@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -177,6 +178,7 @@ public class AiModelService {
      * 设为该类型默认：先把同 model_type 的 is_default 清 0，再置当前为 1（同类型互斥）。
      */
     @CacheEvict(cacheNames = "ai-model", allEntries = true)
+    @Transactional(rollbackFor = Exception.class)
     public void setDefault(Long id) {
         SysAiModel exist = modelMapper.selectById(id);
         if (exist == null) {

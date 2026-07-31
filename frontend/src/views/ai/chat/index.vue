@@ -17,6 +17,7 @@ const authStore = useAuthStore()
 const message = useMessage()
 const isMobile = useIsMobile()
 const sessionCollapsed = ref(true)
+let disposed = false
 
 // ===== 会话 =====
 const sessions = ref<AiChatSession[]>([])
@@ -70,7 +71,9 @@ watch(() => streamingContent.value, () => scrollToBottom())
 // ===== 加载 =====
 async function loadSessions() {
   try {
-    sessions.value = await listMyChatSessions()
+    const result = await listMyChatSessions()
+    if (disposed) return
+    sessions.value = result
     if (sessions.value.length > 0 && currentSessionId.value === null) {
       await selectSession(sessions.value[0].id)
     } else if (sessions.value.length === 0) {
@@ -83,7 +86,9 @@ async function loadSessions() {
 
 async function loadPersonas() {
   try {
-    personas.value = await listEnabledPersonas()
+    const result = await listEnabledPersonas()
+    if (disposed) return
+    personas.value = result
     if (personaId.value === null && personas.value.length > 0) {
       personaId.value = personas.value[0].id
     }
@@ -95,7 +100,9 @@ async function loadPersonas() {
 async function loadKnowledgeBases() {
   if (!authStore.isLogin) return
   try {
-    knowledgeBases.value = await listKnowledgeBases()
+    const result = await listKnowledgeBases()
+    if (disposed) return
+    knowledgeBases.value = result
   } catch {
     // 错误已由拦截器提示
   }
@@ -104,7 +111,9 @@ async function loadKnowledgeBases() {
 async function loadModels() {
   if (!authStore.isLogin) return
   try {
-    textModels.value = await _getModels('TEXT')
+    const result = await _getModels('TEXT')
+    if (disposed) return
+    textModels.value = result
     if (modelId.value === null && textModels.value.length > 0) {
       const def = textModels.value.find((m) => m.isDefault === 1)
       modelId.value = def?.id ?? textModels.value[0].id
@@ -115,16 +124,19 @@ async function loadModels() {
 }
 
 async function selectSession(id: number) {
+  if (disposed) return
   currentSessionId.value = id
   loadingMessages.value = true
   streamError.value = ''
   try {
-    messages.value = await getChatMessages(id)
+    const result = await getChatMessages(id)
+    if (disposed) return
+    messages.value = result
     scrollToBottom()
   } catch {
     // 错误已由拦截器提示
   } finally {
-    loadingMessages.value = false
+    if (!disposed) loadingMessages.value = false
   }
 }
 
@@ -135,6 +147,7 @@ async function newSession() {
       kbId: authStore.isLogin ? kbId.value : null,
       title: '新对话',
     })
+    if (disposed) return
     sessions.value.unshift(s)
     await selectSession(s.id)
   } catch {
@@ -201,12 +214,17 @@ async function send() {
     await streamChat(
       currentSessionId.value,
       text,
-      (delta) => { streamingContent.value = delta },
+      (delta) => {
+        if (!disposed) streamingContent.value = delta
+      },
       ac.signal,
       authStore.isLogin ? modelId.value : null,
       authStore.isLogin ? ttsVoice.value : null,
-      (status) => { streamingStatus.value = status },
+      (status) => {
+        if (!disposed) streamingStatus.value = status
+      },
     )
+    if (disposed) return
     // 流式完成：先把 assistant 乐观加入消息列表，再关 streaming 行——
     // 让回答从 streaming 行无缝衔接到消息流，避免“消失再重现”的闪烁
     messages.value.push({
@@ -226,14 +244,19 @@ async function send() {
     if (currentSessionId.value) {
       await selectSession(currentSessionId.value)
     }
-    sessions.value = await listMyChatSessions()
+    if (disposed) return
+    const result = await listMyChatSessions()
+    if (disposed) return
+    sessions.value = result
   } catch (e) {
+    if (disposed) return
     streaming.value = false
     streamingStatus.value = ''
     const aborted = (e as Error).name === 'AbortError'
     if (currentSessionId.value) {
       await selectSession(currentSessionId.value)
     }
+    if (disposed) return
     if (!aborted) {
       streamError.value = (e as Error).message || '请求失败'
       message.error('请求失败: ' + streamError.value)
@@ -241,7 +264,7 @@ async function send() {
       streamingContent.value = ''
     }
   } finally {
-    abortRef.value = null
+    if (!disposed && abortRef.value === ac) abortRef.value = null
   }
 }
 
@@ -265,9 +288,13 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-onBeforeUnmount(() => abortRef.value?.abort())
+onBeforeUnmount(() => {
+  disposed = true
+  abortRef.value?.abort()
+})
 
 onMounted(() => {
+  disposed = false
   loadPersonas()
   loadKnowledgeBases()
   loadModels()

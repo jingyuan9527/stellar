@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { NButton, NSpace, NSlider, NTabs, NTabPane } from 'naive-ui'
 import CoverCanvas from './CoverCanvas.vue'
 import ContentTab from './tabs/ContentTab.vue'
@@ -18,6 +18,10 @@ const uiStore = useUIStore()
 const containerRef = ref<HTMLDivElement | null>(null)
 const canvasCompRef = ref<{ getEl: () => HTMLElement | null } | null>(null)
 const zoom = ref(1)
+let resizeObserver: ResizeObserver | null = null
+let resizeFrame = 0
+let observedWidth = 0
+let observedHeight = 0
 
 const cfg = computed(() => ratios[coverStore.state.ratio])
 
@@ -36,7 +40,25 @@ function getCanvasEl() {
 }
 
 watch(() => coverStore.state.ratio, fit, { flush: 'post' })
-onMounted(fit)
+onMounted(() => {
+  fit()
+  const container = containerRef.value
+  if (!container) return
+  resizeObserver = new ResizeObserver(([entry]) => {
+    const { width, height } = entry.contentRect
+    if (width === observedWidth && height === observedHeight) return
+    observedWidth = width
+    observedHeight = height
+    cancelAnimationFrame(resizeFrame)
+    resizeFrame = requestAnimationFrame(fit)
+  })
+  resizeObserver.observe(container)
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  if (resizeFrame) cancelAnimationFrame(resizeFrame)
+})
 </script>
 
 <template>

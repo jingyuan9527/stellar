@@ -40,4 +40,17 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean("aiToolExecutor")
+    public Executor aiToolExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(20);
+        executor.setKeepAliveSeconds(120);
+        executor.setThreadNamePrefix("ai-tool-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
 }

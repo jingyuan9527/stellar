@@ -3,6 +3,8 @@ package com.stellar.ai.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.common.BusinessException;
+import com.stellar.common.FileConstants;
+import com.stellar.infra.SafeUrlValidator;
 import com.stellar.ai.entity.AiTask;
 import com.stellar.system.entity.SysFile;
 import com.stellar.ai.mapper.AiTaskMapper;
@@ -19,6 +21,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -46,6 +49,7 @@ public class AiImageTaskWorker {
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
     /**
@@ -156,7 +160,14 @@ public class AiImageTaskWorker {
             String b64 = dataNode.path(0).path("b64_json").asText("");
             byte[] bytes;
             if (StringUtils.hasText(b64)) {
+                long maxEncodedLength = ((FileConstants.GENERATED_IMAGE_MAX_BYTES + 2) / 3) * 4;
+                if (b64.length() > maxEncodedLength) {
+                    throw new BusinessException("生成图片超过大小限制");
+                }
                 bytes = Base64.getDecoder().decode(b64);
+                if (bytes.length > FileConstants.GENERATED_IMAGE_MAX_BYTES) {
+                    throw new BusinessException("生成图片超过大小限制");
+                }
             } else {
                 String imgUrl = dataNode.path(0).path("url").asText("");
                 if (!StringUtils.hasText(imgUrl)) {
@@ -222,19 +233,30 @@ public class AiImageTaskWorker {
 
     private byte[] downloadFile(String url) {
         try {
+            URI uri = SafeUrlValidator.validatePublicHttpUrl(url, "图片下载地址");
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+                    .uri(uri)
                     .timeout(Duration.ofSeconds(30))
                     .GET()
                     .build();
-            HttpResponse<byte[]> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
             if (resp.statusCode() != 200) {
+                resp.body().close();
                 throw new BusinessException("下载图片失败: HTTP " + resp.statusCode());
             }
-            return resp.body();
+            long contentLength = resp.headers().firstValueAsLong("Content-Length").orElse(-1);
+            if (contentLength > FileConstants.GENERATED_IMAGE_MAX_BYTES) {
+                resp.body().close();
+                throw new BusinessException("下载图片超过大小限制");
+            }
+            try (InputStream input = resp.body()) {
+                return SafeUrlValidator.readLimited(input, FileConstants.GENERATED_IMAGE_MAX_BYTES, "下载图片");
+            }
         } catch (BusinessException e) {
+            log.warn("[AI图片] 下载被拒绝 url={} reason={}", url, e.getMessage(), e);
             throw e;
         } catch (Exception e) {
+            log.error("[AI图片] 下载异常 url={}: {}", url, e.getMessage(), e);
             throw new BusinessException("下载图片失败: " + e.getMessage());
         }
     }

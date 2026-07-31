@@ -15,12 +15,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 
 /**
  * AI 知识库 + RAG：KB CRUD、文档分块(500字+50 overlap)、向量化(调 /v1/embeddings)、语义检索 top-k。
@@ -42,6 +46,14 @@ public class AiKnowledgeService {
     private static final int CHUNK_OVERLAP = 50;
     private static final int EMBED_BATCH = 32;
     private static final int DEFAULT_TOP_K = 4;
+    private static final int VECTOR_CACHE_MAX_KB = 16;
+    private final Map<Long, List<CachedChunk>> vectorCache = Collections.synchronizedMap(
+            new LinkedHashMap<>(VECTOR_CACHE_MAX_KB, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Long, List<CachedChunk>> eldest) {
+                    return size() > VECTOR_CACHE_MAX_KB;
+                }
+            });
 
     // ===== 知识库 CRUD =====
 
@@ -92,6 +104,7 @@ public class AiKnowledgeService {
     public void deleteKb(Long id) {
         chunkMapper.delete(new LambdaQueryWrapper<AiKnowledgeChunk>().eq(AiKnowledgeChunk::getKbId, id));
         kbMapper.deleteById(id);
+        invalidateVectorCache(id);
         log.info("[知识库] 删除 id={} (含分块)", id);
     }
 
@@ -112,6 +125,7 @@ public class AiKnowledgeService {
         }
         chunkMapper.deleteById(id);
         refreshChunkCount(chunk.getKbId());
+        invalidateVectorCache(chunk.getKbId());
     }
 
     /**
@@ -131,6 +145,7 @@ public class AiKnowledgeService {
         // 批量向量化回填 embedding 列（失败不阻断分块入库，仅日志告警）
         vectorizeChunks(kb, inserted);
         refreshChunkCount(kbId);
+        invalidateVectorCache(kbId);
         log.info("[知识库] 添加文档 kbId={} source={} chunks={}", kbId, sourceName, inserted.size());
         return inserted.size();
     }
@@ -165,6 +180,7 @@ public class AiKnowledgeService {
             throw new BusinessException("知识库无分块");
         }
         vectorizeChunks(kb, all);
+        invalidateVectorCache(kbId);
         log.info("[知识库] 重建索引完成 kbId={} chunks={}", kbId, all.size());
     }
 
@@ -182,17 +198,13 @@ public class AiKnowledgeService {
             return List.of();
         }
         // 加载该 KB 全量带向量分块（embedding 不在实体默认 select，用手写 SQL 查）
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT chunk_text, embedding FROM ai_knowledge_chunk " +
-                        "WHERE kb_id=? AND embedding IS NOT NULL", kbId);
-        if (rows.isEmpty()) {
+        List<CachedChunk> chunks = getCachedChunks(kbId);
+        if (chunks.isEmpty()) {
             return List.of();
         }
         List<Scored> scored = new ArrayList<>();
-        for (Map<String, Object> row : rows) {
-            float[] vec = parseVector((String) row.get("embedding"));
-            if (vec == null || vec.length == 0) continue;
-            scored.add(new Scored((String) row.get("chunk_text"), cosine(qvec, vec)));
+        for (CachedChunk chunk : chunks) {
+            scored.add(new Scored(chunk.text(), cosine(qvec, chunk.vector())));
         }
         scored.sort((a, b) -> Double.compare(b.sim, a.sim));
         int k = topK > 0 ? topK : DEFAULT_TOP_K;
@@ -300,5 +312,42 @@ public class AiKnowledgeService {
         return dot / (Math.sqrt(na) * Math.sqrt(nb));
     }
 
+    private List<CachedChunk> getCachedChunks(Long kbId) {
+        synchronized (vectorCache) {
+            List<CachedChunk> cached = vectorCache.get(kbId);
+            if (cached != null) {
+                return cached;
+            }
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT id, chunk_text, embedding FROM ai_knowledge_chunk "
+                            + "WHERE kb_id=? AND embedding IS NOT NULL", kbId);
+            List<CachedChunk> loaded = new ArrayList<>(rows.size());
+            for (Map<String, Object> row : rows) {
+                float[] vector = parseVector((String) row.get("embedding"));
+                if (vector != null && vector.length > 0) {
+                    Number id = (Number) row.get("id");
+                    loaded.add(new CachedChunk(id.longValue(), (String) row.get("chunk_text"), vector));
+                }
+            }
+            List<CachedChunk> immutable = List.copyOf(loaded);
+            vectorCache.put(kbId, immutable);
+            return immutable;
+        }
+    }
+
+    private void invalidateVectorCache(Long kbId) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    vectorCache.remove(kbId);
+                }
+            });
+            return;
+        }
+        vectorCache.remove(kbId);
+    }
+
     private record Scored(String chunkText, double sim) {}
+    private record CachedChunk(long id, String text, float[] vector) {}
 }
