@@ -1,8 +1,8 @@
 package com.stellar.config;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.stellar.entity.SysUser;
-import com.stellar.mapper.SysUserMapper;
+import com.stellar.system.entity.SysUser;
+import com.stellar.system.mapper.SysUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;

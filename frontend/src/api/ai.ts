@@ -215,3 +215,38 @@ export function deleteChatRecord(id: number) {
 export function clearChatRecords() {
   return request<void>({ url: '/ai/chat/record', method: 'delete' })
 }
+
+// ===== 统一 AI 任务历史 =====
+
+export interface AiTaskRecord {
+  id: number
+  taskType: string
+  subjectType: string
+  subjectId: string
+  providerId: number | null
+  model: string | null
+  prompt: string
+  result: string | null
+  status: string
+  errorMsg: string | null
+  fileId: number | null
+  fileSize: number | null
+  audioFormat: string | null
+  extra: string | null
+  requestTime: string
+  responseTime: string | null
+  durationMs: number | null
+  createTime: string
+}
+
+export function getAiTaskPage(params: { taskType: string; pageNum: number; pageSize: number }) {
+  return request<PageResult<AiTaskRecord>>({ url: '/ai/task/page', method: 'get', params })
+}
+
+export function deleteAiTask(id: number) {
+  return request<void>({ url: `/ai/task/${id}`, method: 'delete' })
+}
+
+export function clearAiTasks(taskType: string) {
+  return request<void>({ url: '/ai/task', method: 'delete', params: { taskType } })
+}

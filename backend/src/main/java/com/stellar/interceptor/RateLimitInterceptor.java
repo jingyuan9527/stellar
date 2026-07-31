@@ -4,7 +4,7 @@ import com.stellar.common.BusinessException;
 import com.stellar.common.ResultCode;
 import com.stellar.common.annotation.RateLimit;
 import com.stellar.interceptor.WebUtils;
-import com.stellar.service.RateLimitService;
+import com.stellar.infra.RateLimitService;
 import cn.dev33.satoken.stp.StpUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;

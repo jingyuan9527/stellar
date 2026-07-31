@@ -65,6 +65,7 @@ const submitted = ref(false)
 
 // 计时器内部状态
 let timerId: number | null = null
+let startTimeoutId: number | null = null
 let lastTickTime = 0
 const endFlag = ref(false)
 
@@ -122,7 +123,8 @@ function startGame() {
   endFlag.value = false
   phase.value = 'playing'
   // 1 秒后出第一题并启动计时（给玩家准备时间）
-  setTimeout(() => {
+  startTimeoutId = window.setTimeout(() => {
+    startTimeoutId = null
     questionCounter.value = 1
     startTimer()
   }, 1000)
@@ -156,6 +158,10 @@ function startTimer() {
 }
 
 function stopTimer() {
+  if (startTimeoutId !== null) {
+    clearTimeout(startTimeoutId)
+    startTimeoutId = null
+  }
   if (timerId !== null) {
     clearInterval(timerId)
     timerId = null

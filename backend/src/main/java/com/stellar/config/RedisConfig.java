@@ -1,8 +1,8 @@
 package com.stellar.config;
 
 import com.stellar.common.CacheConstants;
-import com.stellar.service.AiNotifyListener;
-import com.stellar.service.AiNotifyPublisher;
+import com.stellar.ai.service.AiNotifyListener;
+import com.stellar.ai.service.AiNotifyPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.cache.annotation.EnableCaching;

@@ -58,39 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_sys_log_module ON sys_log (module);
 CREATE INDEX IF NOT EXISTS idx_sys_log_status ON sys_log (status);
 CREATE INDEX IF NOT EXISTS idx_sys_log_op_time ON sys_log (operator, create_time DESC);
 
-CREATE TABLE IF NOT EXISTS tts_record (
-    id          BIGSERIAL PRIMARY KEY,
-    text        VARCHAR(2000) NOT NULL,
-    voice       VARCHAR(100) NOT NULL,
-    rate        DOUBLE PRECISION DEFAULT 1.0,
-    pitch       DOUBLE PRECISION DEFAULT 1.0,
-    volume      DOUBLE PRECISION DEFAULT 1.0,
-    audio_data  BYTEA,
-    file_size   BIGINT,
-    operator    VARCHAR(64),
-    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    deleted     SMALLINT DEFAULT 0
-);
 
-COMMENT ON TABLE  tts_record IS '语音合成记录表';
-COMMENT ON COLUMN tts_record.id IS '主键';
-COMMENT ON COLUMN tts_record.text IS '合成文本';
-COMMENT ON COLUMN tts_record.voice IS '发音人名称';
-COMMENT ON COLUMN tts_record.rate IS '语速 0.5~2.0';
-COMMENT ON COLUMN tts_record.pitch IS '音调 0~2.0';
-COMMENT ON COLUMN tts_record.volume IS '音量 0~1.0';
-COMMENT ON COLUMN tts_record.audio_data IS 'MP3音频数据';
-COMMENT ON COLUMN tts_record.file_size IS '音频文件大小(字节)';
-COMMENT ON COLUMN tts_record.operator IS '操作人用户名';
-COMMENT ON COLUMN tts_record.create_time IS '创建时间';
-COMMENT ON COLUMN tts_record.deleted IS '逻辑删除: 0未删 1已删';
-
-CREATE INDEX IF NOT EXISTS idx_tts_record_create_time ON tts_record (create_time DESC);
-CREATE INDEX IF NOT EXISTS idx_tts_record_operator ON tts_record (operator);
-
--- 扩展：音频格式字段，区分 Edge(mp3) 与 AI TTS(wav)，试听/下载时按格式设 Content-Type
-ALTER TABLE tts_record ADD COLUMN IF NOT EXISTS audio_format VARCHAR(10) DEFAULT 'mp3';
-COMMENT ON COLUMN tts_record.audio_format IS '音频格式: mp3(Edge TTS) / wav(AI TTS)';
 
 -- AI 配置表（项目级单一配置）
 CREATE TABLE IF NOT EXISTS sys_ai_config (
@@ -492,111 +460,6 @@ COMMENT ON COLUMN sys_ai_usage.model_type IS '模型类型: TEXT/IMAGE/...(自�
 CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_provider ON sys_ai_usage (provider_id);
 CREATE INDEX IF NOT EXISTS idx_sys_ai_usage_model_type ON sys_ai_usage (model_type);
 
--- AI 图片生成异步任务表（后端异步包同步 API：请求立即返回 taskId，异步线程生成+存库，前端 SSE 通知）
-CREATE TABLE IF NOT EXISTS sys_ai_image_task (
-    id            BIGSERIAL PRIMARY KEY,
-    model_id      BIGINT NOT NULL,
-    provider_id   BIGINT,
-    subject_type  VARCHAR(16),
-    subject_id    VARCHAR(64),
-    prompt        TEXT NOT NULL,
-    size          VARCHAR(32),
-    ratio         VARCHAR(32),
-    status        VARCHAR(16) NOT NULL DEFAULT 'generating',
-    file_id       BIGINT,
-    error_msg     TEXT,
-    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    update_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-COMMENT ON TABLE  sys_ai_image_task IS 'AI 图片生成异步任务表';
-COMMENT ON COLUMN sys_ai_image_task.id IS '主键';
-COMMENT ON COLUMN sys_ai_image_task.model_id IS '模型ID(引用 sys_ai_model.id)';
-COMMENT ON COLUMN sys_ai_image_task.provider_id IS '供应商ID';
-COMMENT ON COLUMN sys_ai_image_task.subject_type IS '主体类型: account/ip';
-COMMENT ON COLUMN sys_ai_image_task.subject_id IS '主体ID: userId 或 IP';
-COMMENT ON COLUMN sys_ai_image_task.prompt IS '提示词';
-COMMENT ON COLUMN sys_ai_image_task.size IS '尺寸档位: 1K/2K/...';
-COMMENT ON COLUMN sys_ai_image_task.ratio IS '宽高比: 1:1/16:9/...';
-COMMENT ON COLUMN sys_ai_image_task.status IS '状态: generating/completed/failed';
-COMMENT ON COLUMN sys_ai_image_task.file_id IS '生成图片文件ID(引用 sys_file.id)';
-COMMENT ON COLUMN sys_ai_image_task.error_msg IS '失败原因';
-COMMENT ON COLUMN sys_ai_image_task.create_time IS '创建时间';
-COMMENT ON COLUMN sys_ai_image_task.update_time IS '更新时间';
-CREATE INDEX IF NOT EXISTS idx_sys_ai_image_task_subject ON sys_ai_image_task (subject_type, subject_id, create_time DESC);
-
--- AI 文本生成历史记录表（流式生成结束自动落库：提示词/结果/请求与返回时间，方便像日志一样查看历史）
-CREATE TABLE IF NOT EXISTS sys_ai_chat_record (
-    id            BIGSERIAL PRIMARY KEY,
-    subject_type  VARCHAR(16) NOT NULL,
-    subject_id    VARCHAR(64) NOT NULL,
-    provider_id   BIGINT,
-    model         VARCHAR(100),
-    prompt        TEXT NOT NULL,
-    result        TEXT,
-    status        VARCHAR(16) NOT NULL DEFAULT 'success',
-    error_msg     TEXT,
-    request_time  TIMESTAMP NOT NULL,
-    response_time TIMESTAMP,
-    duration_ms   BIGINT,
-    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-COMMENT ON TABLE  sys_ai_chat_record IS 'AI 文本生成历史记录表(流式结束自动落库)';
-COMMENT ON COLUMN sys_ai_chat_record.id IS '主键';
-COMMENT ON COLUMN sys_ai_chat_record.subject_type IS '主体类型: account/ip';
-COMMENT ON COLUMN sys_ai_chat_record.subject_id IS '主体ID: userId 或 IP';
-COMMENT ON COLUMN sys_ai_chat_record.provider_id IS '供应商ID(自带key为NULL)';
-COMMENT ON COLUMN sys_ai_chat_record.model IS 'LLM 模型名';
-COMMENT ON COLUMN sys_ai_chat_record.prompt IS '请求提示词(实际发送给LLM的完整prompt)';
-COMMENT ON COLUMN sys_ai_chat_record.result IS '返回结果(流式完整文本)';
-COMMENT ON COLUMN sys_ai_chat_record.status IS '状态: success/failed';
-COMMENT ON COLUMN sys_ai_chat_record.error_msg IS '失败原因';
-COMMENT ON COLUMN sys_ai_chat_record.request_time IS '请求时间(发起LLM调用时刻)';
-COMMENT ON COLUMN sys_ai_chat_record.response_time IS '返回时间(流式结束时刻)';
-COMMENT ON COLUMN sys_ai_chat_record.duration_ms IS '耗时(毫秒)';
-COMMENT ON COLUMN sys_ai_chat_record.create_time IS '落库时间';
-CREATE INDEX IF NOT EXISTS idx_sys_ai_chat_record_subject ON sys_ai_chat_record (subject_type, subject_id, request_time DESC);
-
--- AI 视频生成异步任务表（本地留痕：createTask 落库，getTask 被 worker 调用更新，完成存 sys_file）
-CREATE TABLE IF NOT EXISTS sys_ai_video_task (
-    id            BIGSERIAL PRIMARY KEY,
-    model_id      BIGINT NOT NULL,
-    provider_id   BIGINT,
-    subject_type  VARCHAR(16),
-    subject_id    VARCHAR(64),
-    prompt        TEXT NOT NULL,
-    ratio         VARCHAR(16),
-    duration      INT,
-    width         INT,
-    height        INT,
-    num_frames    INT,
-    frame_rate    DOUBLE PRECISION,
-    video_id      VARCHAR(128),
-    status        VARCHAR(16) NOT NULL DEFAULT 'generating',
-    file_id       BIGINT,
-    error_msg     TEXT,
-    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    update_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-COMMENT ON TABLE  sys_ai_video_task IS 'AI 视频生成异步任务表(本地留痕)';
-COMMENT ON COLUMN sys_ai_video_task.id IS '主键';
-COMMENT ON COLUMN sys_ai_video_task.model_id IS '模型ID(引用 sys_ai_model.id)';
-COMMENT ON COLUMN sys_ai_video_task.provider_id IS '供应商ID';
-COMMENT ON COLUMN sys_ai_video_task.subject_type IS '主体类型: account/ip';
-COMMENT ON COLUMN sys_ai_video_task.subject_id IS '主体ID: userId 或 IP';
-COMMENT ON COLUMN sys_ai_video_task.prompt IS '提示词';
-COMMENT ON COLUMN sys_ai_video_task.ratio IS '画面比例: 16:9/9:16/1:1';
-COMMENT ON COLUMN sys_ai_video_task.duration IS '时长(秒)';
-COMMENT ON COLUMN sys_ai_video_task.width IS '画面宽';
-COMMENT ON COLUMN sys_ai_video_task.height IS '画面高';
-COMMENT ON COLUMN sys_ai_video_task.num_frames IS '帧数';
-COMMENT ON COLUMN sys_ai_video_task.frame_rate IS '帧率';
-COMMENT ON COLUMN sys_ai_video_task.video_id IS '供应商返回的 video_id(供后端 worker 轮询)';
-COMMENT ON COLUMN sys_ai_video_task.status IS '状态: generating/completed/failed';
-COMMENT ON COLUMN sys_ai_video_task.file_id IS '生成视频文件ID(引用 sys_file.id)';
-COMMENT ON COLUMN sys_ai_video_task.error_msg IS '失败原因';
-COMMENT ON COLUMN sys_ai_video_task.create_time IS '请求时间(任务创建)';
-COMMENT ON COLUMN sys_ai_video_task.update_time IS '返回时间(完成/失败更新)';
-CREATE INDEX IF NOT EXISTS idx_sys_ai_video_task_subject ON sys_ai_video_task (subject_type, subject_id, create_time DESC);
 
 -- ===== AI 聊天模块 =====
 -- 向量存 ai_knowledge_chunk.embedding(TEXT, JSON 数组文本 [v1,v2,...])，纯 Java 内存余弦检索，无 pgvector 依赖。
@@ -748,3 +611,52 @@ WHERE NOT EXISTS (SELECT 1 FROM ai_persona WHERE name = '程序员' AND built_in
 INSERT INTO ai_persona (name, system_prompt, description, enabled, sort_order, built_in, create_time, update_time)
 SELECT '写作助手', '你是一位优秀的写作搭档，擅长润色、改写、构思大纲与生成多平台文案。根据用户需求提供多种风格的文本，并简要说明取舍。', '写作与文案助手', 1, 2, 1, NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM ai_persona WHERE name = '写作助手' AND built_in = 1);
+
+-- ============================================================
+-- 统一 AI 任务历史表（合并 sys_ai_chat_record / sys_ai_image_task / sys_ai_video_task / tts_record 四张表的查询视图）
+-- 旧表保留不删，新写入走此表，旧数据通过下方 DO 块幂等迁移
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ai_task (
+    id            BIGSERIAL PRIMARY KEY,
+    task_type     VARCHAR(16) NOT NULL,
+    subject_type  VARCHAR(16),
+    subject_id    VARCHAR(64),
+    provider_id   BIGINT,
+    model         VARCHAR(100),
+    prompt        TEXT NOT NULL,
+    result        TEXT,
+    status        VARCHAR(16) NOT NULL DEFAULT 'success',
+    error_msg     TEXT,
+    file_id       BIGINT,
+    file_data     BYTEA,
+    file_size     BIGINT,
+    audio_format  VARCHAR(16),
+    extra         JSONB DEFAULT '{}',
+    request_time  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    response_time TIMESTAMP,
+    duration_ms   BIGINT,
+    deleted       SMALLINT DEFAULT 0,
+    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  ai_task IS '统一AI任务历史(文案/图片/视频/TTS)';
+COMMENT ON COLUMN ai_task.task_type IS '任务类型: text/image/video/tts';
+COMMENT ON COLUMN ai_task.subject_type IS '主体类型: account/ip';
+COMMENT ON COLUMN ai_task.subject_id IS '主体ID: userId或IP或operator';
+COMMENT ON COLUMN ai_task.provider_id IS '供应商ID';
+COMMENT ON COLUMN ai_task.model IS '模型名';
+COMMENT ON COLUMN ai_task.prompt IS '输入提示词/文本';
+COMMENT ON COLUMN ai_task.result IS '文本输出(text类型)';
+COMMENT ON COLUMN ai_task.status IS '状态: generating/success/completed/failed';
+COMMENT ON COLUMN ai_task.error_msg IS '失败原因';
+COMMENT ON COLUMN ai_task.file_id IS '产物文件ID(引用sys_file, image/video)';
+COMMENT ON COLUMN ai_task.file_data IS '内联二进制(tts音频, 兼容旧逻辑)';
+COMMENT ON COLUMN ai_task.file_size IS '产物文件大小(字节)';
+COMMENT ON COLUMN ai_task.audio_format IS '音频格式: mp3/wav (tts类型)';
+COMMENT ON COLUMN ai_task.extra IS '类型专属参数JSON: voice/rate/pitch/volume/size/ratio/duration/width/height/video_id等';
+COMMENT ON COLUMN ai_task.request_time IS '请求时间';
+COMMENT ON COLUMN ai_task.response_time IS '返回时间';
+COMMENT ON COLUMN ai_task.duration_ms IS '耗时(毫秒)';
+COMMENT ON COLUMN ai_task.deleted IS '逻辑删除: 0未删 1已删';
+CREATE INDEX IF NOT EXISTS idx_ai_task_type_subject ON ai_task (task_type, subject_type, subject_id, request_time DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_task_request_time ON ai_task (request_time DESC);

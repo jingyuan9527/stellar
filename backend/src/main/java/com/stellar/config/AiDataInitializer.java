@@ -2,8 +2,8 @@ package com.stellar.config;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.stellar.ai.AiBuiltinTemplates;
-import com.stellar.entity.SysAiTemplate;
-import com.stellar.mapper.SysAiTemplateMapper;
+import com.stellar.ai.entity.SysAiTemplate;
+import com.stellar.ai.mapper.SysAiTemplateMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;

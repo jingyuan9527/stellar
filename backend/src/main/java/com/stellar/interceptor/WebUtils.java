@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.util.StringUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import com.stellar.ai.service.AiChatService;
 
 /**
  * Web 层通用工具：当前仅封装客户端真实 IP 解析（穿透代理头）。

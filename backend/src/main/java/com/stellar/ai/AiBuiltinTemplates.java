@@ -3,6 +3,7 @@ package com.stellar.ai;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import com.stellar.ai.service.AiTemplateService;
 
 /**
  * AI 内置提示词模板种子数据，供 DataInitializer 初始化和 AiTemplateService 恢复默认使用。

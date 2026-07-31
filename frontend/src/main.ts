@@ -3,7 +3,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import { setupDiscreteApi } from './utils/discrete'
-import { setupCrossTabSync } from './views/video/lib/sync'
+import { setupCrossTabSync } from './views/tools/cover/lib/sync'
 import 'virtual:uno.css'
 import './styles/global.css'
 

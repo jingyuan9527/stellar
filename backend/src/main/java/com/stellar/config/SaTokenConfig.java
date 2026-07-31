@@ -3,7 +3,7 @@ package com.stellar.config;
 import com.stellar.interceptor.AuthInterceptor;
 import com.stellar.interceptor.RateLimitInterceptor;
 import com.stellar.interceptor.RequestLogInterceptor;
-import com.stellar.service.RateLimitService;
+import com.stellar.infra.RateLimitService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

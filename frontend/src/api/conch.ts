@@ -5,7 +5,7 @@ import type { ConchAnswer, ConchAnswerQuery, ConchAskResult, ConchRecord, PageRe
  * 神奇海螺提问，返回命中的回答文本 + 音频地址。
  */
 export function askConch(question: string) {
-  return request<ConchAskResult>({ url: '/tts/conch/ask', method: 'post', data: { question } })
+  return request<ConchAskResult>({ url: '/game/conch/ask', method: 'post', data: { question } })
 }
 
 /**
@@ -13,7 +13,7 @@ export function askConch(question: string) {
  */
 export function getConchAnswerAudio(id: number): Promise<Blob> {
   return service
-    .get(`/tts/conch/answer/${id}/audio`, { responseType: 'blob', timeout: 30000 })
+    .get(`/game/conch/answer/${id}/audio`, { responseType: 'blob', timeout: 30000 })
     .then((res) => res as unknown as Blob)
 }
 
@@ -21,28 +21,28 @@ export function getConchAnswerAudio(id: number): Promise<Blob> {
  * 预设回答分页（管理后台）。
  */
 export function getConchAnswerPage(params: ConchAnswerQuery) {
-  return request<PageResult<ConchAnswer>>({ url: '/tts/conch/answer/page', method: 'get', params })
+  return request<PageResult<ConchAnswer>>({ url: '/game/conch/answer/page', method: 'get', params })
 }
 
 /**
  * 新增预设回答。
  */
 export function createConchAnswer(data: { answerText: string; matchDescription?: string; fileId: number }) {
-  return request<void>({ url: '/tts/conch/answer', method: 'post', data })
+  return request<void>({ url: '/game/conch/answer', method: 'post', data })
 }
 
 /**
  * 编辑预设回答。
  */
 export function updateConchAnswer(data: { id: number; answerText: string; matchDescription?: string; fileId: number }) {
-  return request<void>({ url: '/tts/conch/answer', method: 'put', data })
+  return request<void>({ url: '/game/conch/answer', method: 'put', data })
 }
 
 /**
  * 删除预设回答。
  */
 export function deleteConchAnswer(id: number) {
-  return request<void>({ url: `/tts/conch/answer/${id}`, method: 'delete' })
+  return request<void>({ url: `/game/conch/answer/${id}`, method: 'delete' })
 }
 
 /**
@@ -50,7 +50,7 @@ export function deleteConchAnswer(id: number) {
  */
 export function toggleConchAnswerEnabled(id: number, enabled: number) {
   return request<void>({
-    url: `/tts/conch/answer/${id}/enabled`,
+    url: `/game/conch/answer/${id}/enabled`,
     method: 'put',
     params: { enabled },
   })
@@ -61,7 +61,7 @@ export function toggleConchAnswerEnabled(id: number, enabled: number) {
  */
 export function getConchRecordPage(pageNum: number, pageSize: number) {
   return request<PageResult<ConchRecord>>({
-    url: '/tts/conch/record/page',
+    url: '/game/conch/record/page',
     method: 'get',
     params: { pageNum, pageSize },
   })
