@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 # =============================================================================
 # Stellar 单镜像：前端(Nginx) + 后端(Spring Boot) 双进程，由 supervisord 托管。
-# 构建上下文为项目根目录：docker build -t stellar:latest .
+# 构建上下文为项目根目录：
+#   低内存服务器（≤8G）构建请带 --memory 兜底，防止编译进程挤爆宿主：
+#   docker build --memory=6g --memory-swap=6g -t stellar:latest .
 # -----------------------------------------------------------------------------
 # 设计要点：
 #   - 多阶段构建：node 构建前端 dist → maven 构建后端 jar → 合并到运行镜像
@@ -12,6 +14,7 @@
 # ---------- 前端构建阶段 ----------
 # Node 22 + pnpm 固定版本（与 pnpm-lock.yaml v9 生成环境一致，镜像内 corepack 启用 pnpm）
 FROM node:22-alpine AS frontend-build
+ENV NODE_OPTIONS="--max-old-space-size=3072"
 RUN corepack enable && corepack prepare pnpm@10.12.4 --activate
 WORKDIR /app
 # 先拷锁文件与 pnpm 配置利用层缓存恢复依赖（pnpm-workspace.yaml 含 allowBuilds 审批，必须同时拷入）
@@ -25,6 +28,7 @@ RUN pnpm build
 
 # ---------- 后端构建阶段 ----------
 FROM maven:3.9-eclipse-temurin-21 AS backend-build
+ENV MAVEN_OPTS="-Xmx2g -Xms1g -XX:+UseContainerSupport"
 WORKDIR /app
 # 先拷 pom 利用层缓存下载依赖（挂 ~/.m2 缓存卷，Maven 依赖跨构建复用，避免每次全量重下）
 COPY backend/pom.xml .
