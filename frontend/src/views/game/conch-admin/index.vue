@@ -364,6 +364,7 @@ onMounted(() => {
             }"
             :scroll-x="800"
             :bordered="false"
+            remote
           />
 
           <div v-if="currentAudioUrl" class="inline-audio">
@@ -385,6 +386,7 @@ onMounted(() => {
             }"
             :scroll-x="600"
             :bordered="false"
+            remote
           />
         </NTabPane>
       </NTabs>

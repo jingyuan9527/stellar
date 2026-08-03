@@ -210,6 +210,7 @@ onMounted(loadData)
         }"
         :scroll-x="800"
         :bordered="false"
+        remote
       />
     </NCard>
 
