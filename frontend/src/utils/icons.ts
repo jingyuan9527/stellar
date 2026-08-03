@@ -46,6 +46,7 @@ import {
   BuildOutline,
   CodeSlashOutline,
   GitCompareOutline,
+  SyncOutline,
 } from '@vicons/ionicons5'
 
 export const iconMap: Record<string, Component> = {
@@ -95,4 +96,5 @@ export const iconMap: Record<string, Component> = {
   build: BuildOutline,
   json: CodeSlashOutline,
   diff: GitCompareOutline,
+  sync: SyncOutline,
 }

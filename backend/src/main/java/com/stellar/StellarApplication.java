@@ -5,7 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-@MapperScan({"com.stellar.ai.mapper", "com.stellar.tts.mapper", "com.stellar.game.mapper", "com.stellar.system.mapper"})
+@MapperScan({"com.stellar.ai.mapper", "com.stellar.tts.mapper", "com.stellar.game.mapper", "com.stellar.system.mapper", "com.stellar.memos.mapper"})
 public class StellarApplication {
 
     public static void main(String[] args) {

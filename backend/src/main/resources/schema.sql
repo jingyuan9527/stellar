@@ -452,6 +452,51 @@ SELECT 'chat_tts_engine', 'ai',
        '聊天TTS引擎: ai(优先AI失败降级Edge) / edge(直接Edge); 用户在聊天页选了具体音色则覆盖此开关', NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM sys_setting WHERE setting_key = 'chat_tts_engine');
 
+-- 备忘同步（Memos）配置 → sys_setting（上线后由用户在「备忘同步」页配置）
+INSERT INTO sys_setting (setting_key, setting_value, description, create_time, update_time)
+SELECT 'memos_base_url', '',
+       'Memos 实例域名(如 https://memo.booksy.cf, 末尾不带/)', NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM sys_setting WHERE setting_key = 'memos_base_url');
+
+INSERT INTO sys_setting (setting_key, setting_value, description, create_time, update_time)
+SELECT 'memos_token', '',
+       'Memos API Token(个人 Access Token)', NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM sys_setting WHERE setting_key = 'memos_token');
+
+INSERT INTO sys_setting (setting_key, setting_value, description, create_time, update_time)
+SELECT 'memo_tag_prompt',
+       '你是笔记标签生成助手。为下面的笔记内容生成 2-5 个简洁准确的中文标签。\n要求：\n- 只输出标签本身，用顿号或逗号分隔，放在一行\n- 不要输出编号、解释或多余文字\n- 标签要精准概括笔记主题\n\n笔记内容：\n{{content}}',
+       'AI 打标签提示词模板(含 {{content}} 占位符)', NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM sys_setting WHERE setting_key = 'memo_tag_prompt');
+
+-- ===== 备忘同步（Memos 笔记备份 + AI 打标签）=====
+-- 全量拉取 memo.booksy.cf 笔记备份到本地；远端删除 → 本地标记删除；AI 标签写回远端(content 追加 #标签)。
+CREATE TABLE IF NOT EXISTS memos_note (
+    id                 BIGSERIAL PRIMARY KEY,
+    uid                VARCHAR(64) NOT NULL UNIQUE,
+    content            TEXT NOT NULL,
+    tags               VARCHAR(1000),
+    tags_synced        SMALLINT DEFAULT 1,
+    remote_deleted     SMALLINT DEFAULT 0,
+    remote_create_time TIMESTAMP,
+    remote_update_time TIMESTAMP,
+    create_time        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  memos_note IS '备忘同步笔记备份表(Memos全量拉取)';
+COMMENT ON COLUMN memos_note.id IS '主键';
+COMMENT ON COLUMN memos_note.uid IS 'Memos 笔记 UID(远端唯一标识)';
+COMMENT ON COLUMN memos_note.content IS '笔记原文(Markdown, 去除尾部 #标签 块)';
+COMMENT ON COLUMN memos_note.tags IS '当前有效标签(逗号分隔, 远端解析+AI新增)';
+COMMENT ON COLUMN memos_note.tags_synced IS '标签是否已写回远端: 0待写回 1已同步(含无标签)';
+COMMENT ON COLUMN memos_note.remote_deleted IS '远端是否已删除: 0存活 1标记删除';
+COMMENT ON COLUMN memos_note.remote_create_time IS '远端创建时间';
+COMMENT ON COLUMN memos_note.remote_update_time IS '远端更新时间';
+COMMENT ON COLUMN memos_note.create_time IS '本地入库时间';
+COMMENT ON COLUMN memos_note.update_time IS '本地更新时间';
+CREATE INDEX IF NOT EXISTS idx_memos_note_uid ON memos_note (uid);
+CREATE INDEX IF NOT EXISTS idx_memos_note_remote_deleted ON memos_note (remote_deleted, tags_synced);
+
 -- sys_ai_usage 扩展：关联供应商与模型类型，便于按类型/供应商统计
 ALTER TABLE sys_ai_usage ADD COLUMN IF NOT EXISTS provider_id BIGINT;
 ALTER TABLE sys_ai_usage ADD COLUMN IF NOT EXISTS model_type VARCHAR(32);

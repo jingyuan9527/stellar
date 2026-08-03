@@ -453,3 +453,61 @@ export interface AiKnowledgeChunk {
   sourceName: string | null
   createTime: string
 }
+
+export interface MemosConfig {
+  baseUrl: string
+  tokenConfigured: boolean
+  promptTemplate: string
+}
+
+export interface MemosConfigUpdate {
+  baseUrl?: string
+  token?: string
+  promptTemplate?: string
+}
+
+export interface MemosSyncResult {
+  fetched: number
+  created: number
+  updated: number
+  markedDeleted: number
+  errors: number
+}
+
+export interface MemosJobResult {
+  processed: number
+  success: number
+  skipped: number
+  failed: number
+  remaining: number
+  pushSuccess: number
+  pushFailed: number
+}
+
+export interface MemosNote {
+  id: number
+  uid: string
+  content: string
+  tags: string[]
+  tagsSynced: number
+  remoteDeleted: number
+  remoteCreateTime: string | null
+  remoteUpdateTime: string | null
+  createTime: string | null
+  updateTime: string | null
+}
+
+export interface MemosQuery {
+  pageNum: number
+  pageSize: number
+  keyword?: string
+  remoteDeleted?: number
+}
+
+export interface MemosStats {
+  total: number
+  active: number
+  deleted: number
+  untagged: number
+  pendingPush: number
+}
