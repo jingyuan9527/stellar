@@ -10,13 +10,15 @@
 # =============================================================================
 
 # ---------- 前端构建阶段 ----------
-# Node 22+：corepack 拉取的 pnpm 11 要求 Node v22.13+（用到 node:sqlite 内置模块）
+# Node 22 + pnpm 固定版本（与 pnpm-lock.yaml v9 生成环境一致，镜像内 corepack 启用 pnpm）
 FROM node:22-alpine AS frontend-build
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.12.4 --activate
 WORKDIR /app
 # 先拷锁文件与 pnpm 配置利用层缓存恢复依赖（pnpm-workspace.yaml 含 allowBuilds 审批，必须同时拷入）
+# 挂 pnpm store 缓存卷，依赖包跨构建复用，避免每次全部重下
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 # 再拷源码构建（VITE_API_BASE_URL 默认 /api，生产由 Nginx 反代）
 COPY frontend/ .
 RUN pnpm build
@@ -24,12 +26,14 @@ RUN pnpm build
 # ---------- 后端构建阶段 ----------
 FROM maven:3.9-eclipse-temurin-21 AS backend-build
 WORKDIR /app
-# 先拷 pom 利用层缓存下载依赖
+# 先拷 pom 利用层缓存下载依赖（挂 ~/.m2 缓存卷，Maven 依赖跨构建复用，避免每次全量重下）
 COPY backend/pom.xml .
-RUN mvn -B -q dependency:go-offline
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -q dependency:go-offline
 # 再拷源码编译打包（跳过测试以加速，本地/CI 应单独跑测试）
 COPY backend/src ./src
-RUN mvn -B -q clean package -DskipTests
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -q clean package -DskipTests
 
 # ---------- 运行阶段 ----------
 FROM eclipse-temurin:21-jre-alpine
