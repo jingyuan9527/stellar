@@ -117,6 +117,12 @@ export const routes: RouteRecordRaw[] = [
             component: () => import('@/views/tools/cover/index.vue'),
             meta: { title: '封面工具', icon: 'image', order: 1 },
           },
+          {
+            path: 'json',
+            name: 'ToolsJson',
+            component: () => import('@/views/tools/json/index.vue'),
+            meta: { title: 'JSON 格式化', icon: 'json', order: 2 },
+          },
         ],
       },
       {

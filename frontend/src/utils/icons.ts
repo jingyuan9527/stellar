@@ -44,6 +44,8 @@ import {
   BookOutline,
   BodyOutline,
   BuildOutline,
+  CodeSlashOutline,
+  GitCompareOutline,
 } from '@vicons/ionicons5'
 
 export const iconMap: Record<string, Component> = {
@@ -91,4 +93,6 @@ export const iconMap: Record<string, Component> = {
   book: BookOutline,
   persona: BodyOutline,
   build: BuildOutline,
+  json: CodeSlashOutline,
+  diff: GitCompareOutline,
 }
