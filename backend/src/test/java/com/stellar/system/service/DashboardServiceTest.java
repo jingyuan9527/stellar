@@ -1,0 +1,148 @@
+package com.stellar.system.service;
+
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.stellar.ai.entity.AiTask;
+import com.stellar.ai.mapper.AiTaskMapper;
+import com.stellar.ai.service.SysAiUsageService;
+import com.stellar.ai.vo.AiUsageStatsVO;
+import com.stellar.system.entity.SysFile;
+import com.stellar.system.mapper.SysFileMapper;
+import com.stellar.system.vo.DashboardStatsVO;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * {@link DashboardService} 单测：各模块统计聚合 + 异常分支吞掉独立降级。
+ * <p>LambdaQueryWrapper.select() 需在构建时解析实体列，须先经 TableInfoHelper 注册
+ * AiTask/SysFile 元数据（Spring 启动时由 MyBatis-Plus 自动做，纯 Mockito 下手工补）。
+ */
+@ExtendWith(MockitoExtension.class)
+class DashboardServiceTest {
+
+    @Mock
+    SysAiUsageService aiUsageService;
+    @Mock
+    AiTaskMapper aiTaskMapper;
+    @Mock
+    SysFileMapper fileMapper;
+
+    @BeforeAll
+    static void registerTableInfo() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiTask.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), SysFile.class);
+    }
+
+    private AiTask task(String type, String status, long durationMs, LocalDateTime createTime) {
+        AiTask t = new AiTask();
+        t.setTaskType(type);
+        t.setStatus(status);
+        t.setDurationMs(durationMs);
+        t.setCreateTime(createTime);
+        return t;
+    }
+
+    @Test
+    void stats_正常聚合所有模块() {
+        DashboardService service = new DashboardService(aiUsageService, aiTaskMapper, fileMapper);
+        when(aiUsageService.stats()).thenReturn(new AiUsageStatsVO());
+        when(aiTaskMapper.selectList(any(Wrapper.class)))
+                .thenReturn(List.of(
+                        task("text", "success", 100, LocalDateTime.now()),
+                        task("text", "failed", 50, LocalDateTime.now().minusDays(2)),
+                        task("text", "generating", 0, LocalDateTime.now())))
+                .thenReturn(List.of(
+                        task("image", "completed", 500, LocalDateTime.now())))
+                .thenReturn(List.of(
+                        task("video", "completed", 1000, LocalDateTime.now())))
+                .thenReturn(List.of(
+                        task("tts", "success", 0, LocalDateTime.now())));
+
+        DashboardStatsVO vo = service.stats();
+
+        assertNotNull(vo.getAiUsage());
+        // text: 排除 generating，2 条终态，1 成功
+        assertEquals(2, vo.getTextGen().getTotal());
+        assertEquals(1, vo.getTextGen().getSuccessCount());
+        assertEquals(50.0, vo.getTextGen().getSuccessRate());
+        assertEquals(100, vo.getTextGen().getAvgDuration());
+        assertEquals(1, vo.getImageTask().getSuccessCount());
+        assertEquals(1, vo.getVideoTask().getSuccessCount());
+        assertNotNull(vo.getFile());
+        assertNotNull(vo.getTts());
+    }
+
+    @Test
+    void stats_文件按类型分组() {
+        DashboardService service = new DashboardService(aiUsageService, aiTaskMapper, fileMapper);
+        when(aiUsageService.stats()).thenReturn(new AiUsageStatsVO());
+        when(aiTaskMapper.selectList(any(Wrapper.class))).thenReturn(List.of(), List.of(), List.of(), List.of());
+
+        SysFile png = new SysFile();
+        png.setExt("png");
+        png.setSize(100L);
+        png.setCreateTime(LocalDateTime.now());
+        SysFile mp3 = new SysFile();
+        mp3.setExt("mp3");
+        mp3.setSize(200L);
+        SysFile unknown = new SysFile();
+        unknown.setExt("txt");
+        unknown.setSize(50L);
+        when(fileMapper.selectList(any(Wrapper.class))).thenReturn(List.of(png, mp3, unknown));
+
+        DashboardStatsVO vo = service.stats();
+
+        DashboardStatsVO.FileStat file = vo.getFile();
+        assertEquals(3, file.getTotal());
+        assertEquals(1, file.getTodayUpload());
+        assertEquals(350L, file.getTotalSize());
+        assertEquals(3, file.getByType().size());
+    }
+
+    @Test
+    void stats_单模块异常_独立降级其余继续() {
+        DashboardService service = new DashboardService(aiUsageService, aiTaskMapper, fileMapper);
+        when(aiUsageService.stats()).thenThrow(new RuntimeException("usage down"));
+        when(aiTaskMapper.selectList(any(Wrapper.class))).thenThrow(new RuntimeException("task down"));
+        when(fileMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+
+        DashboardStatsVO vo = service.stats();
+
+        assertNull(vo.getAiUsage());
+        assertNull(vo.getTextGen());
+        assertNull(vo.getImageTask());
+        assertNull(vo.getVideoTask());
+        assertNull(vo.getTts());
+        assertNotNull(vo.getFile());
+    }
+
+    @Test
+    void buildTaskStat_无终态_成功率0() {
+        DashboardService service = new DashboardService(aiUsageService, aiTaskMapper, fileMapper);
+        when(aiUsageService.stats()).thenReturn(new AiUsageStatsVO());
+        when(aiTaskMapper.selectList(any(Wrapper.class)))
+                .thenReturn(List.of(task("text", "generating", 0, LocalDateTime.now())))
+                .thenReturn(List.of())
+                .thenReturn(List.of())
+                .thenReturn(List.of());
+        when(fileMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+
+        DashboardStatsVO vo = service.stats();
+
+        assertEquals(0, vo.getTextGen().getTotal());
+        assertEquals(0.0, vo.getTextGen().getSuccessRate());
+        assertEquals(0, vo.getTextGen().getAvgDuration());
+    }
+}
