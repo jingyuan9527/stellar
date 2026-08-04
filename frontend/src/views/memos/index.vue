@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue'
+import MarkdownIt from 'markdown-it'
 import {
   NCard, NForm, NFormItem, NInput, NButton, NSpace, NDataTable, NTag,
   NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem, NIcon, NSelect,
@@ -18,7 +19,22 @@ import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
 const isMobile = useIsMobile()
-const drawerWidth = computed(() => (isMobile.value ? '100%' : 640))
+const drawerWidth = computed(() => (isMobile.value ? '100%' : 660))
+
+// 详情原文 Markdown 渲染（html=false 防 XSS，linkify 自动识别裸链接）
+const markdown = new MarkdownIt({ html: false, linkify: true })
+
+function renderMarkdown(content: string) {
+  return markdown.render(content || '')
+}
+
+/** 内容预览是否含图片/链接（Memos 笔记常见 ![图] 或裸 URL） */
+function hasContentImage(content: string) {
+  return content.includes('![')
+}
+function hasContentLink(content: string) {
+  return /https?:\/\//.test(content)
+}
 
 const config = reactive<MemosConfig & { token: string }>({
   baseUrl: '',
@@ -220,15 +236,32 @@ const allColumns: DataTableColumns<MemosNote> = [
   { title: 'ID', key: 'id', width: 70 },
   { title: 'UID', key: 'uid', ellipsis: { tooltip: true }, width: 110 },
   {
-    title: '内容', key: 'content', ellipsis: { tooltip: true }, width: 260,
-    render: (row) => row.content || '-',
+    title: '内容', key: 'content', width: 340,
+    render: (row) => {
+      if (!row.content) return h('span', { style: 'color:#999' }, '-')
+      const hasImage = hasContentImage(row.content)
+      const hasLink = hasContentLink(row.content)
+      const icon = (ic: string, color: string) =>
+        h(NIcon, { size: 14, style: `color:${color};vertical-align:-2px;margin-left:4px;flex-shrink:0` },
+          { default: () => h(iconMap[ic]) })
+      return h('span', { class: 'content-cell', title: row.content }, [
+        h('span', { class: 'content-text' }, row.content),
+        hasImage ? icon('image', '#f0a020') : null,
+        hasLink ? icon('link', '#2080f0') : null,
+      ])
+    },
   },
   {
     title: '标签', key: 'tags', width: 200,
     render: (row) => {
       if (!row.tags.length) return h('span', { style: 'color:#999' }, '-')
+      const show = row.tags.slice(0, 2)
+      const rest = row.tags.length - show.length
       return h(NSpace, { size: 2, wrap: true }, {
-        default: () => row.tags.map((t) => h(NTag, { size: 'small', type: 'info' }, { default: () => `#${t}` })),
+        default: () => [
+          ...show.map((t) => h(NTag, { size: 'small', type: 'info' }, { default: () => `#${t}` })),
+          rest > 0 ? h(NTag, { size: 'small', type: 'default' }, { default: () => `+${rest}` }) : null,
+        ],
       })
     },
   },
@@ -244,6 +277,7 @@ const allColumns: DataTableColumns<MemosNote> = [
       ? h(NTag, { size: 'small', type: 'error' }, { default: () => '已删除' })
       : h(NTag, { size: 'small', type: 'success' }, { default: () => '存活' }),
   },
+  { title: '创建时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },
   { title: '更新时间', key: 'remoteUpdateTime', width: 170, render: (row) => formatTime(row.remoteUpdateTime) },
   {
     title: '操作', key: 'actions', width: 80, fixed: 'right',
@@ -252,7 +286,10 @@ const allColumns: DataTableColumns<MemosNote> = [
   },
 ]
 
-const mobileHiddenKeys = new Set(['id', 'uid', 'tagsSynced'])
+/** 已删除行置灰 + 删除线（视觉区分备份与存活笔记） */
+const rowProps = (row: MemosNote) => (row.remoteDeleted === 1 ? { class: 'row-deleted' } : {})
+
+const mobileHiddenKeys = new Set(['id', 'uid', 'tagsSynced', 'createTime'])
 const columns = computed<DataTableColumns<MemosNote>>(() =>
   isMobile.value
     ? allColumns.filter((c) => !mobileHiddenKeys.has((c as { key?: string }).key ?? ''))
@@ -411,7 +448,8 @@ onMounted(() => {
         </template>
         <NDataTable :columns="columns" :data="tableData" :loading="loading" :pagination="pagination"
           :row-key="(row: MemosNote) => row.id" v-model:checked-row-keys="checkedKeys"
-          :scroll-x="isMobile ? 800 : 1080" remote striped size="small" />
+          :row-props="rowProps"
+          :scroll-x="isMobile ? 900 : 1180" remote striped size="small" />
       </NCard>
     </NSpace>
 
@@ -440,8 +478,9 @@ onMounted(() => {
             <NDescriptionsItem label="远端更新">{{ formatTime(current.remoteUpdateTime) }}</NDescriptionsItem>
             <NDescriptionsItem label="本地入库">{{ formatTime(current.createTime) }}</NDescriptionsItem>
           </NDescriptions>
-          <NCard title="原文" size="small" style="margin-top: 12px">
-            <pre class="memo-content">{{ current.content }}</pre>
+<NCard title="原文" size="small" style="margin-top: 12px">
+            <div v-if="current.content" class="markdown-body" v-html="renderMarkdown(current.content)"></div>
+            <span v-else style="color:#999">-</span>
           </NCard>
         </template>
       </NDrawerContent>
@@ -450,12 +489,79 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.memo-content {
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
+.content-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.content-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:deep(.row-deleted) {
+  opacity: 0.55;
+}
+:deep(.row-deleted td) {
+  text-decoration: line-through;
+}
+.markdown-body {
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.8;
+  word-break: break-word;
+}
+.markdown-body :deep(p) {
+  margin: 0.5em 0;
+}
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  margin: 0.8em 0 0.4em;
+  font-weight: 600;
+}
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  padding-left: 1.5em;
+  margin: 0.4em 0;
+}
+.markdown-body :deep(code) {
+  background: rgba(128, 128, 128, 0.15);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.markdown-body :deep(pre) {
+  background: rgba(128, 128, 128, 0.1);
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.markdown-body :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+.markdown-body :deep(blockquote) {
+  border-left: 3px solid rgba(128, 128, 128, 0.4);
+  margin: 0.5em 0;
+  padding-left: 10px;
+  color: #888;
+}
+.markdown-body :deep(a) {
+  color: #2080f0;
+}
+.markdown-body :deep(img) {
+  max-width: 100%;
+  border-radius: 6px;
+}
+.markdown-body :deep(table) {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  padding: 4px 8px;
 }
 </style>
 
