@@ -8,7 +8,7 @@ import {
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
   getMemosConfig, saveMemosConfig, pullMemos, tagMemos, pushMemosTags,
-  getMemosPage, getMemosStats,
+  getMemosPage, getMemosStats, getMemosWebhookConfig, saveMemosWebhookSecret,
 } from '@/api/memos'
 import { getAiModelsByType } from '@/api/ai'
 import type { MemosConfig, MemosNote, MemosStats, AiModel } from '@/types/api'
@@ -49,6 +49,45 @@ async function handleSaveConfig() {
   message.success('配置已保存')
   config.token = ''
   await loadConfig()
+}
+
+// ===== Webhook 配置 =====
+
+const webhookUrl = ref('')
+const webhookSecretConfigured = ref(false)
+const webhookSecret = ref('')
+const webhookSaving = ref(false)
+
+function buildWebhookUrl() {
+  return `${window.location.origin}/memos/webhook`
+}
+
+async function loadWebhookConfig() {
+  webhookUrl.value = buildWebhookUrl()
+  const c = await getMemosWebhookConfig()
+  webhookSecretConfigured.value = c.secretConfigured
+}
+
+async function handleSaveWebhookSecret() {
+  if (!webhookSecret.value.trim()) return
+  webhookSaving.value = true
+  try {
+    await saveMemosWebhookSecret(webhookSecret.value.trim())
+    message.success('Webhook 密钥已保存')
+    webhookSecret.value = ''
+    await loadWebhookConfig()
+  } finally {
+    webhookSaving.value = false
+  }
+}
+
+async function copyWebhookUrl() {
+  try {
+    await navigator.clipboard.writeText(webhookUrl.value)
+    message.success('已复制回调地址')
+  } catch {
+    message.error('复制失败')
+  }
 }
 
 // ===== 三个动作按钮 =====
@@ -278,6 +317,7 @@ onMounted(() => {
   loadData()
   loadStats()
   loadTextModels()
+  loadWebhookConfig()
 })
 </script>
 
@@ -301,6 +341,29 @@ onMounted(() => {
             <NButton type="primary" :loading="configLoading" @click="handleSaveConfig">保存配置</NButton>
           </NFormItem>
         </NForm>
+</NCard>
+
+      <NCard title="Webhook 实时同步" size="small">
+        <NForm label-placement="left" :label-width="90" :show-feedback="false">
+          <NFormItem label="回调地址">
+            <NSpace :size="8" style="width: 100%">
+              <NInput :value="webhookUrl" readonly></NInput>
+              <NButton size="small" :disabled="!webhookUrl" @click="copyWebhookUrl">复制</NButton>
+            </NSpace>
+          </NFormItem>
+          <NFormItem label="签名密钥">
+            <NInput v-model:value="webhookSecret" type="password" show-password-on="click"
+              :placeholder="webhookSecretConfigured ? '已配置（留空不修改）' : '请输入 webhook 签名密钥'" />
+          </NFormItem>
+          <NFormItem label=" ">
+            <NButton type="primary" :loading="webhookSaving" :disabled="!webhookSecret.trim()"
+              @click="handleSaveWebhookSecret">保存密钥</NButton>
+          </NFormItem>
+        </NForm>
+        <NAlert type="info" :bordered="false">
+          在 Memos 设置 → 我的 Webhooks 中新建回调：URL 填上面的回调地址，创建后复制签名密钥（whsec_ 开头）填到这里保存。
+          此后 Memos 创建/更新/删除笔记时实时推送到本地，与「立即同步」并行、互不影响。
+        </NAlert>
       </NCard>
 
       <NCard title="同步操作" size="small">

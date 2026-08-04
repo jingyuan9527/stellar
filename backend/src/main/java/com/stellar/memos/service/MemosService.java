@@ -3,6 +3,7 @@ package com.stellar.memos.service;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.ai.service.AiChatService;
 import com.stellar.common.BusinessException;
@@ -18,15 +19,23 @@ import com.stellar.memos.vo.MemosJobResultVO;
 import com.stellar.memos.vo.MemosNoteVO;
 import com.stellar.memos.vo.MemosStatsVO;
 import com.stellar.memos.vo.MemosSyncResultVO;
+import com.stellar.memos.vo.MemosWebhookConfigVO;
 import com.stellar.system.service.SysSettingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -51,6 +60,20 @@ public class MemosService {
     static final String KEY_BASE_URL = "memos_base_url";
     static final String KEY_TOKEN = "memos_token";
     static final String KEY_PROMPT = "memo_tag_prompt";
+    static final String KEY_WEBHOOK_SECRET = "memos_webhook_secret";
+
+    /** webhook-id 去重 key 前缀（Redis），TTL 内重复投递直接忽略 */
+    private static final String WEBHOOK_DEDUP_KEY_PREFIX = "stellar:memos:webhook:";
+    private static final Duration WEBHOOK_DEDUP_TTL = Duration.ofMinutes(5);
+
+    /** 签名时间戳容差（秒）：超出视为失效，防重放 */
+    private static final long SIGNATURE_TOLERANCE_SECONDS = 300;
+
+    /** Memos 支持的活动类型 */
+    private static final String TYPE_MEMO_CREATED = "memos.memo.created";
+    private static final String TYPE_MEMO_UPDATED = "memos.memo.updated";
+    private static final String TYPE_MEMO_DELETED = "memos.memo.deleted";
+    private static final String TYPE_MEMO_COMMENT_CREATED = "memos.memo.comment.created";
 
     /** 默认提示词模板（sys_setting 为空时的兜底） */
     static final String DEFAULT_PROMPT =
@@ -67,6 +90,7 @@ public class MemosService {
     private final AiChatService aiChatService;
     private final ExternalCallLogger externalCallLogger;
     private final ObjectMapper objectMapper;
+    private final RedisTemplate<String, Object> redisTemplate;
 
     // ===== 配置 =====
 
@@ -93,6 +117,160 @@ public class MemosService {
         log.info("[备忘同步] 配置已保存 operator={}", operator());
     }
 
+    // ===== Webhook 配置 =====
+
+    public MemosWebhookConfigVO getWebhookConfig() {
+        MemosWebhookConfigVO vo = new MemosWebhookConfigVO();
+        vo.setSecretConfigured(StringUtils.hasText(sysSettingService.get(KEY_WEBHOOK_SECRET, "")));
+        return vo;
+    }
+
+    public void saveWebhookSecret(String secret) {
+        if (StringUtils.hasText(secret)) {
+            sysSettingService.set(KEY_WEBHOOK_SECRET, secret.trim(), null);
+            log.info("[备忘同步] Webhook 签名密钥已保存");
+        }
+    }
+
+    // ===== Webhook 接收（Memos 服务器主动推送，与主动拉取并行）=====
+
+    /**
+     * 处理 Memos webhook 投递：签名验证 → 去重 → 按活动类型分发。
+     * <p>签名验证失败抛 {@link BusinessException}（由 Controller 转 4xx 拒绝投递）；
+     * 成功返回处理结果 Map（status: created/updated/unchanged/marked/skipped/ignored/duplicate）。
+     * 与主动拉取共用 {@link #mergeRemote}/{@link #insertMemo} 落库逻辑，保留本地待写回标签。
+     */
+    public Map<String, Object> handleWebhook(byte[] rawBody, String webhookId, String timestamp, String signature) {
+        verifySignature(rawBody, webhookId, timestamp, signature);
+        if (!dedupeWebhookId(webhookId)) {
+            log.info("[备忘同步] Webhook 重复投递已忽略 id={}", webhookId);
+            return Map.of("status", "duplicate");
+        }
+        try {
+            JsonNode body = objectMapper.readTree(rawBody);
+            String activityType = body.path("activityType").asText("");
+            JsonNode memoNode = body.path("memo");
+            LocalDateTime now = LocalDateTime.now();
+            switch (activityType) {
+                case TYPE_MEMO_CREATED:
+                case TYPE_MEMO_UPDATED:
+                    return upsertFromWebhook(memoNode, now);
+                case TYPE_MEMO_DELETED:
+                    return markDeletedFromWebhook(memoNode, now);
+                case TYPE_MEMO_COMMENT_CREATED:
+                    log.info("[备忘同步] Webhook 忽略评论事件 id={}", webhookId);
+                    return Map.of("status", "ignored", "type", activityType);
+                default:
+                    log.warn("[备忘同步] Webhook 未知活动类型 type={} id={}", activityType, webhookId);
+                    return Map.of("status", "ignored", "type", activityType);
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[备忘同步] Webhook payload 解析失败 id={}: {}", webhookId, e.getMessage(), e);
+            throw new BusinessException("Webhook payload 解析失败");
+        }
+    }
+
+    /** 校验签名（Standard Webhooks 兼容）：时效 + HMAC-SHA256 常量时间比较。 */
+    private void verifySignature(byte[] rawBody, String webhookId, String timestamp, String signature) {
+        String secret = sysSettingService.get(KEY_WEBHOOK_SECRET, "");
+        if (!StringUtils.hasText(secret)) {
+            throw new BusinessException("Webhook 签名密钥未配置");
+        }
+        if (!StringUtils.hasText(webhookId) || !StringUtils.hasText(timestamp) || !StringUtils.hasText(signature)) {
+            throw new BusinessException("Webhook 缺少签名头（webhook-id/webhook-timestamp/webhook-signature）");
+        }
+        long ts;
+        try {
+            ts = Long.parseLong(timestamp);
+        } catch (NumberFormatException e) {
+            throw new BusinessException("Webhook 时间戳格式非法");
+        }
+        long nowSec = System.currentTimeMillis() / 1000;
+        if (Math.abs(nowSec - ts) > SIGNATURE_TOLERANCE_SECONDS) {
+            throw new BusinessException("Webhook 时间戳超出容差窗口");
+        }
+        byte[] key = decodeSecret(secret);
+        String signedContent = webhookId + "." + timestamp + "." + new String(rawBody, StandardCharsets.UTF_8);
+        String expected;
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(key, "HmacSHA256"));
+            expected = "v1," + Base64.getEncoder().encodeToString(
+                    mac.doFinal(signedContent.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new BusinessException("Webhook 签名计算失败: " + e.getMessage());
+        }
+        if (!MessageDigest.isEqual(signature.getBytes(StandardCharsets.UTF_8),
+                expected.getBytes(StandardCharsets.UTF_8))) {
+            throw new BusinessException("Webhook 签名校验失败");
+        }
+    }
+
+    /** 解析签名密钥：whsec_ 前缀 base64 解码，其余按 UTF-8 原样（与 Memos 端 resolveSigningKey 一致）。 */
+    private byte[] decodeSecret(String secret) {
+        if (secret.startsWith("whsec_")) {
+            try {
+                return Base64.getDecoder().decode(secret.substring("whsec_".length()));
+            } catch (IllegalArgumentException e) {
+                throw new BusinessException("Webhook 签名密钥格式错误（whsec_ 后非合法 base64）");
+            }
+        }
+        return secret.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** webhook-id 去重：Redis SETNX + TTL，返回 false 表示已处理过（防重放）。 */
+    private boolean dedupeWebhookId(String webhookId) {
+        try {
+            Boolean first = redisTemplate.opsForValue().setIfAbsent(
+                    WEBHOOK_DEDUP_KEY_PREFIX + webhookId, "1", WEBHOOK_DEDUP_TTL);
+            return Boolean.TRUE.equals(first);
+        } catch (Exception e) {
+            log.warn("[备忘同步] Webhook 去重 Redis 异常，放行处理 id={}: {}", webhookId, e.getMessage());
+            return true;
+        }
+    }
+
+    /** created/updated 事件：payload 完整 memo 直接 upsert（与 pull 同源逻辑）。 */
+    private Map<String, Object> upsertFromWebhook(JsonNode memoNode, LocalDateTime now) {
+        MemosApiClient.MemosRemoteMemo rm = memosApiClient.parseMemo(memoNode);
+        if (rm == null) {
+            log.warn("[备忘同步] Webhook memo 缺少 uid，跳过");
+            return Map.of("status", "skipped");
+        }
+        MemosNote local = memosNoteMapper.selectOne(
+                new LambdaQueryWrapper<MemosNote>().eq(MemosNote::getUid, rm.uid()));
+        String status;
+        if (local == null) {
+            insertMemo(rm, now);
+            status = "created";
+        } else {
+            status = mergeRemote(local, rm, now) ? "updated" : "unchanged";
+        }
+        log.info("[备忘同步] Webhook 事件处理完成 uid={} status={}", rm.uid(), status);
+        return Map.of("status", status, "uid", rm.uid());
+    }
+
+    /** deleted 事件：本地标记远端删除（保留备份，与拉取语义一致）。 */
+    private Map<String, Object> markDeletedFromWebhook(JsonNode memoNode, LocalDateTime now) {
+        MemosApiClient.MemosRemoteMemo rm = memosApiClient.parseMemo(memoNode);
+        if (rm == null) {
+            log.warn("[备忘同步] Webhook 删除事件缺少 memo uid，跳过");
+            return Map.of("status", "skipped");
+        }
+        MemosNote local = memosNoteMapper.selectOne(
+                new LambdaQueryWrapper<MemosNote>().eq(MemosNote::getUid, rm.uid()));
+        if (local != null && (local.getRemoteDeleted() == null || local.getRemoteDeleted() == 0)) {
+            local.setRemoteDeleted(1);
+            local.setUpdateTime(now);
+            memosNoteMapper.updateById(local);
+            log.info("[备忘同步] Webhook 标记远端已删 uid={} id={}", rm.uid(), local.getId());
+            return Map.of("status", "marked", "uid", rm.uid());
+        }
+        return Map.of("status", "unchanged", "uid", rm.uid());
+    }
+
     // ===== 立即同步（拉取备份 + 标记远端已删）=====
 
     public MemosSyncResultVO syncPull() {
@@ -112,17 +290,7 @@ public class MemosService {
             MemosNote local = existing.get(rm.uid());
             try {
                 if (local == null) {
-                    MemosNote note = new MemosNote();
-                    note.setUid(rm.uid());
-                    note.setContent(stripTrailingTagBlock(rm.content()));
-                    note.setTags(joinTags(rm.tags()));
-                    note.setTagsSynced(1);
-                    note.setRemoteDeleted(0);
-                    note.setRemoteCreateTime(rm.createTime());
-                    note.setRemoteUpdateTime(rm.updateTime());
-                    note.setCreateTime(now);
-                    note.setUpdateTime(now);
-                    memosNoteMapper.insert(note);
+                    insertMemo(rm, now);
                     result.setCreated(result.getCreated() + 1);
                 } else {
                     boolean changed = mergeRemote(local, rm, now);
@@ -153,6 +321,21 @@ public class MemosService {
         log.info("[备忘同步] 同步完成 fetched={} created={} updated={} markedDeleted={} errors={}",
                 result.getFetched(), result.getCreated(), result.getUpdated(), result.getMarkedDeleted(), result.getErrors());
         return result;
+    }
+
+    /** 新建一条本地笔记（pull 与 webhook 共用同源落库逻辑）。 */
+    private void insertMemo(MemosApiClient.MemosRemoteMemo rm, LocalDateTime now) {
+        MemosNote note = new MemosNote();
+        note.setUid(rm.uid());
+        note.setContent(stripTrailingTagBlock(rm.content()));
+        note.setTags(joinTags(rm.tags()));
+        note.setTagsSynced(1);
+        note.setRemoteDeleted(0);
+        note.setRemoteCreateTime(rm.createTime());
+        note.setRemoteUpdateTime(rm.updateTime());
+        note.setCreateTime(now);
+        note.setUpdateTime(now);
+        memosNoteMapper.insert(note);
     }
 
     /**

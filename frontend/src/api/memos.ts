@@ -48,3 +48,13 @@ export function getMemosPage(params: MemosQuery) {
 export function getMemosStats() {
   return request<MemosStats>({ url: '/memos/stats', method: 'get' })
 }
+
+/** Webhook 配置：是否已配置签名密钥 */
+export function getMemosWebhookConfig() {
+  return request<{ secretConfigured: boolean }>({ url: '/memos/webhook/config', method: 'get' })
+}
+
+/** 保存 Webhook 签名密钥（whsec_ 开头，Memos 创建 webhook 时生成） */
+export function saveMemosWebhookSecret(secret: string) {
+  return request<void>({ url: '/memos/webhook/config', method: 'put', data: { secret } })
+}

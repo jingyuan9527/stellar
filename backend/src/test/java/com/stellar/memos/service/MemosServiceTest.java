@@ -16,6 +16,7 @@ import com.stellar.memos.vo.MemosJobResultVO;
 import com.stellar.memos.vo.MemosNoteVO;
 import com.stellar.memos.vo.MemosStatsVO;
 import com.stellar.memos.vo.MemosSyncResultVO;
+import com.stellar.memos.vo.MemosWebhookConfigVO;
 import com.stellar.system.service.SysSettingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,9 +24,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -52,13 +61,17 @@ class MemosServiceTest {
     private AiChatService aiChatService;
     @Mock
     private ExternalCallLogger externalCallLogger;
+    @Mock
+    private RedisTemplate<String, Object> redisTemplate;
+    @Mock
+    private ValueOperations<String, Object> valueOperations;
 
     private MemosService service;
 
     @BeforeEach
     void setUp() {
         service = new MemosService(memosNoteMapper, memosApiClient, sysSettingService,
-                aiChatService, externalCallLogger, new ObjectMapper());
+                aiChatService, externalCallLogger, new ObjectMapper(), redisTemplate);
     }
 
     private void mockConfig(String baseUrl, String token) {
@@ -71,6 +84,43 @@ class MemosServiceTest {
                 LocalDateTime.of(2025, 1, 1, 0, 0),
                 LocalDateTime.of(2025, 1, 2, 0, 0),
                 tags.isEmpty() ? List.of() : List.of(tags.split(",")));
+    }
+
+    static MemosApiClient.MemosRemoteMemo remoteMemo(String uid, String content, String tags) {
+        return new MemosApiClient.MemosRemoteMemo(uid, content,
+                LocalDateTime.of(2025, 1, 1, 0, 0),
+                LocalDateTime.of(2025, 1, 2, 0, 0),
+                tags.isEmpty() ? List.of() : List.of(tags.split(",")));
+    }
+
+    /** 按 Memos 端算法生成签名：whsec_ 密钥 base64 解码后 HMAC-SHA256(id.timestamp.body)。 */
+    static String sign(String id, String ts, String body, String secret) {
+        try {
+            byte[] key = secret.startsWith("whsec_")
+                    ? Base64.getDecoder().decode(secret.substring("whsec_".length()))
+                    : secret.getBytes(StandardCharsets.UTF_8);
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(key, "HmacSHA256"));
+            return "v1," + Base64.getEncoder().encodeToString(
+                    mac.doFinal((id + "." + ts + "." + body).getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String nowTs() {
+        return String.valueOf(System.currentTimeMillis() / 1000);
+    }
+
+    /** 预置 webhook 签名密钥已配置。 */
+    private void mockWebhookSecret(String secret) {
+        when(sysSettingService.get(MemosService.KEY_WEBHOOK_SECRET, "")).thenReturn(secret);
+    }
+
+    /** 预置 Redis 去重通过（首次投递）。 */
+    private void mockRedisOk() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent(anyString(), any(), any(Duration.class))).thenReturn(true);
     }
 
     // ===== 配置 =====
@@ -491,6 +541,215 @@ class MemosServiceTest {
         assertEquals(3L, vo.getDeleted());
         assertEquals(2L, vo.getUntagged());
         assertEquals(1L, vo.getPendingPush());
+    }
+
+    // ===== Webhook =====
+
+    @Test
+    void getWebhookConfig_密钥未配置_置false() {
+        when(sysSettingService.get(MemosService.KEY_WEBHOOK_SECRET, "")).thenReturn("");
+        MemosWebhookConfigVO vo = service.getWebhookConfig();
+        assertFalse(vo.getSecretConfigured());
+    }
+
+    @Test
+    void getWebhookConfig_密钥已配置_置true() {
+        when(sysSettingService.get(MemosService.KEY_WEBHOOK_SECRET, "")).thenReturn("whsec_abc");
+        MemosWebhookConfigVO vo = service.getWebhookConfig();
+        assertTrue(vo.getSecretConfigured());
+    }
+
+    @Test
+    void saveWebhookSecret_保存_空不保存() {
+        service.saveWebhookSecret("whsec_abc");
+        verify(sysSettingService).set(MemosService.KEY_WEBHOOK_SECRET, "whsec_abc", null);
+        service.saveWebhookSecret("  ");
+        verify(sysSettingService, never()).set(MemosService.KEY_WEBHOOK_SECRET, "  ", null);
+    }
+
+    @Test
+    void handleWebhook_签名密钥未配置_抛异常() {
+        when(sysSettingService.get(MemosService.KEY_WEBHOOK_SECRET, "")).thenReturn("");
+        byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+        assertThrows(BusinessException.class, () -> service.handleWebhook(body, "msg_1", nowTs(), "v1,x"));
+    }
+
+    @Test
+    void handleWebhook_签名不匹配_抛异常() {
+        String secret = "whsec_" + Base64.getEncoder().encodeToString("key".getBytes(StandardCharsets.UTF_8));
+        mockWebhookSecret(secret);
+        byte[] body = "{\"activityType\":\"memos.memo.created\"}".getBytes(StandardCharsets.UTF_8);
+        assertThrows(BusinessException.class,
+                () -> service.handleWebhook(body, "msg_1", nowTs(), "v1,forged"));
+    }
+
+    @Test
+    void handleWebhook_时间戳过期_抛异常() {
+        String secret = "whsec_" + Base64.getEncoder().encodeToString("key".getBytes(StandardCharsets.UTF_8));
+        mockWebhookSecret(secret);
+        byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+        String oldTs = String.valueOf(System.currentTimeMillis() / 1000 - 600);
+        String sig = sign("msg_1", oldTs, "{}", secret);
+        assertThrows(BusinessException.class,
+                () -> service.handleWebhook(body, "msg_1", oldTs, sig));
+    }
+
+    @Test
+    void handleWebhook_重复id_忽略() {
+        String secret = "whsec_" + Base64.getEncoder().encodeToString("key".getBytes(StandardCharsets.UTF_8));
+        mockWebhookSecret(secret);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent(anyString(), any(), any(Duration.class))).thenReturn(false);
+        byte[] body = "{\"activityType\":\"memos.memo.created\"}".getBytes(StandardCharsets.UTF_8);
+        String ts = nowTs();
+        String sig = sign("msg_dup", ts, new String(body, StandardCharsets.UTF_8), secret);
+
+        Map<String, Object> result = service.handleWebhook(body, "msg_dup", ts, sig);
+
+        assertEquals("duplicate", result.get("status"));
+        verify(memosNoteMapper, never()).insert(any(MemosNote.class));
+    }
+
+    @Test
+    void handleWebhook_created_新笔记入库() {
+        String secret = "whsec_" + Base64.getEncoder().encodeToString("key".getBytes(StandardCharsets.UTF_8));
+        mockWebhookSecret(secret);
+        mockRedisOk();
+        String payload = "{\"activityType\":\"memos.memo.created\",\"creator\":\"users/1\","
+                + "\"memo\":{\"name\":\"memos/u1\",\"uid\":\"u1\",\"content\":\"hello\","
+                + "\"createTime\":\"2025-01-01T00:00:00Z\",\"updateTime\":\"2025-01-02T00:00:00Z\","
+                + "\"property\":{\"tags\":[\"a\"]}}}";
+        when(memosApiClient.parseMemo(any())).thenReturn(remoteMemo("u1", "hello", "a"));
+        when(memosNoteMapper.selectOne(any())).thenReturn(null);
+        String ts = nowTs();
+        String sig = sign("msg_c", ts, payload, secret);
+
+        Map<String, Object> result = service.handleWebhook(payload.getBytes(StandardCharsets.UTF_8), "msg_c", ts, sig);
+
+        assertEquals("created", result.get("status"));
+        ArgumentCaptor<MemosNote> captor = ArgumentCaptor.forClass(MemosNote.class);
+        verify(memosNoteMapper).insert(captor.capture());
+        assertEquals("u1", captor.getValue().getUid());
+        assertEquals("hello", captor.getValue().getContent());
+        assertEquals("a", captor.getValue().getTags());
+        assertEquals(1, captor.getValue().getTagsSynced());
+        assertEquals(0, captor.getValue().getRemoteDeleted());
+    }
+
+    @Test
+    void handleWebhook_updated_合并本地待写回标签() {
+        String secret = "whsec_" + Base64.getEncoder().encodeToString("key".getBytes(StandardCharsets.UTF_8));
+        mockWebhookSecret(secret);
+        mockRedisOk();
+        String payload = "{\"activityType\":\"memos.memo.updated\",\"creator\":\"users/1\","
+                + "\"memo\":{\"name\":\"memos/u1\",\"uid\":\"u1\",\"content\":\"new content\","
+                + "\"createTime\":\"2025-01-01T00:00:00Z\",\"updateTime\":\"2025-01-03T00:00:00Z\","
+                + "\"property\":{\"tags\":[\"remote\"]}}}";
+        when(memosApiClient.parseMemo(any())).thenReturn(remoteMemo("u1", "new content", "remote"));
+        MemosNote local = new MemosNote();
+        local.setId(1L);
+        local.setUid("u1");
+        local.setContent("old content");
+        local.setTags("ai_local");
+        local.setTagsSynced(0);
+        local.setRemoteDeleted(0);
+        local.setRemoteUpdateTime(LocalDateTime.of(2025, 1, 2, 0, 0));
+        when(memosNoteMapper.selectOne(any())).thenReturn(local);
+        String ts = nowTs();
+        String sig = sign("msg_u", ts, payload, secret);
+
+        Map<String, Object> result = service.handleWebhook(payload.getBytes(StandardCharsets.UTF_8), "msg_u", ts, sig);
+
+        assertEquals("updated", result.get("status"));
+        assertEquals("new content", local.getContent());
+        assertEquals("remote,ai_local", local.getTags());
+        assertEquals(0, local.getTagsSynced());
+        verify(memosNoteMapper).updateById(local);
+    }
+
+    @Test
+    void handleWebhook_deleted_标记远端删除() {
+        String secret = "whsec_" + Base64.getEncoder().encodeToString("key".getBytes(StandardCharsets.UTF_8));
+        mockWebhookSecret(secret);
+        mockRedisOk();
+        String payload = "{\"activityType\":\"memos.memo.deleted\",\"creator\":\"users/1\","
+                + "\"memo\":{\"name\":\"memos/u1\",\"uid\":\"u1\",\"content\":\"gone\"}}";
+        when(memosApiClient.parseMemo(any())).thenReturn(remoteMemo("u1", "gone", ""));
+        MemosNote local = new MemosNote();
+        local.setId(1L);
+        local.setUid("u1");
+        local.setContent("gone");
+        local.setRemoteDeleted(0);
+        when(memosNoteMapper.selectOne(any())).thenReturn(local);
+        String ts = nowTs();
+        String sig = sign("msg_d", ts, payload, secret);
+
+        Map<String, Object> result = service.handleWebhook(payload.getBytes(StandardCharsets.UTF_8), "msg_d", ts, sig);
+
+        assertEquals("marked", result.get("status"));
+        assertEquals(1, local.getRemoteDeleted());
+        verify(memosNoteMapper).updateById(local);
+    }
+
+    @Test
+    void handleWebhook_deleted_本地无记录_不改动() {
+        String secret = "whsec_" + Base64.getEncoder().encodeToString("key".getBytes(StandardCharsets.UTF_8));
+        mockWebhookSecret(secret);
+        mockRedisOk();
+        String payload = "{\"activityType\":\"memos.memo.deleted\",\"creator\":\"users/1\","
+                + "\"memo\":{\"name\":\"memos/u1\",\"uid\":\"u1\"}}";
+        when(memosApiClient.parseMemo(any())).thenReturn(remoteMemo("u1", "", ""));
+        when(memosNoteMapper.selectOne(any())).thenReturn(null);
+        String ts = nowTs();
+        String sig = sign("msg_d2", ts, payload, secret);
+
+        Map<String, Object> result = service.handleWebhook(payload.getBytes(StandardCharsets.UTF_8), "msg_d2", ts, sig);
+
+        assertEquals("unchanged", result.get("status"));
+        verify(memosNoteMapper, never()).updateById(any(MemosNote.class));
+    }
+
+    @Test
+    void handleWebhook_comment事件_忽略() {
+        String secret = "whsec_" + Base64.getEncoder().encodeToString("key".getBytes(StandardCharsets.UTF_8));
+        mockWebhookSecret(secret);
+        mockRedisOk();
+        String payload = "{\"activityType\":\"memos.memo.comment.created\",\"creator\":\"users/1\","
+                + "\"memo\":{\"name\":\"memos/c1\",\"uid\":\"c1\"}}";
+        String ts = nowTs();
+        String sig = sign("msg_cm", ts, payload, secret);
+
+        Map<String, Object> result = service.handleWebhook(payload.getBytes(StandardCharsets.UTF_8), "msg_cm", ts, sig);
+
+        assertEquals("ignored", result.get("status"));
+        verify(memosNoteMapper, never()).insert(any(MemosNote.class));
+        verify(memosNoteMapper, never()).updateById(any(MemosNote.class));
+    }
+
+    @Test
+    void handleWebhook_未知类型_忽略() {
+        String secret = "whsec_" + Base64.getEncoder().encodeToString("key".getBytes(StandardCharsets.UTF_8));
+        mockWebhookSecret(secret);
+        mockRedisOk();
+        String payload = "{\"activityType\":\"memos.memo.weird\",\"creator\":\"users/1\"}";
+        String ts = nowTs();
+        String sig = sign("msg_x", ts, payload, secret);
+
+        Map<String, Object> result = service.handleWebhook(payload.getBytes(StandardCharsets.UTF_8), "msg_x", ts, sig);
+
+        assertEquals("ignored", result.get("status"));
+    }
+
+    @Test
+    void handleWebhook_payload非法JSON_抛异常() {
+        String secret = "whsec_" + Base64.getEncoder().encodeToString("key".getBytes(StandardCharsets.UTF_8));
+        mockWebhookSecret(secret);
+        mockRedisOk();
+        byte[] body = "{not json".getBytes(StandardCharsets.UTF_8);
+        String ts = nowTs();
+        String sig = sign("msg_bad", ts, "{not json", secret);
+        assertThrows(BusinessException.class,
+                () -> service.handleWebhook(body, "msg_bad", ts, sig));
     }
 
     // ===== 静态 helper =====

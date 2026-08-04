@@ -1,6 +1,7 @@
 package com.stellar.memos.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.stellar.common.BusinessException;
 import com.stellar.memos.dto.MemosConfigDTO;
 import com.stellar.memos.dto.MemosQueryDTO;
 import com.stellar.memos.dto.MemosTagDTO;
@@ -15,7 +16,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -114,7 +117,7 @@ class MemosControllerTest {
                         && "k".equals(dto.getKeyword()) && dto.getRemoteDeleted() == 0));
     }
 
-    @Test
+@Test
     void stats_透传统计() {
         MemosStatsVO vo = new MemosStatsVO();
         vo.setTotal(10L);
@@ -124,5 +127,43 @@ class MemosControllerTest {
 
         assertEquals(200, resp.getCode());
         assertEquals(10L, resp.getData().getTotal());
+    }
+
+    // ===== Webhook =====
+
+    @Test
+    void webhook_处理成功_返回code0() {
+        byte[] body = "{\"activityType\":\"memos.memo.created\"}".getBytes(StandardCharsets.UTF_8);
+        when(memosService.handleWebhook(any(), any(), any(), any()))
+                .thenReturn(Map.of("status", "created"));
+
+        var resp = newController().webhook(body, "msg_1", "123", "v1,x");
+
+        assertEquals(200, resp.getStatusCode().value());
+        assertEquals(0, resp.getBody().get("code"));
+    }
+
+    @Test
+    void webhook_签名失败_返回400非0code() {
+        byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+        when(memosService.handleWebhook(any(), any(), any(), any()))
+                .thenThrow(new BusinessException("Webhook 签名校验失败"));
+
+        var resp = newController().webhook(body, "msg_1", "123", "v1,forged");
+
+        assertEquals(400, resp.getStatusCode().value());
+        assertEquals(1, resp.getBody().get("code"));
+        assertTrue(resp.getBody().get("message").toString().contains("签名"));
+    }
+
+    @Test
+    void webhook_未知异常_返回500() {
+        when(memosService.handleWebhook(any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("boom"));
+
+        var resp = newController().webhook(new byte[]{123}, "msg_1", "123", "v1,x");
+
+        assertEquals(500, resp.getStatusCode().value());
+        assertEquals(2, resp.getBody().get("code"));
     }
 }

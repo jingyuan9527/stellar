@@ -59,6 +59,25 @@ public class MemosApiClient {
     }
 
     /**
+     * 从 webhook payload 的 memo 对象解析远端笔记（与列表解析同构字段）。
+     * 缺 uid 时返回 null，由调用方跳过。
+     */
+    public MemosRemoteMemo parseMemo(JsonNode memo) {
+        if (memo == null || memo.isNull()) {
+            return null;
+        }
+        String uid = resolveUid(memo);
+        if (uid.isBlank()) {
+            return null;
+        }
+        return new MemosRemoteMemo(uid,
+                memo.path("content").asText(""),
+                parseTime(memo.path("createTime").asText(null)),
+                parseTime(memo.path("updateTime").asText(null)),
+                parseTags(memo));
+    }
+
+    /**
      * 全量分页拉取远端活跃笔记（ListMemos 默认只回 ACTIVE）。
      */
     public List<MemosRemoteMemo> listAllMemos(String baseUrl, String token) {

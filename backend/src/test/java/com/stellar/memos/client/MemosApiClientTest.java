@@ -131,6 +131,30 @@ class MemosApiClientTest {
                 () -> client.listAllMemos("https://memo.booksy.cf", "tok"));
     }
 
+    // ===== parseMemo（webhook payload 解析） =====
+
+    @Test
+    void parseMemo_完整memo_解析uid内容时间标签() throws Exception {
+        var memo = objectMapper.readTree("{\"name\":\"memos/w1\",\"uid\":\"w1\",\"content\":\"hello\","
+                + "\"createTime\":\"2025-01-01T00:00:00Z\",\"updateTime\":\"2025-01-02T00:00:00Z\","
+                + "\"property\":{\"tags\":[\"a\",\"b\"]}}");
+
+        MemosApiClient.MemosRemoteMemo rm = client.parseMemo(memo);
+
+        assertEquals("w1", rm.uid());
+        assertEquals("hello", rm.content());
+        assertEquals(LocalDateTime.of(2025, 1, 1, 0, 0), rm.createTime());
+        assertEquals(LocalDateTime.of(2025, 1, 2, 0, 0), rm.updateTime());
+        assertEquals(List.of("a", "b"), rm.tags());
+    }
+
+    @Test
+    void parseMemo_缺uid_返回null() throws Exception {
+        var noUid = objectMapper.readTree("{\"content\":\"x\"}");
+        assertNull(client.parseMemo(noUid));
+        assertNull(client.parseMemo(null));
+    }
+
     // ===== UpdateMemo =====
 
     @Test
