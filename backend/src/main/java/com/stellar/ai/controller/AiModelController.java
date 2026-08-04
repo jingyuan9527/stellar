@@ -3,6 +3,7 @@ package com.stellar.ai.controller;
 import com.stellar.annotation.Log;
 import com.stellar.common.Result;
 import com.stellar.common.annotation.PublicAccess;
+import com.stellar.ai.dto.AiModelBatchDTO;
 import com.stellar.ai.dto.AiModelDTO;
 import com.stellar.enums.OperationType;
 import com.stellar.ai.service.AiModelService;
@@ -73,6 +74,26 @@ public class AiModelController {
     @Log(title = "AI模型", type = OperationType.DELETE)
     public Result<Void> delete(@PathVariable Long id) {
         aiModelService.delete(id);
+        return Result.success();
+    }
+
+    /**
+     * 批量删除模型。
+     */
+    @DeleteMapping("/batch")
+    @Log(title = "AI模型", type = OperationType.DELETE)
+    public Result<Void> deleteBatch(@Valid @RequestBody AiModelBatchDTO dto) {
+        aiModelService.deleteBatch(dto.getIds());
+        return Result.success();
+    }
+
+    /**
+     * 批量启用/停用模型。
+     */
+    @PutMapping("/batch-enabled")
+    @Log(title = "AI模型", type = OperationType.UPDATE)
+    public Result<Void> toggleEnabledBatch(@Valid @RequestBody AiModelBatchDTO dto) {
+        aiModelService.toggleEnabledBatch(dto.getIds(), dto.getEnabled());
         return Result.success();
     }
 

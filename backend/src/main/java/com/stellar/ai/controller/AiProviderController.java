@@ -67,12 +67,32 @@ public class AiProviderController {
     }
 
     /**
-     * 拉取供应商端点支持的模型列表，落库 available_models。
+     * 预览供应商端点支持的模型列表（仅查询不落库），供前端弹窗勾选。
      */
-    @GetMapping("/{id}/models")
+    @GetMapping("/{id}/models/preview")
     @Log(title = "AI供应商", type = OperationType.QUERY)
-    public Result<List<String>> fetchModels(@PathVariable Long id) {
-        return Result.success(aiProviderService.fetchModels(id));
+    public Result<List<String>> previewModels(@PathVariable Long id) {
+        return Result.success(aiProviderService.previewModels(id));
+    }
+
+    /**
+     * 覆盖式保存勾选的模型：清空该供应商旧模型后按勾选写入。
+     */
+    @PostMapping("/{id}/models")
+    @Log(title = "AI供应商", type = OperationType.UPDATE)
+    public Result<Void> saveModels(@PathVariable Long id, @RequestBody List<String> models) {
+        aiProviderService.saveSelectedModels(id, models);
+        return Result.success();
+    }
+
+    /**
+     * 清空该供应商下全部模型。
+     */
+    @DeleteMapping("/{id}/models")
+    @Log(title = "AI供应商", type = OperationType.DELETE)
+    public Result<Void> clearModels(@PathVariable Long id) {
+        aiProviderService.clearModels(id);
+        return Result.success();
     }
 
     /**

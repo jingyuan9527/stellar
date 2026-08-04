@@ -13,6 +13,7 @@ import com.stellar.test.ReflectUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -26,8 +27,8 @@ import static org.mockito.Mockito.*;
 
 /**
  * {@link AiProviderService} 单测：覆盖列表脱敏（toVO / maskApiKey）、raw 取数校验、
- * CRUD 校验（含 apiKey 为空保留原值、删除级联模型）、fetchModels / testConnection
- * 前置校验分支，以及注入 mock HttpClient 覆盖 HTTP 成功/失败/同步模型路径。
+ * CRUD 校验（含 apiKey 为空保留原值、删除级联模型）、previewModels / saveSelectedModels /
+ * clearModels / testConnection 前置校验分支，以及注入 mock HttpClient 覆盖 HTTP 成功/失败路径。
  */
 @ExtendWith(MockitoExtension.class)
 class AiProviderServiceTest {
@@ -180,18 +181,18 @@ class AiProviderServiceTest {
         verify(providerMapper).updateById(any(SysAiProvider.class));
     }
 
-    // ===== fetchModels / testConnection 前置校验（不发真实 HTTP） =====
+    // ===== previewModels / testConnection 前置校验（不发真实 HTTP） =====
 
     @Test
-    void fetchModels_endpoint空_抛() {
+    void previewModels_endpoint空_抛() {
         when(providerMapper.selectById(1L)).thenReturn(provider(1L, "p", "", "k", 1, ""));
-        assertThrows(BusinessException.class, () -> service.fetchModels(1L));
+        assertThrows(BusinessException.class, () -> service.previewModels(1L));
     }
 
     @Test
-    void fetchModels_apiKey空_抛() {
+    void previewModels_apiKey空_抛() {
         when(providerMapper.selectById(1L)).thenReturn(provider(1L, "p", "ep", "", 1, ""));
-        assertThrows(BusinessException.class, () -> service.fetchModels(1L));
+        assertThrows(BusinessException.class, () -> service.previewModels(1L));
     }
 
     @Test
@@ -206,74 +207,116 @@ class AiProviderServiceTest {
         assertThrows(BusinessException.class, () -> service.testConnection(1L, null));
     }
 
-    // ===== fetchModels HTTP 路径 =====
+    // ===== previewModels HTTP 路径（仅预览不落库） =====
 
     @Test
-    void fetchModels_成功_排序_同步新模型() throws Exception {
+    void previewModels_成功_排序_不落库() throws Exception {
         when(providerMapper.selectById(1L)).thenReturn(provider(1L, "p", "https://api.x.com", "k", 1, ""));
-        when(modelMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         HttpResponse<String> resp = mock(HttpResponse.class);
         when(resp.statusCode()).thenReturn(200);
         when(resp.body()).thenReturn("{\"data\":[{\"id\":\"b\"},{\"id\":\"a\"}]}");
         doReturn(resp).when(mockHttpClient).send(any(), any());
 
-        List<String> models = service.fetchModels(1L);
+        List<String> models = service.previewModels(1L);
 
         assertEquals(List.of("a", "b"), models);
-        // 同步创建两个模型
-        verify(modelMapper, times(2)).insert(any(SysAiModel.class));
+        // 预览不改库
+        verify(modelMapper, never()).insert(any(SysAiModel.class));
+        verify(providerMapper, never()).updateById(any(SysAiProvider.class));
     }
 
     @Test
-    void fetchModels_成功_已有模型跳过() throws Exception {
-        when(providerMapper.selectById(1L)).thenReturn(provider(1L, "p", "https://api.x.com", "k", 1, ""));
-        SysAiModel exist = new SysAiModel();
-        exist.setProviderId(1L);
-        exist.setModel("a");
-        when(modelMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(exist));
-        HttpResponse<String> resp = mock(HttpResponse.class);
-        when(resp.statusCode()).thenReturn(200);
-        when(resp.body()).thenReturn("{\"data\":[{\"id\":\"a\"},{\"id\":\"b\"}]}");
-        doReturn(resp).when(mockHttpClient).send(any(), any());
-
-        List<String> models = service.fetchModels(1L);
-
-        assertEquals(List.of("a", "b"), models);
-        verify(modelMapper, times(1)).insert(any(SysAiModel.class));
-    }
-
-    @Test
-    void fetchModels_空数据_availableModels置空() throws Exception {
+    void previewModels_空数据_返回空() throws Exception {
         when(providerMapper.selectById(1L)).thenReturn(provider(1L, "p", "https://api.x.com", "k", 1, ""));
         HttpResponse<String> resp = mock(HttpResponse.class);
         when(resp.statusCode()).thenReturn(200);
         when(resp.body()).thenReturn("{\"data\":[]}");
         doReturn(resp).when(mockHttpClient).send(any(), any());
 
-        List<String> models = service.fetchModels(1L);
+        List<String> models = service.previewModels(1L);
 
         assertTrue(models.isEmpty());
-        verify(modelMapper, never()).insert(any(SysAiModel.class));
     }
 
     @Test
-    void fetchModels_非200_抛() throws Exception {
+    void previewModels_非200_抛() throws Exception {
         when(providerMapper.selectById(1L)).thenReturn(provider(1L, "p", "https://api.x.com", "k", 1, ""));
         HttpResponse<String> resp = mock(HttpResponse.class);
         when(resp.statusCode()).thenReturn(500);
         doReturn(resp).when(mockHttpClient).send(any(), any());
 
-        BusinessException e = assertThrows(BusinessException.class, () -> service.fetchModels(1L));
+        BusinessException e = assertThrows(BusinessException.class, () -> service.previewModels(1L));
         assertTrue(e.getMessage().contains("500"));
     }
 
     @Test
-    void fetchModels_网络异常_包装抛() throws Exception {
+    void previewModels_网络异常_包装抛() throws Exception {
         when(providerMapper.selectById(1L)).thenReturn(provider(1L, "p", "https://api.x.com", "k", 1, ""));
         doThrow(new java.io.IOException("conn reset")).when(mockHttpClient).send(any(), any());
 
-        BusinessException e = assertThrows(BusinessException.class, () -> service.fetchModels(1L));
+        BusinessException e = assertThrows(BusinessException.class, () -> service.previewModels(1L));
         assertTrue(e.getMessage().contains("conn reset"));
+    }
+
+    // ===== saveSelectedModels 覆盖式保存 =====
+
+    @Test
+    void saveSelectedModels_覆盖式_删旧插新并更新availableModels() {
+        SysAiProvider p = provider(1L, "p", "ep", "k", 1, "old");
+        when(providerMapper.selectById(1L)).thenReturn(p);
+
+        service.saveSelectedModels(1L, List.of(" b ", "a", "b", " c "));
+
+        // 先删旧模型
+        verify(modelMapper).delete(any(LambdaQueryWrapper.class));
+        // 去重后按顺序插 3 个（b/a/c）
+        ArgumentCaptor<SysAiModel> captor = ArgumentCaptor.forClass(SysAiModel.class);
+        verify(modelMapper, times(3)).insert(captor.capture());
+        List<SysAiModel> inserted = captor.getAllValues();
+        assertEquals(List.of("b", "a", "c"), inserted.stream().map(SysAiModel::getModel).toList());
+        assertEquals(0, inserted.get(0).getSortOrder());
+        // availableModels 更新为逗号串
+        ArgumentCaptor<SysAiProvider> pCaptor = ArgumentCaptor.forClass(SysAiProvider.class);
+        verify(providerMapper).updateById(pCaptor.capture());
+        assertEquals("b,a,c", pCaptor.getValue().getAvailableModels());
+    }
+
+    @Test
+    void saveSelectedModels_空列表_只删不插() {
+        when(providerMapper.selectById(1L)).thenReturn(provider(1L, "p", "ep", "k", 1, ""));
+        service.saveSelectedModels(1L, List.of());
+        verify(modelMapper).delete(any(LambdaQueryWrapper.class));
+        verify(modelMapper, never()).insert(any(SysAiModel.class));
+        ArgumentCaptor<SysAiProvider> pCaptor = ArgumentCaptor.forClass(SysAiProvider.class);
+        verify(providerMapper).updateById(pCaptor.capture());
+        assertEquals("", pCaptor.getValue().getAvailableModels());
+    }
+
+    @Test
+    void saveSelectedModels_null_当空处理() {
+        when(providerMapper.selectById(1L)).thenReturn(provider(1L, "p", "ep", "k", 1, ""));
+        service.saveSelectedModels(1L, null);
+        verify(modelMapper).delete(any(LambdaQueryWrapper.class));
+        verify(modelMapper, never()).insert(any(SysAiModel.class));
+    }
+
+    // ===== clearModels 清空 =====
+
+    @Test
+    void clearModels_清空模型与availableModels() {
+        SysAiProvider p = provider(1L, "p", "ep", "k", 1, "a,b");
+        when(providerMapper.selectById(1L)).thenReturn(p);
+        service.clearModels(1L);
+        verify(modelMapper).delete(any(LambdaQueryWrapper.class));
+        ArgumentCaptor<SysAiProvider> pCaptor = ArgumentCaptor.forClass(SysAiProvider.class);
+        verify(providerMapper).updateById(pCaptor.capture());
+        assertEquals("", pCaptor.getValue().getAvailableModels());
+    }
+
+    @Test
+    void clearModels_供应商不存在_抛() {
+        when(providerMapper.selectById(1L)).thenReturn(null);
+        assertThrows(BusinessException.class, () -> service.clearModels(1L));
     }
 
     // ===== testConnection HTTP 路径 =====

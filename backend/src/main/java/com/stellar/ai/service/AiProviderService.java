@@ -16,6 +16,7 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.net.URI;
@@ -31,7 +32,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -151,54 +151,19 @@ public class AiProviderService {
     }
 
     /**
-     * 拉取供应商端点支持的模型列表，落库 available_models，并同步创建未存在的模型记录。
-     * <p>会改 available_models 与 sys_ai_model，同时清掉 ai-provider 与 ai-model 两份缓存。
+     * 拉取供应商端点支持的模型列表（仅预览不落库），供前端弹窗勾选。
+     * <p>不改库、不清缓存，与 saveSelectedModels 配对使用。
      */
-    @Caching(evict = {
-            @CacheEvict(cacheNames = "ai-provider", allEntries = true),
-            @CacheEvict(cacheNames = "ai-model", allEntries = true)
-    })
-    public List<String> fetchModels(Long id) {
+    public List<String> previewModels(Long id) {
         SysAiProvider p = getRawById(id);
         if (!StringUtils.hasText(p.getEndpoint()) || !StringUtils.hasText(p.getApiKey())) {
             throw new BusinessException("请先配置该供应商的接口地址和 API Key");
         }
-        log.info("fetchModels: providerId={} name={} endpoint={} apiKey(masked)={}",
+        log.info("previewModels: providerId={} name={} endpoint={} apiKey(masked)={}",
                 id, p.getName(), p.getEndpoint(), maskApiKey(p.getApiKey()));
-        String url = p.getEndpoint().replaceAll("/+$", "") + "/v1/models";
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(15))
-                .header("Authorization", "Bearer " + p.getApiKey())
-                .GET()
-                .build();
-
         try {
-            HttpResponse<String> response = httpClient.send(request,
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() != 200) {
-                throw new BusinessException("获取模型列表失败: HTTP " + response.statusCode());
-            }
-            JsonNode json = objectMapper.readTree(response.body());
-            JsonNode dataNode = json.path("data");
-            List<String> models = new ArrayList<>();
-            if (dataNode.isArray()) {
-                for (JsonNode node : dataNode) {
-                    String mid = node.path("id").asText("");
-                    if (!mid.isEmpty()) models.add(mid);
-                }
-            }
-            Collections.sort(models);
-            // 持久化到供应商的 available_models
-            p.setAvailableModels(models.isEmpty() ? "" : String.join(",", models));
-            p.setUpdateTime(LocalDateTime.now());
-            providerMapper.updateById(p);
-            // 同步创建未存在的模型记录（默认 TEXT 类型），拉取后模型管理立即可见
-            int created = syncModels(p.getId(), models);
-            if (created > 0) {
-                log.info("[AI供应商] 同步创建 {} 个新模型 providerId={}", created, p.getId());
-            }
+            List<String> models = fetchRemoteModels(p);
+            log.info("previewModels: providerId={} 远端模型 {} 个", id, models.size());
             return models;
         } catch (BusinessException e) {
             throw e;
@@ -208,38 +173,88 @@ public class AiProviderService {
     }
 
     /**
-     * 同步拉取到的模型到 sys_ai_model：未存在的创建（默认 TEXT 类型），已存在的保留不动。
-     * <p>避免覆盖用户已设的类型/启停/默认。
-     * @return 新创建的模型数量
+     * 覆盖式保存勾选的模型：先清空该供应商旧模型，再按勾选顺序写入（默认 TEXT 类型）。
+     * <p>与弹窗所见一致，无残留；同时更新 available_models，清掉 ai-provider 与 ai-model 两份缓存。
      */
-    private int syncModels(Long providerId, List<String> models) {
-        if (models.isEmpty()) {
-            return 0;
-        }
-        List<SysAiModel> existing = modelMapper.selectList(new LambdaQueryWrapper<SysAiModel>()
-                .eq(SysAiModel::getProviderId, providerId));
-        Set<String> existingNames = existing.stream()
-                .map(SysAiModel::getModel).collect(Collectors.toSet());
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "ai-provider", allEntries = true),
+            @CacheEvict(cacheNames = "ai-model", allEntries = true)
+    })
+    @Transactional(rollbackFor = Exception.class)
+    public void saveSelectedModels(Long id, List<String> models) {
+        SysAiProvider p = getRawById(id);
+        // 过滤空白项并去重，保序
+        List<String> selected = models == null ? List.of() : models.stream()
+                .filter(m -> StringUtils.hasText(m))
+                .map(String::trim)
+                .distinct()
+                .toList();
+        modelMapper.delete(new LambdaQueryWrapper<SysAiModel>()
+                .eq(SysAiModel::getProviderId, id));
         LocalDateTime now = LocalDateTime.now();
-        int order = existing.size();
-        int created = 0;
-        for (String m : models) {
-            if (existingNames.contains(m)) {
-                continue;
-            }
+        for (int i = 0; i < selected.size(); i++) {
             SysAiModel model = new SysAiModel();
-            model.setProviderId(providerId);
-            model.setModel(m);
+            model.setProviderId(id);
+            model.setModel(selected.get(i));
             model.setModelType("TEXT");
             model.setEnabled(1);
             model.setIsDefault(0);
-            model.setSortOrder(order++);
+            model.setSortOrder(i);
             model.setCreateTime(now);
             model.setUpdateTime(now);
             modelMapper.insert(model);
-            created++;
         }
-        return created;
+        p.setAvailableModels(selected.isEmpty() ? "" : String.join(",", selected));
+        p.setUpdateTime(now);
+        providerMapper.updateById(p);
+        log.info("[AI供应商] 覆盖保存 {} 个模型 providerId={} name={}", selected.size(), id, p.getName());
+    }
+
+    /**
+     * 清空该供应商下全部模型并清空 available_models。
+     */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "ai-provider", allEntries = true),
+            @CacheEvict(cacheNames = "ai-model", allEntries = true)
+    })
+    @Transactional(rollbackFor = Exception.class)
+    public void clearModels(Long id) {
+        SysAiProvider p = getRawById(id);
+        modelMapper.delete(new LambdaQueryWrapper<SysAiModel>()
+                .eq(SysAiModel::getProviderId, id));
+        p.setAvailableModels("");
+        p.setUpdateTime(LocalDateTime.now());
+        providerMapper.updateById(p);
+        log.info("[AI供应商] 清空全部模型 providerId={} name={}", id, p.getName());
+    }
+
+    /**
+     * 请求远端 /v1/models 取模型 id 列表（已排序），不落库。
+     */
+    private List<String> fetchRemoteModels(SysAiProvider p) throws Exception {
+        String url = p.getEndpoint().replaceAll("/+$", "") + "/v1/models";
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(15))
+                .header("Authorization", "Bearer " + p.getApiKey())
+                .GET()
+                .build();
+        HttpResponse<String> response = httpClient.send(request,
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() != 200) {
+            throw new BusinessException("获取模型列表失败: HTTP " + response.statusCode());
+        }
+        JsonNode json = objectMapper.readTree(response.body());
+        JsonNode dataNode = json.path("data");
+        List<String> models = new ArrayList<>();
+        if (dataNode.isArray()) {
+            for (JsonNode node : dataNode) {
+                String mid = node.path("id").asText("");
+                if (!mid.isEmpty()) models.add(mid);
+            }
+        }
+        Collections.sort(models);
+        return models;
     }
 
     /**

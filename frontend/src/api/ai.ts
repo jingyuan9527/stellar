@@ -20,12 +20,23 @@ export function deleteAiProvider(id: number) {
   return request<void>({ url: `/ai/provider/${id}`, method: 'delete' })
 }
 
-export function toggleAiProviderEnabled(id: number, enabled: number) {
-  return request<void>({ url: `/ai/provider/${id}/enabled`, method: 'put', params: { enabled } })
+/** 预览远端模型列表（不落库，弹窗勾选用） */
+export function previewAiProviderModels(id: number) {
+  return request<string[]>({ url: `/ai/provider/${id}/models/preview`, method: 'get' })
 }
 
-export function fetchAiProviderModels(id: number) {
-  return request<string[]>({ url: `/ai/provider/${id}/models`, method: 'get' })
+/** 覆盖式保存勾选的模型（清空旧模型后写入） */
+export function saveAiProviderModels(id: number, models: string[]) {
+  return request<void>({ url: `/ai/provider/${id}/models`, method: 'post', data: models })
+}
+
+/** 清空该供应商下全部模型 */
+export function clearAiProviderModels(id: number) {
+  return request<void>({ url: `/ai/provider/${id}/models`, method: 'delete' })
+}
+
+export function toggleAiProviderEnabled(id: number, enabled: number) {
+  return request<void>({ url: `/ai/provider/${id}/enabled`, method: 'put', params: { enabled } })
 }
 
 export function testAiProviderConnection(id: number, model?: string) {
@@ -52,6 +63,14 @@ export function updateAiModel(data: { id: number; providerId?: number; model: st
 
 export function deleteAiModel(id: number) {
   return request<void>({ url: `/ai/model/${id}`, method: 'delete' })
+}
+
+export function deleteAiModelsBatch(ids: number[]) {
+  return request<void>({ url: '/ai/model/batch', method: 'delete', data: { ids } })
+}
+
+export function toggleAiModelsBatch(ids: number[], enabled: number) {
+  return request<void>({ url: '/ai/model/batch-enabled', method: 'put', data: { ids, enabled } })
 }
 
 export function toggleAiModelEnabled(id: number, enabled: number) {

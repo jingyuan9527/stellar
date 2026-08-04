@@ -64,9 +64,22 @@ class AiProviderControllerTest {
     }
 
     @Test
-    void fetchModels_正常() {
-        when(aiProviderService.fetchModels(1L)).thenReturn(List.of("gpt-4o"));
-        assertEquals(1, controller.fetchModels(1L).getData().size());
+    void previewModels_正常() {
+        when(aiProviderService.previewModels(1L)).thenReturn(List.of("gpt-4o"));
+        assertEquals(1, controller.previewModels(1L).getData().size());
+    }
+
+    @Test
+    void saveModels_正常() {
+        List<String> models = List.of("a", "b");
+        controller.saveModels(1L, models);
+        verify(aiProviderService).saveSelectedModels(1L, models);
+    }
+
+    @Test
+    void clearModels_正常() {
+        controller.clearModels(1L);
+        verify(aiProviderService).clearModels(1L);
     }
 
     @Test

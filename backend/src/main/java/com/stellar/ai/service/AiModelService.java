@@ -162,6 +162,34 @@ public class AiModelService {
         log.info("[AI模型] 删除 id={}", id);
     }
 
+    /**
+     * 批量删除模型。
+     */
+    @CacheEvict(cacheNames = "ai-model", allEntries = true)
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        modelMapper.deleteBatchIds(ids);
+        log.info("[AI模型] 批量删除 {} 个 ids={}", ids.size(), ids);
+    }
+
+    /**
+     * 批量启用/停用模型。
+     */
+    @CacheEvict(cacheNames = "ai-model", allEntries = true)
+    public void toggleEnabledBatch(List<Long> ids, Integer enabled) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        SysAiModel update = new SysAiModel();
+        update.setEnabled(enabled);
+        update.setUpdateTime(LocalDateTime.now());
+        modelMapper.update(update, new LambdaQueryWrapper<SysAiModel>()
+                .in(SysAiModel::getId, ids));
+        log.info("[AI模型] 批量切换启用 {} 个 enabled={} ids={}", ids.size(), enabled, ids);
+    }
+
     @CacheEvict(cacheNames = "ai-model", allEntries = true)
     public void toggleEnabled(Long id, Integer enabled) {
         SysAiModel exist = modelMapper.selectById(id);

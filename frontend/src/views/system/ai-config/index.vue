@@ -7,9 +7,10 @@ import {
 import type { DataTableColumns } from 'naive-ui'
 import {
   getAiProviderList, createAiProvider, updateAiProvider, deleteAiProvider,
-  toggleAiProviderEnabled, fetchAiProviderModels, testAiProviderConnection,
+  toggleAiProviderEnabled, previewAiProviderModels, saveAiProviderModels,
+  clearAiProviderModels, testAiProviderConnection,
   getAiModelList, createAiModel, updateAiModel, deleteAiModel,
-  toggleAiModelEnabled, setAiModelDefault,
+  toggleAiModelEnabled, setAiModelDefault, deleteAiModelsBatch, toggleAiModelsBatch,
 } from '@/api/ai'
 import type { AiProvider, AiModel } from '@/types/api'
 import { useIsMobile } from '@/composables/useBreakpoint'
@@ -90,20 +91,68 @@ async function handleDeleteProvider(id: number) {
   }
 }
 
-async function handleFetchModels(id: number) {
+// ===== 拉取模型弹窗 =====
+const fetchShow = ref(false)
+const fetchProvider = ref<AiProvider | null>(null)
+const fetchLoading = ref(false)
+const fetchSaving = ref(false)
+const fetchModels = ref<string[]>([])
+const fetchKeyword = ref('')
+const fetchChecked = ref<string[]>([])
+
+const fetchFiltered = computed(() => {
+  const kw = fetchKeyword.value.trim().toLowerCase()
+  const list = !kw
+    ? fetchModels.value
+    : fetchModels.value.filter((m) => m.toLowerCase().includes(kw))
+  return list.map((m) => ({ model: m }))
+})
+
+async function openFetchModal(provider: AiProvider) {
+  fetchProvider.value = provider
+  fetchKeyword.value = ''
+  fetchModels.value = []
+  fetchChecked.value = []
+  fetchShow.value = true
+  await loadPreviewModels(provider.id)
+}
+
+async function loadPreviewModels(id: number) {
+  fetchLoading.value = true
   try {
-    const list = await fetchAiProviderModels(id)
-    if (list.length === 0) {
-      message.info('未获取到模型列表')
-    } else {
-      message.success(`已拉取 ${list.length} 个模型`)
-      // 拉取会自动同步创建新模型记录，刷新后选中该供应商展示模型
-      await loadProviders()
-      const p = providers.value.find((x) => x.id === id)
-      if (p) selectProvider(p)
-    }
+    const list = await previewAiProviderModels(id)
+    fetchModels.value = list
+    // 默认全勾选，方便全量拉取
+    fetchChecked.value = [...list]
   } catch {
     // 错误已由拦截器提示
+  } finally {
+    fetchLoading.value = false
+  }
+}
+
+function handleFetchSelectAll() {
+  fetchChecked.value = fetchFiltered.value.map((r) => r.model)
+}
+
+function handleFetchSelectNone() {
+  fetchChecked.value = []
+}
+
+async function handleConfirmFetch() {
+  if (!fetchProvider.value) return
+  fetchSaving.value = true
+  try {
+    await saveAiProviderModels(fetchProvider.value.id, fetchChecked.value)
+    message.success(`已保存 ${fetchChecked.value.length} 个模型（覆盖旧配置）`)
+    fetchShow.value = false
+    const p = providers.value.find((x) => x.id === fetchProvider.value!.id)
+    if (p) selectProvider(p)
+    else loadProviders()
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    fetchSaving.value = false
   }
 }
 
@@ -134,7 +183,7 @@ const allProviderColumns: DataTableColumns<AiProvider> = [
     render: (row) => h(NSpace, { size: 'small' }, {
       default: () => [
         h(NButton, { size: 'small', type: row.id === selectedProviderId.value ? 'primary' : 'default', onClick: () => selectProvider(row) }, { default: () => '模型' }),
-        h(NButton, { size: 'small', onClick: () => handleFetchModels(row.id) }, { default: () => '拉取' }),
+        h(NButton, { size: 'small', onClick: () => openFetchModal(row) }, { default: () => '拉取' }),
         h(NButton, { size: 'small', onClick: () => handleTestProvider(row.id) }, { default: () => '测试' }),
         h(NButton, { size: 'small', onClick: () => startEditProvider(row) }, { default: () => '编辑' }),
         h(NPopconfirm, { onPositiveClick: () => handleDeleteProvider(row.id) }, {
@@ -241,7 +290,48 @@ async function handleDeleteModel(id: number) {
   }
 }
 
+// ===== 模型批量操作 =====
+const checkedModelIds = ref<number[]>([])
+
+async function handleBatchToggleModel(enabled: number) {
+  if (checkedModelIds.value.length === 0) return
+  try {
+    await toggleAiModelsBatch(checkedModelIds.value, enabled)
+    message.success(`已批量${enabled === 1 ? '启用' : '停用'} ${checkedModelIds.value.length} 个模型`)
+    checkedModelIds.value = []
+    if (selectedProviderId.value) loadModels(selectedProviderId.value)
+  } catch {
+    // 错误已由拦截器提示
+  }
+}
+
+async function handleBatchDeleteModels() {
+  if (checkedModelIds.value.length === 0) return
+  try {
+    await deleteAiModelsBatch(checkedModelIds.value)
+    message.success(`已批量删除 ${checkedModelIds.value.length} 个模型`)
+    checkedModelIds.value = []
+    if (selectedProviderId.value) loadModels(selectedProviderId.value)
+  } catch {
+    // 错误已由拦截器提示
+  }
+}
+
+async function handleClearModels() {
+  if (!selectedProviderId.value) return
+  try {
+    await clearAiProviderModels(selectedProviderId.value)
+    message.success('已清空该供应商全部模型')
+    checkedModelIds.value = []
+    if (selectedProviderId.value) loadModels(selectedProviderId.value)
+    loadProviders()
+  } catch {
+    // 错误已由拦截器提示
+  }
+}
+
 const allModelColumns: DataTableColumns<AiModel> = [
+  { type: 'selection' },
   { title: 'ID', key: 'id', width: 60 },
   { title: '模型名', key: 'model', ellipsis: { tooltip: true } },
   {
@@ -283,6 +373,14 @@ const modelColumns = computed<DataTableColumns<AiModel>>(() =>
     ? allModelColumns.filter((c) => !mobileHiddenModelKeys.has((c as { key?: string }).key ?? ''))
     : allModelColumns,
 )
+
+const fetchModelColumns: DataTableColumns<{ model: string }> = [
+  { type: 'selection' },
+  {
+    title: '模型名', key: 'model', ellipsis: { tooltip: true },
+    render: (row) => h(NTag, { size: 'small', bordered: false, type: 'info' }, { default: () => row.model }),
+  },
+]
 
 // 模型编辑
 const modelEditShow = ref(false)
@@ -360,15 +458,38 @@ onMounted(loadProviders)
 
     <NCard v-if="selectedProvider" :title="`模型管理 · ${selectedProvider.name}`" :bordered="false">
       <template #header-extra>
-        <NButton type="primary" @click="startAddModel">新增模型</NButton>
+        <NSpace :size="8" wrap>
+          <NPopconfirm @positive-click="handleClearModels">
+            <template #trigger>
+              <NButton size="small" type="warning">清空</NButton>
+            </template>
+            清空该供应商下全部模型？此操作不可恢复。
+          </NPopconfirm>
+          <NButton type="primary" @click="startAddModel">新增模型</NButton>
+        </NSpace>
       </template>
+      <NSpace v-if="checkedModelIds.length > 0" vertical :size="8" class="batch-bar">
+        <NSpace align="center" :size="8" wrap>
+          <NTag type="info" size="small" bordered>已选 {{ checkedModelIds.length }} 项</NTag>
+          <NButton size="small" type="success" @click="handleBatchToggleModel(1)">批量启用</NButton>
+          <NButton size="small" type="warning" @click="handleBatchToggleModel(0)">批量停用</NButton>
+          <NPopconfirm @positive-click="handleBatchDeleteModels">
+            <template #trigger>
+              <NButton size="small" type="error">批量删除</NButton>
+            </template>
+            删除选中的 {{ checkedModelIds.length }} 个模型？此操作不可恢复。
+          </NPopconfirm>
+        </NSpace>
+      </NSpace>
       <NDataTable
         :columns="modelColumns"
         :data="models"
         :loading="modelLoading"
         :row-key="(row: AiModel) => row.id"
+        :checked-row-keys="checkedModelIds"
+        @update:checked-row-keys="(keys: (string | number)[]) => checkedModelIds = keys.map(Number)"
         :bordered="false"
-        :scroll-x="600"
+        :scroll-x="640"
       />
     </NCard>
 
@@ -428,6 +549,66 @@ onMounted(loadProviders)
         </NSpace>
       </template>
     </NModal>
+
+    <NModal
+      v-model:show="fetchShow"
+      preset="card"
+      :title="`拉取模型 · ${fetchProvider?.name ?? ''}`"
+      :style="{ width: isMobile ? '100%' : '720px', maxWidth: '95vw' }"
+      :mask-closable="false"
+    >
+      <NSpace vertical :size="12">
+        <NAlert v-if="fetchProvider && !fetchProvider.endpoint" type="warning" :bordered="false">
+          该供应商未配置接口地址/API Key，无法拉取模型。
+        </NAlert>
+        <NInput
+          v-model:value="fetchKeyword"
+          placeholder="输入关键字筛选模型（支持部分匹配）"
+          clearable
+        >
+          <template #prefix>🔍</template>
+        </NInput>
+        <NDataTable
+          :columns="fetchModelColumns"
+          :data="fetchFiltered"
+          :loading="fetchLoading"
+          :row-key="(row: any) => row.model"
+          :checked-row-keys="fetchChecked"
+          @update:checked-row-keys="(keys: (string | number)[]) => fetchChecked = keys.map(String)"
+          :bordered="false"
+          :scroll-y="420"
+          :scroll-x="380"
+        />
+        <NSpace align="center" :size="8" justify="space-between" wrap>
+          <NSpace :size="8">
+            <NTag size="small" bordered>远端共 {{ fetchModels.length }} 个</NTag>
+            <NTag v-if="fetchKeyword.trim()" size="small" type="info" bordered>
+              筛选后 {{ fetchFiltered.length }} 个
+            </NTag>
+            <NTag v-if="fetchChecked.length > 0" size="small" type="success" bordered>
+              已勾选 {{ fetchChecked.length }} 个
+            </NTag>
+          </NSpace>
+          <NSpace :size="8">
+            <NButton size="small" @click="handleFetchSelectAll" :disabled="fetchFiltered.length === 0">全选</NButton>
+            <NButton size="small" @click="handleFetchSelectNone" :disabled="fetchChecked.length === 0">清空选择</NButton>
+          </NSpace>
+        </NSpace>
+      </NSpace>
+      <template #action>
+        <NSpace justify="end">
+          <NButton @click="fetchShow = false">取消</NButton>
+          <NButton
+            type="primary"
+            :loading="fetchSaving"
+            :disabled="fetchLoading || !fetchProvider?.endpoint"
+            @click="handleConfirmFetch"
+          >
+            确认保存（覆盖旧配置）
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
   </div>
 </template>
 
@@ -436,5 +617,9 @@ onMounted(loadProviders)
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.batch-bar {
+  margin-bottom: 12px;
 }
 </style>
