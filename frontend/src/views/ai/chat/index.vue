@@ -8,6 +8,7 @@ import { useIsMobile } from '@/composables/useBreakpoint'
 import {
   listMyChatSessions, createChatSession, getChatMessages, deleteChatSession,
   clearMyChatSessions, streamChat, listEnabledPersonas, listKnowledgeBases,
+  submitFeedback,
 } from '@/api/chat'
 import { getAiModelsByType as _getModels } from '@/api/ai'
 import { chatVoiceOptions } from '@/constants/tts-voices'
@@ -54,6 +55,31 @@ const streamingStatus = ref('')
 const streamError = ref('')
 // TTS 音色（仅登录用户工具调用生效；用户选了具体音色则按音色所属引擎走覆盖系统开关）
 const ttsVoice = ref<string | null>(null)
+
+// 回复反馈（👍有用/👎没用）：记录当前已选评价值，切换/取消本地即时反馈，异步落库
+const feedbackMap = ref<Record<number, number>>({})
+
+async function handleFeedback(messageId: number, value: number) {
+  if (!messageId || !authStore.isLogin) return
+  const next = feedbackMap.value[messageId] === value ? 0 : value
+  // 乐观更新，失败回滚
+  const prev = feedbackMap.value[messageId] ?? 0
+  feedbackMap.value[messageId] = next
+  try {
+    await submitFeedback(messageId, next)
+  } catch {
+    feedbackMap.value[messageId] = prev
+    // 错误已由拦截器提示
+  }
+}
+
+// 页面高度：视口 - 顶栏(56) - 多标签页(40,仅登录) - 内容区 padding(16×2 / 移动端 12×2)
+// 不依赖父容器 height:100%（NLayoutContent 自定义滚动容器不约束子高度），保证输入区固定在最下方
+const chatPageStyle = computed(() => {
+  const padding = isMobile.value ? 12 : 16
+  const chrome = 56 + (authStore.isLogin ? 40 : 0) + padding * 2
+  return { height: `calc(100vh - ${chrome}px)` }
+})
 
 const messageListRef = ref<HTMLElement | null>(null)
 
@@ -132,6 +158,12 @@ async function selectSession(id: number) {
     const result = await getChatMessages(id)
     if (disposed) return
     messages.value = result
+    // 回填历史反馈（"有用/没用"选中态），保证切会话/刷新后状态不丢
+    const map: Record<number, number> = {}
+    for (const m of result) {
+      if (m.role === 'assistant' && m.feedbackValue) map[m.id] = m.feedbackValue
+    }
+    feedbackMap.value = map
     scrollToBottom()
   } catch {
     // 错误已由拦截器提示
@@ -200,7 +232,8 @@ async function send() {
   const now = new Date().toISOString()
   messages.value.push({
     id: 0, sessionId: currentSessionId.value, role: 'user', content: text,
-    tokens: null, createTime: now, attachmentType: null, attachmentFileId: null, attachmentUrl: null,
+    tokens: null, createTime: now, attachmentType: null, attachmentFileId: null,
+    attachmentUrl: null, ragRefs: null, refs: null, feedbackValue: null,
   })
   streamingContent.value = ''
   streamingStatus.value = ''
@@ -237,6 +270,9 @@ async function send() {
       attachmentType: null,
       attachmentFileId: null,
       attachmentUrl: null,
+      ragRefs: null,
+      refs: null,
+      feedbackValue: null,
     })
     streaming.value = false
     streamingContent.value = ''
@@ -303,7 +339,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="chat-page">
+  <div class="chat-page" :style="chatPageStyle">
     <aside class="session-panel" :class="{ collapsed: isMobile && sessionCollapsed }">
       <div class="session-panel-header">
         <NButton size="small" type="primary" block @click="newSession">+ 新建对话</NButton>
@@ -407,17 +443,57 @@ onMounted(() => {
                 class="msg-audio"
               />
               <span v-if="m.content" class="msg-text">{{ m.content }}</span>
+              <div v-if="m.role === 'assistant' && m.refs && m.refs.length" class="msg-refs">
+                <div class="refs-label">参考</div>
+                <div class="refs-list">
+                  <template v-for="(r, i) in m.refs" :key="r.source + ':' + r.sourceKey">
+                    <a
+                      v-if="r.url"
+                      :href="r.url"
+                      target="_blank"
+                      rel="noopener"
+                      class="ref-link"
+                      :title="r.title ?? ''"
+                    >{{ r.title || '来源' + (i + 1) }}</a>
+                    <span v-else class="ref-text">{{ r.title || '来源' + (i + 1) }}</span>
+                  </template>
+                </div>
+              </div>
             </div>
-            <NButton
-              v-if="m.content"
-              class="msg-copy"
-              size="tiny"
-              text
-              type="primary"
-              @click="copyText(m.content)"
-            >
-              复制
-            </NButton>
+            <div class="msg-tools" :class="{ visible: m.content }">
+              <NButton
+                v-if="m.content"
+                class="msg-copy"
+                size="tiny"
+                text
+                type="primary"
+                @click="copyText(m.content)"
+              >
+                复制
+              </NButton>
+              <template v-if="m.role === 'assistant' && m.id && authStore.isLogin">
+                <NButton
+                  class="msg-fb"
+                  size="tiny"
+                  text
+                  :type="feedbackMap[m.id] === 1 ? 'success' : 'default'"
+                  :disabled="feedbackMap[m.id] === -1"
+                  @click="handleFeedback(m.id, 1)"
+                >
+                  {{ feedbackMap[m.id] === 1 ? '✓ 有用' : '有用' }}
+                </NButton>
+                <NButton
+                  class="msg-fb"
+                  size="tiny"
+                  text
+                  :type="feedbackMap[m.id] === -1 ? 'error' : 'default'"
+                  :disabled="feedbackMap[m.id] === 1"
+                  @click="handleFeedback(m.id, -1)"
+                >
+                  {{ feedbackMap[m.id] === -1 ? '✗ 没用' : '没用' }}
+                </NButton>
+              </template>
+            </div>
           </div>
         </template>
         <div v-if="streaming" class="msg-row assistant">
@@ -445,7 +521,7 @@ onMounted(() => {
 
       <footer class="input-area">
         <NAlert v-if="!authStore.isLogin" type="info" :bordered="false" style="margin-bottom: 8px">
-          游客每日 20 次（受 IP 限流）。会话按 IP 记录，同网络下他人可见。登录后可用知识库 RAG 与长期记忆。
+          游客每日 20 次（受 IP 限流）。会话按 IP 记录，同网络下他人可见。登录后可用知识库 + 备忘笔记 RAG（带参考溯源）与长期记忆。
         </NAlert>
         <div class="input-row">
           <NInput
@@ -466,7 +542,6 @@ onMounted(() => {
 <style scoped>
 .chat-page {
   display: flex;
-  height: 100%;
   min-height: 0;
   gap: 1px;
   background: var(--n-border-color, rgba(128, 128, 128, 0.15));
@@ -527,6 +602,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--n-color, #fff);
 }
 .chat-header {
@@ -629,14 +705,64 @@ onMounted(() => {
   font-size: 13px;
   opacity: 0.85;
 }
-.msg-copy {
+.msg-text {
+  display: block;
+}
+.msg-refs {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--n-border-color, rgba(128, 128, 128, 0.25));
+  font-size: 12px;
+}
+.refs-label {
+  opacity: 0.55;
+  margin-bottom: 4px;
+}
+.refs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ref-link,
+.ref-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(100, 150, 255, 0.1);
+  color: var(--n-text-color, inherit);
+}
+.ref-link {
+  color: #2d8cf0;
+}
+.ref-link:hover {
+  text-decoration: underline;
+}
+.ref-text {
+  opacity: 0.8;
+}
+.msg-tools {
+  display: flex;
+  gap: 4px;
+  align-items: center;
   margin-top: 4px;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
-.msg-row:hover .msg-copy,
-.msg-copy:focus-visible {
+.msg-tools.visible,
+.msg-tools:has(.msg-fb:hover),
+.msg-row:hover .msg-tools,
+.msg-tools:focus-within {
   opacity: 1;
+}
+.msg-copy {
+  opacity: 1 !important;
+}
+.msg-fb {
+  margin-left: 2px;
 }
 .input-area {
   padding: 12px 16px 16px;
@@ -678,7 +804,7 @@ onMounted(() => {
   .input-area {
     padding: 8px 12px 12px;
   }
-  .msg-copy {
+  .msg-tools {
     opacity: 1;
   }
 }

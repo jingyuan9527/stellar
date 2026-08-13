@@ -410,6 +410,77 @@ export interface AiChatSessionAdmin {
   updateTime: string
 }
 
+/** RAG 引用来源：回答实际召回并注入的资料（气泡下方"参考"链接，溯源用） */
+export interface RagSource {
+  /** 来源类型: kb=知识库 / memos=备忘笔记 */
+  source: 'kb' | 'memos'
+  /** 来源标识: chunkId 或 noteId（字符串） */
+  sourceKey: string
+  /** 来源标题: KB sourceName / memos 首行，可空 */
+  title: string | null
+  /** 原始链接: memos 为 {base}/m/{uid}，KB 为 null */
+  url: string | null
+  /** 检索融合分 */
+  score: number
+}
+
+/** RAG 评估用例（golden set）：问题 + 期望命中的来源 key */
+export interface RagEvalCase {
+  id: number
+  query: string
+  /** 关联知识库 (空=仅备忘笔记源) */
+  kbId: number | null
+  /** 期望命中的来源key(JSON数组文本, 如 ["memos:12","kb:3"]) */
+  expectedSources: string
+  note: string | null
+  createTime: string
+  updateTime: string
+}
+
+/** RAG 跑分结果明细（某条 case） */
+export interface RagEvalDetail {
+  caseId: number
+  query: string
+  pass: boolean
+  recall: number
+  topHits: { source: string; title: string | null; url: string | null; score: number }[]
+}
+
+/** RAG 跑分汇总（一次 run） */
+export interface RagEvalRunVO {
+  runId: string
+  total: number
+  passCount: number
+  failCount: number
+  recallAvg: number
+  details: RagEvalDetail[]
+}
+
+/** RAG 跑分结果行（历史批次落库记录） */
+export interface RagEvalResultRow {
+  id: number
+  runId: string
+  caseId: number
+  query: string
+  topHits: string | null
+  pass: number
+  recall: number
+  createTime: string
+}
+
+/** 回复反馈 + 消息快照（bad case 复盘原料） */
+export interface RagFeedbackVO {
+  id: number
+  messageId: number
+  value: number
+  comment: string | null
+  subjectType: string
+  subjectId: string
+  content: string | null
+  refs: RagSource[]
+  createTime: string
+}
+
 export interface AiChatMessage {
   id: number
   sessionId: number
@@ -423,6 +494,12 @@ export interface AiChatMessage {
   attachmentFileId: number | null
   /** 附件访问 URL (/file/{id})，后端实体 getter 计算输出 */
   attachmentUrl: string | null
+  /** RAG 引用来源原始 JSON 文本（兼容字段，一般用 refs 解析数组） */
+  ragRefs: string | null
+  /** RAG 引用来源列表（后端 getter 解析输出，气泡渲染"参考"链接） */
+  refs: RagSource[] | null
+  /** 当前主体对该消息的评价（1 有用 / -1 没用 / null 未评价），回显"有用/没用"选中态 */
+  feedbackValue: number | null
 }
 
 export interface AiMemory {

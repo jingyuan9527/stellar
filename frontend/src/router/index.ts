@@ -103,6 +103,12 @@ export const routes: RouteRecordRaw[] = [
             component: () => import('@/views/ai/persona/index.vue'),
             meta: { title: '人设管理', icon: 'persona', order: 10, group: '管理' },
           },
+          {
+            path: 'rag-eval',
+            name: 'AiRagEval',
+            component: () => import('@/views/ai/rag-eval/index.vue'),
+            meta: { title: 'RAG评估', icon: 'trophy', order: 11, group: '管理' },
+          },
         ],
       },
       {

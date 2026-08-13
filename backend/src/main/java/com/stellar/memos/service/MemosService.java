@@ -91,6 +91,7 @@ public class MemosService {
     private final ExternalCallLogger externalCallLogger;
     private final ObjectMapper objectMapper;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final MemosRagService memosRagService;
 
     // ===== 配置 =====
 
@@ -265,6 +266,8 @@ public class MemosService {
             local.setRemoteDeleted(1);
             local.setUpdateTime(now);
             memosNoteMapper.updateById(local);
+            // 标记删除后应从检索剔除，清检索缓存
+            memosRagService.invalidateCache();
             log.info("[备忘同步] Webhook 标记远端已删 uid={} id={}", rm.uid(), local.getId());
             return Map.of("status", "marked", "uid", rm.uid());
         }
@@ -313,6 +316,8 @@ public class MemosService {
                     local.setUpdateTime(now);
                     memosNoteMapper.updateById(local);
                     marked++;
+                    // 标记删除后应从检索剔除，清检索缓存
+                    memosRagService.invalidateCache();
                     log.info("[备忘同步] 标记远端已删 uid={} id={}", local.getUid(), local.getId());
                 }
             }
@@ -336,6 +341,8 @@ public class MemosService {
         note.setCreateTime(now);
         note.setUpdateTime(now);
         memosNoteMapper.insert(note);
+        // 新笔记异步向量化（失败不阻断同步，rebuild 兜底）
+        memosRagService.embedNoteAsync(note.getId(), note.getContent());
     }
 
     /**
@@ -369,6 +376,8 @@ public class MemosService {
         local.setRemoteUpdateTime(rm.updateTime());
         local.setUpdateTime(now);
         memosNoteMapper.updateById(local);
+        // 内容变更后异步重新向量化（失败不阻断合并，rebuild 兜底）
+        memosRagService.embedNoteAsync(local.getId(), cleanContent);
         return true;
     }
 

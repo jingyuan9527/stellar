@@ -186,9 +186,10 @@ public class AiKnowledgeService {
 
     /**
      * 语义检索：查询文本向量化后，加载该知识库全量向量在内存做余弦相似度 top-k。
+     * <p>返回分块详情（含 chunkId/sourceName/score），供 RAG 管线（RRF 融合/重排/引用溯源）使用。
      * <p>无向量数据或查询向量化失败时返回空列表（RAG 不注入）。
      */
-    public List<String> search(Long kbId, String query, int topK) {
+    public List<ScoredChunk> searchDetailed(Long kbId, String query, int topK) {
         AiKnowledgeBase kb = getKb(kbId);
         float[] qvec;
         try {
@@ -204,15 +205,23 @@ public class AiKnowledgeService {
         }
         List<Scored> scored = new ArrayList<>();
         for (CachedChunk chunk : chunks) {
-            scored.add(new Scored(chunk.text(), cosine(qvec, chunk.vector())));
+            scored.add(new Scored(chunk.id(), chunk.text(), chunk.sourceName(), VectorOps.cosine(qvec, chunk.vector())));
         }
         scored.sort((a, b) -> Double.compare(b.sim, a.sim));
         int k = topK > 0 ? topK : DEFAULT_TOP_K;
-        List<String> result = new ArrayList<>(k);
+        List<ScoredChunk> result = new ArrayList<>(k);
         for (int i = 0; i < Math.min(k, scored.size()); i++) {
-            result.add(scored.get(i).chunkText);
+            Scored s = scored.get(i);
+            result.add(new ScoredChunk(s.chunkId, s.chunkText, s.sourceName, s.sim));
         }
         return result;
+    }
+
+    /**
+     * 语义检索（仅返回文本），兼容旧调用与测试。委托 {@link #searchDetailed}。
+     */
+    public List<String> search(Long kbId, String query, int topK) {
+        return searchDetailed(kbId, query, topK).stream().map(ScoredChunk::text).toList();
     }
 
     // ===== 内部 =====
@@ -276,42 +285,6 @@ public class AiKnowledgeService {
         return result;
     }
 
-    /**
-     * 解析 embedding 文本 '[1.0,2.0,...]' 为 float[]。非法返回 null。
-     */
-    private float[] parseVector(String text) {
-        if (text == null || text.isBlank()) return null;
-        String s = text.trim();
-        if (s.startsWith("[")) s = s.substring(1);
-        if (s.endsWith("]")) s = s.substring(0, s.length() - 1);
-        if (s.isBlank()) return null;
-        String[] parts = s.split(",");
-        float[] vec = new float[parts.length];
-        try {
-            for (int i = 0; i < parts.length; i++) {
-                vec[i] = Float.parseFloat(parts[i].trim());
-            }
-        } catch (NumberFormatException e) {
-            return null;
-        }
-        return vec;
-    }
-
-    /**
-     * 余弦相似度。任一为零向量返回 0。
-     */
-    private double cosine(float[] a, float[] b) {
-        if (a.length != b.length) return 0;
-        double dot = 0, na = 0, nb = 0;
-        for (int i = 0; i < a.length; i++) {
-            dot += a[i] * b[i];
-            na += a[i] * a[i];
-            nb += b[i] * b[i];
-        }
-        if (na == 0 || nb == 0) return 0;
-        return dot / (Math.sqrt(na) * Math.sqrt(nb));
-    }
-
     private List<CachedChunk> getCachedChunks(Long kbId) {
         synchronized (vectorCache) {
             List<CachedChunk> cached = vectorCache.get(kbId);
@@ -319,14 +292,15 @@ public class AiKnowledgeService {
                 return cached;
             }
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    "SELECT id, chunk_text, embedding FROM ai_knowledge_chunk "
+                    "SELECT id, chunk_text, source_name, embedding FROM ai_knowledge_chunk "
                             + "WHERE kb_id=? AND embedding IS NOT NULL", kbId);
             List<CachedChunk> loaded = new ArrayList<>(rows.size());
             for (Map<String, Object> row : rows) {
-                float[] vector = parseVector((String) row.get("embedding"));
+                float[] vector = VectorOps.parseVector((String) row.get("embedding"));
                 if (vector != null && vector.length > 0) {
                     Number id = (Number) row.get("id");
-                    loaded.add(new CachedChunk(id.longValue(), (String) row.get("chunk_text"), vector));
+                    loaded.add(new CachedChunk(id.longValue(), (String) row.get("chunk_text"),
+                            (String) row.get("source_name"), vector));
                 }
             }
             List<CachedChunk> immutable = List.copyOf(loaded);
@@ -348,6 +322,9 @@ public class AiKnowledgeService {
         vectorCache.remove(kbId);
     }
 
-    private record Scored(String chunkText, double sim) {}
-    private record CachedChunk(long id, String text, float[] vector) {}
+    /** 检索结果详情（含 chunkId/sourceName/score），供 RAG 管线使用。 */
+    public record ScoredChunk(Long chunkId, String text, String sourceName, double score) {}
+
+    private record Scored(Long chunkId, String chunkText, String sourceName, double sim) {}
+    private record CachedChunk(long id, String text, String sourceName, float[] vector) {}
 }

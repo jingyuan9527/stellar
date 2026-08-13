@@ -5,6 +5,7 @@ import com.stellar.annotation.Log;
 import com.stellar.common.Result;
 import com.stellar.common.annotation.PublicAccess;
 import com.stellar.common.annotation.RateLimit;
+import com.stellar.ai.dto.AiChatFeedbackDTO;
 import com.stellar.ai.dto.AiChatSessionCreateDTO;
 import com.stellar.ai.dto.AiChatStreamDTO;
 import com.stellar.ai.entity.AiChatMessage;
@@ -138,5 +139,17 @@ public class AiChatSessionController {
     @Log(title = "AI聊天", type = OperationType.OTHER)
     public SseEmitter streamChat(@Valid @RequestBody AiChatStreamDTO dto) {
         return sessionService.streamChat(dto.getSessionId(), dto.getUserMessage(), dto.getModelId(), dto.getVoice());
+    }
+
+    /**
+     * 回复反馈（👍/👎）：对某条消息打分（1 有用 / -1 没用 / 0 取消评价），同一主体重复打分会覆盖。
+     * <p>游客开放（按 IP 归属校验），评分是数据飞轮评估集原料（期4 复盘用）。
+     */
+    @PublicAccess
+    @PostMapping("/feedback")
+    @Log(title = "AI聊天反馈", type = OperationType.INSERT)
+    public Result<Void> feedback(@Valid @RequestBody AiChatFeedbackDTO dto) {
+        sessionService.saveFeedback(dto);
+        return Result.success();
     }
 }

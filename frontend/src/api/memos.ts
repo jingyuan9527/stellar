@@ -39,6 +39,19 @@ export function pushMemosTags() {
   return request<MemosJobResult>({ url: '/memos/push-tags', method: 'post', timeout: 600000 })
 }
 
+/** 重建备忘笔记 RAG 向量索引（全量向量化，新增/变更自动增量，此按钮为兜底） */
+export function rebuildMemosRag() {
+  return request<MemosJobResult>({ url: '/memos/rag/rebuild', method: 'post', timeout: 600000 })
+}
+
+/** RAG 索引构建状态（存活笔记 已向量化数/总数 + 上次全量重建时间） */
+export function getMemosRagStatus() {
+  return request<{ total: number; embedded: number; pending: number; lastRebuildAt: string }>({
+    url: '/memos/rag/status',
+    method: 'get',
+  })
+}
+
 /** 笔记分页 */
 export function getMemosPage(params: MemosQuery) {
   return request<{ records: MemosNote[]; total: number }>({ url: '/memos/page', method: 'get', params })

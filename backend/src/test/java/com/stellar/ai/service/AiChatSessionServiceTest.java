@@ -8,11 +8,12 @@ import com.stellar.ai.entity.AiChatSession;
 import com.stellar.ai.mapper.AiChatMessageMapper;
 import com.stellar.ai.mapper.AiChatSessionMapper;
 import com.stellar.ai.mapper.AiPersonaMapper;
+import com.stellar.ai.mapper.RagFeedbackMapper;
 import com.stellar.ai.service.AiChatService;
 import com.stellar.ai.service.AiChatSessionService;
 import com.stellar.ai.service.AiChatToolService;
-import com.stellar.ai.service.AiKnowledgeService;
 import com.stellar.ai.service.AiMemoryService;
+import com.stellar.ai.service.rag.RagSearchService;
 import com.stellar.common.BusinessException;
 import com.stellar.system.entity.SysUser;
 import com.stellar.system.mapper.SysUserMapper;
@@ -33,9 +34,10 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * {@link AiChatSessionService} 单测：构造注入 8 个协作者，覆盖会话/消息 CRUD 的归属校验
+ * {@link AiChatSessionService} 单测：构造注入 9 个协作者，覆盖会话/消息 CRUD 的归属校验
  * （checkOwnership：不存在/无权）、列表与分页联查用户名、批量删除、以及 streamChat 的消息空
  * 前置校验与登录分支（SseEmitter 返回 + user 消息落库）。currentSubject 用 MockedStatic 模拟登录态。
+ * RAG 检索（RagSearchService）mock 未打桩返回 null → buildSystemText 捕获降级，不影响流式流程。
  */
 @ExtendWith(MockitoExtension.class)
 class AiChatSessionServiceTest {
@@ -49,20 +51,22 @@ class AiChatSessionServiceTest {
     @Mock
     SysUserMapper userMapper;
     @Mock
-    AiKnowledgeService knowledgeService;
-    @Mock
     AiMemoryService memoryService;
     @Mock
     AiChatService aiChatService;
     @Mock
     AiChatToolService aiChatToolService;
+    @Mock
+    RagSearchService ragSearchService;
+    @Mock
+    RagFeedbackMapper ragFeedbackMapper;
 
     AiChatSessionService service;
 
     @BeforeEach
     void setup() {
         service = new AiChatSessionService(sessionMapper, messageMapper, personaMapper, userMapper,
-                knowledgeService, memoryService, aiChatService, aiChatToolService);
+                memoryService, aiChatService, aiChatToolService, ragSearchService, ragFeedbackMapper);
     }
 
     private AiChatSession accountSession(Long id, String subjectId) {

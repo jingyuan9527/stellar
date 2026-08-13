@@ -496,6 +496,9 @@ COMMENT ON COLUMN memos_note.create_time IS '本地入库时间';
 COMMENT ON COLUMN memos_note.update_time IS '本地更新时间';
 CREATE INDEX IF NOT EXISTS idx_memos_note_uid ON memos_note (uid);
 CREATE INDEX IF NOT EXISTS idx_memos_note_remote_deleted ON memos_note (remote_deleted, tags_synced);
+-- 备忘笔记 RAG：笔记向量（JSON 数组文本 [v1,v2,...]），聊天时检索备份笔记注入问答，无 pgvector 依赖
+ALTER TABLE memos_note ADD COLUMN IF NOT EXISTS embedding TEXT;
+COMMENT ON COLUMN memos_note.embedding IS '笔记向量(JSON数组文本 [v1,v2,...]),备忘RAG内存余弦检索用,空=未向量化';
 
 -- sys_ai_usage 扩展：关联供应商与模型类型，便于按类型/供应商统计
 ALTER TABLE sys_ai_usage ADD COLUMN IF NOT EXISTS provider_id BIGINT;
@@ -582,6 +585,68 @@ ALTER TABLE ai_chat_message ADD COLUMN IF NOT EXISTS attachment_type VARCHAR(16)
 ALTER TABLE ai_chat_message ADD COLUMN IF NOT EXISTS attachment_file_id BIGINT;
 COMMENT ON COLUMN ai_chat_message.attachment_type IS '附件类型: image/audio (NULL=纯文本消息)';
 COMMENT ON COLUMN ai_chat_message.attachment_file_id IS '附件文件ID(引用 sys_file.id)';
+-- ai_chat_message 扩展：RAG 引用来源（回答实际召回并注入的资料，JSON 数组文本 [{source,key,title,url,score}]）
+ALTER TABLE ai_chat_message ADD COLUMN IF NOT EXISTS rag_refs TEXT;
+COMMENT ON COLUMN ai_chat_message.rag_refs IS 'RAG引用来源(JSON数组文本),assistant消息落库,前端气泡渲染参考链接';
+
+-- AI 聊天反馈表（回复质量评分：👍有用/👎没用，数据飞轮评估集原料，期4 复盘/回归用）
+CREATE TABLE IF NOT EXISTS rag_feedback (
+    id            BIGSERIAL PRIMARY KEY,
+    message_id    BIGINT NOT NULL,
+    value         SMALLINT NOT NULL,
+    comment       VARCHAR(500),
+    subject_type  VARCHAR(16) NOT NULL,
+    subject_id    VARCHAR(64) NOT NULL,
+    create_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  rag_feedback IS 'AI 聊天回复反馈表(?/?)';
+COMMENT ON COLUMN rag_feedback.message_id IS '被评价消息ID(引用 ai_chat_message.id)';
+COMMENT ON COLUMN rag_feedback.value IS '评价: 1有用 -1没用';
+COMMENT ON COLUMN rag_feedback.comment IS '用户可选补充说明';
+COMMENT ON COLUMN rag_feedback.subject_type IS '主体类型: account/ip';
+COMMENT ON COLUMN rag_feedback.subject_id IS '主体ID: userId 或 IP';
+COMMENT ON COLUMN rag_feedback.create_time IS '创建时间';
+COMMENT ON COLUMN rag_feedback.update_time IS '更新时间';
+CREATE INDEX IF NOT EXISTS idx_rag_feedback_message ON rag_feedback (message_id);
+CREATE INDEX IF NOT EXISTS idx_rag_feedback_subject ON rag_feedback (subject_type, subject_id);
+
+-- AI RAG 评估集（golden set：查询 + 期望命中的来源 key，数据飞轮离线回归跑分用）
+-- 来源 key 格式与检索管线一致：memos:{noteId} / kb:{chunkId}
+CREATE TABLE IF NOT EXISTS rag_eval_case (
+    id               BIGSERIAL PRIMARY KEY,
+    query            TEXT NOT NULL,
+    kb_id            BIGINT,
+    expected_sources TEXT NOT NULL,
+    note             VARCHAR(500),
+    create_time      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  rag_eval_case IS 'AI RAG 评估集(golden set, 查询+期望命中来源)';
+COMMENT ON COLUMN rag_eval_case.query IS '用户问题(golden, 与线上同样的提问)';
+COMMENT ON COLUMN rag_eval_case.kb_id IS '关联知识库ID(可空,空=仅备忘笔记源)';
+COMMENT ON COLUMN rag_eval_case.expected_sources IS '期望命中的来源key(JSON数组文本, 如 ["memos:12","kb:3"])';
+COMMENT ON COLUMN rag_eval_case.note IS '备注(为什么期望这些来源/问题背景)';
+
+-- AI RAG 跑分结果（一次 run 对每个 case 记一条，供回归对比防改坏）
+CREATE TABLE IF NOT EXISTS rag_eval_result (
+    id          BIGSERIAL PRIMARY KEY,
+    run_id      VARCHAR(40) NOT NULL,
+    case_id     BIGINT NOT NULL,
+    query       TEXT NOT NULL,
+    top_hits    TEXT,
+    pass        SMALLINT NOT NULL,
+    recall      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  rag_eval_result IS 'AI RAG 跑分结果(按 run_id 批次)';
+COMMENT ON COLUMN rag_eval_result.run_id IS '跑分批次ID(R+时间戳+随机)';
+COMMENT ON COLUMN rag_eval_result.case_id IS '评估用例ID(引用 rag_eval_case.id)';
+COMMENT ON COLUMN rag_eval_result.query IS '该用例问题快照';
+COMMENT ON COLUMN rag_eval_result.top_hits IS '检索 top-k 命中(JSON数组 [{source,title,url,score}])';
+COMMENT ON COLUMN rag_eval_result.pass IS '是否命中期望来源: 1是 0否';
+COMMENT ON COLUMN rag_eval_result.recall IS '期望来源召回率(命中数/期望数)';
+CREATE INDEX IF NOT EXISTS idx_rag_eval_result_run ON rag_eval_result (run_id, create_time DESC);
 
 -- AI 长期记忆表（定期整理会话为事实陈述，按账号，对话时注入 system prompt）
 CREATE TABLE IF NOT EXISTS ai_memory (

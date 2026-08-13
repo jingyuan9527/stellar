@@ -63,6 +63,20 @@ sa-token:
 rate-limit:
   default-daily: ${RATE_LIMIT_DAILY:50}
 
+# RAG 检索管线配置（登录用户聊天）：改写/重排/判定各一次 LLM 调用，无需可关
+stellar:
+  rag:
+    top-k: 4
+    pool-size: 12
+    score-threshold: 0.0
+    rewrite-enabled: true
+    rerank-enabled: true
+    memos-enabled: true
+    loop-enabled: true
+    loop-max-rounds: 3
+    router-enabled: true
+    router-simple-length: 12
+
 logging:
   level:
     com.stellar: debug

@@ -10,6 +10,7 @@ import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
   getMemosConfig, saveMemosConfig, pullMemos, tagMemos, pushMemosTags,
   getMemosPage, getMemosStats, getMemosWebhookConfig, saveMemosWebhookSecret,
+  rebuildMemosRag, getMemosRagStatus,
 } from '@/api/memos'
 import { getAiModelsByType } from '@/api/ai'
 import type { MemosConfig, MemosNote, MemosStats, AiModel } from '@/types/api'
@@ -111,6 +112,7 @@ async function copyWebhookUrl() {
 const pulling = ref(false)
 const tagging = ref(false)
 const pushing = ref(false)
+const rebuilding = ref(false)
 
 async function handlePull() {
   pulling.value = true
@@ -192,6 +194,29 @@ async function handlePushTags() {
     await Promise.all([loadData(), loadStats()])
   } finally {
     pushing.value = false
+  }
+}
+
+async function handleRebuildRag() {
+  rebuilding.value = true
+  try {
+    const r = await rebuildMemosRag()
+    message.success(`重建完成：处理 ${r.processed}，成功 ${r.success}，失败 ${r.failed}`)
+    await loadRagStatus()
+  } finally {
+    rebuilding.value = false
+  }
+}
+
+// ===== RAG 索引状态（是否已构建：已向量化数/总数 + 上次全量重建时间）=====
+
+const ragStatus = ref<{ total: number; embedded: number; pending: number; lastRebuildAt: string } | null>(null)
+
+async function loadRagStatus() {
+  try {
+    ragStatus.value = await getMemosRagStatus()
+  } catch {
+    // 错误已由拦截器提示
   }
 }
 
@@ -355,6 +380,7 @@ onMounted(() => {
   loadStats()
   loadTextModels()
   loadWebhookConfig()
+  loadRagStatus()
 })
 </script>
 
@@ -429,10 +455,22 @@ onMounted(() => {
               AI 打标签<template v-if="checkedKeys.length">({{ checkedKeys.length }})</template>
             </NButton>
             <NButton type="warning" :loading="pushing" @click="handlePushTags">同步标签到 Memos</NButton>
+            <NButton type="tertiary" :loading="rebuilding" @click="handleRebuildRag">
+              重建RAG索引
+            </NButton>
+            <template v-if="ragStatus">
+              <NTag size="small" :type="ragStatus.pending === 0 ? 'success' : 'warning'" :bordered="false">
+                RAG索引 {{ ragStatus.embedded }}/{{ ragStatus.total }}
+              </NTag>
+              <span v-if="ragStatus.lastRebuildAt" class="rag-status-time">
+                上次重建 {{ formatTime(ragStatus.lastRebuildAt) }}
+              </span>
+            </template>
           </NSpace>
           <NAlert type="info" :bordered="false">
             立即同步：全量拉取远端笔记备份到本地，远端已删除的笔记在本地标记删除（不删数据）。
             勾选笔记后选供应商/模型（留空用默认 TEXT 模型），点「AI 打标签」：AI 生成标签（与现有标签合并），打标成功后自动写回远端；写回失败的笔记保持待写回状态，可点「同步标签到 Memos」手动重试。
+            笔记同步后自动向量化供 AI 聊天 RAG 检索（登录后问自己的笔记）；「重建RAG索引」用于新增向量化失败的笔记或更换向量模型后全量重算。
           </NAlert>
         </NSpace>
       </NCard>
@@ -489,6 +527,10 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.rag-status-time {
+  font-size: 12px;
+  opacity: 0.6;
+}
 .content-cell {
   display: flex;
   align-items: center;

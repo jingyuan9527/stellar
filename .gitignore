@@ -38,3 +38,7 @@ desktop.ini
 # ===== opencode 本地 =====
 .opencode/state/
 .opencode/cache/
+
+# ===== 本机 AI 工具运行态（.reasonix 桌面会话 / .workbuddy 记忆）=====
+.reasonix/
+.workbuddy/

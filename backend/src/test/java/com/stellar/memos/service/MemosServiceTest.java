@@ -65,13 +65,15 @@ class MemosServiceTest {
     private RedisTemplate<String, Object> redisTemplate;
     @Mock
     private ValueOperations<String, Object> valueOperations;
+    @Mock
+    private MemosRagService memosRagService;
 
     private MemosService service;
 
     @BeforeEach
     void setUp() {
         service = new MemosService(memosNoteMapper, memosApiClient, sysSettingService,
-                aiChatService, externalCallLogger, new ObjectMapper(), redisTemplate);
+                aiChatService, externalCallLogger, new ObjectMapper(), redisTemplate, memosRagService);
     }
 
     private void mockConfig(String baseUrl, String token) {

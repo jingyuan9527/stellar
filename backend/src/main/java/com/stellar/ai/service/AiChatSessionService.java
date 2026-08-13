@@ -4,15 +4,22 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.stellar.common.BusinessException;
+import com.stellar.ai.dto.AiChatFeedbackDTO;
 import com.stellar.ai.entity.AiChatMessage;
 import com.stellar.ai.entity.AiChatSession;
 import com.stellar.ai.entity.AiPersona;
+import com.stellar.ai.entity.RagFeedback;
 import com.stellar.system.entity.SysUser;
 import com.stellar.ai.mapper.AiChatMessageMapper;
 import com.stellar.ai.mapper.AiChatSessionMapper;
 import com.stellar.ai.mapper.AiPersonaMapper;
+import com.stellar.ai.mapper.RagFeedbackMapper;
 import com.stellar.system.mapper.SysUserMapper;
+import com.stellar.ai.service.rag.RagHit;
+import com.stellar.ai.service.rag.RagSearchService;
+import com.stellar.ai.service.rag.RetrievalResult;
 import com.stellar.ai.vo.AiChatResult;
+import com.stellar.ai.vo.RagSource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,13 +51,13 @@ public class AiChatSessionService {
     private final AiChatMessageMapper messageMapper;
     private final AiPersonaMapper personaMapper;
     private final SysUserMapper userMapper;
-    private final AiKnowledgeService knowledgeService;
     private final AiMemoryService memoryService;
     private final AiChatService aiChatService;
     private final AiChatToolService aiChatToolService;
+    private final RagSearchService ragSearchService;
+    private final RagFeedbackMapper ragFeedbackMapper;
 
     private static final int HISTORY_LIMIT = 20;
-    private static final int RAG_TOP_K = 4;
 
     // ===== 会话 CRUD =====
 
@@ -98,9 +105,30 @@ public class AiChatSessionService {
 
     public List<AiChatMessage> getMessages(Long sessionId) {
         checkOwnership(sessionId);
-        return messageMapper.selectList(new LambdaQueryWrapper<AiChatMessage>()
+        List<AiChatMessage> messages = messageMapper.selectList(new LambdaQueryWrapper<AiChatMessage>()
                 .eq(AiChatMessage::getSessionId, sessionId)
                 .orderByAsc(AiChatMessage::getCreateTime));
+        fillFeedback(messages);
+        return messages;
+    }
+
+    /**
+     * 按当前主体回填每条消息的评价（反馈闭环回显：气泡"有用/没用"选中态）。
+     */
+    private void fillFeedback(List<AiChatMessage> messages) {
+        if (messages.isEmpty()) {
+            return;
+        }
+        List<Long> ids = messages.stream().map(AiChatMessage::getId).collect(Collectors.toList());
+        List<RagFeedback> fbs = ragFeedbackMapper.selectList(new LambdaQueryWrapper<RagFeedback>()
+                .in(RagFeedback::getMessageId, ids)
+                .eq(RagFeedback::getSubjectType, currentSubjectType())
+                .eq(RagFeedback::getSubjectId, currentSubjectId()));
+        Map<Long, Integer> valueMap = fbs.stream()
+                .collect(Collectors.toMap(RagFeedback::getMessageId, RagFeedback::getValue, (a, b) -> b));
+        for (AiChatMessage m : messages) {
+            m.setFeedbackValue(valueMap.get(m.getId()));
+        }
     }
 
     /**
@@ -152,6 +180,58 @@ public class AiChatSessionService {
         return ids.size();
     }
 
+    // ===== 回复反馈（数据飞轮）=====
+
+    /**
+     * 对某条消息打分（1 有用 / -1 没用 / 0 取消评价），同一主体同一消息重复打分会覆盖（往返切换点赞/踩）。
+     * 消息须属于当前主体（游客按 IP，登录按账号），归属校验复用 {@link #checkOwnership}。
+     *
+     * @param dto messageId + value(1/-1/0, 0=取消) + comment(可选)
+     */
+    public void saveFeedback(AiChatFeedbackDTO dto) {
+        Integer value = dto.getValue();
+        if (value == null || (value != 1 && value != -1 && value != 0)) {
+            throw new BusinessException("评价值非法（1=有用, -1=没用, 0=取消）");
+        }
+        AiChatMessage msg = messageMapper.selectById(dto.getMessageId());
+        if (msg == null) {
+            throw new BusinessException("消息不存在");
+        }
+        checkOwnership(msg.getSessionId());
+        LocalDateTime now = LocalDateTime.now();
+        RagFeedback existing = ragFeedbackMapper.selectOne(new LambdaQueryWrapper<RagFeedback>()
+                .eq(RagFeedback::getMessageId, dto.getMessageId())
+                .eq(RagFeedback::getSubjectType, currentSubjectType())
+                .eq(RagFeedback::getSubjectId, currentSubjectId()));
+        // 取消评价：删除既有记录（幂等，无则忽略）
+        if (value == 0) {
+            if (existing != null) {
+                ragFeedbackMapper.deleteById(existing.getId());
+            }
+            log.info("[AI聊天] 回复反馈取消 messageId={} subject={}:{}", dto.getMessageId(),
+                    currentSubjectType(), currentSubjectId());
+            return;
+        }
+        if (existing != null) {
+            existing.setValue(value);
+            existing.setComment(dto.getComment());
+            existing.setUpdateTime(now);
+            ragFeedbackMapper.updateById(existing);
+        } else {
+            RagFeedback fb = new RagFeedback();
+            fb.setMessageId(dto.getMessageId());
+            fb.setValue(value);
+            fb.setComment(dto.getComment());
+            fb.setSubjectType(currentSubjectType());
+            fb.setSubjectId(currentSubjectId());
+            fb.setCreateTime(now);
+            fb.setUpdateTime(now);
+            ragFeedbackMapper.insert(fb);
+        }
+        log.info("[AI聊天] 回复反馈 messageId={} value={} subject={}:{}", dto.getMessageId(), value,
+                currentSubjectType(), currentSubjectId());
+    }
+
     // ===== 流式多轮聊天 =====
 
     /**
@@ -174,8 +254,9 @@ public class AiChatSessionService {
         userMsg.setCreateTime(LocalDateTime.now());
         messageMapper.insert(userMsg);
 
-        // 2. 组装 messages
-        List<Map<String, String>> messages = buildMessages(session, userMessage);
+        // 2. 组装 messages（含 RAG 检索：知识库 + 备忘笔记，refs 收集实际召回来源用于溯源）
+        List<RagSource> refs = new ArrayList<>();
+        List<Map<String, String>> messages = buildMessages(session, userMessage, modelId, refs);
 
         // 3. 流式
         if (StpUtil.isLogin()) {
@@ -196,12 +277,14 @@ public class AiChatSessionService {
                         aMsg.setTokens(ar.content() == null ? 0 : ar.content().length());
                         aMsg.setAttachmentType(ar.attachmentType());
                         aMsg.setAttachmentFileId(ar.attachmentFileId());
+                        // RAG 溯源：回答实际召回并注入的资料（前端气泡渲染"参考"链接）
+                        aMsg.setRagRefs(RagSource.toJson(refs));
                         aMsg.setCreateTime(LocalDateTime.now());
                         messageMapper.insert(aMsg);
                         updateSessionTitle(session, userMessage);
                     });
         }
-        // 游客：纯文本，无 tools
+        // 游客：纯文本，无 tools（无 RAG，refs 恒空）
         return aiChatService.streamMultiChat(messages, modelId, fullText -> {
             if (!StringUtils.hasText(fullText)) {
                 log.warn("[AI聊天] 游客流返回空文本，不保存 assistant sessionId={}", sessionId);
@@ -232,12 +315,15 @@ public class AiChatSessionService {
 
     /**
      * 组装 OpenAI messages：system（人设+记忆+RAG）+ 历史最近 N 条（含刚存的 user）。
+     *
+     * @param refs RAG 实际召回来源收集器（溯源落库用，检索后填充）
      */
-    private List<Map<String, String>> buildMessages(AiChatSession session, String currentUserMessage) {
+    private List<Map<String, String>> buildMessages(AiChatSession session, String currentUserMessage,
+                                                    Long modelId, List<RagSource> refs) {
         List<Map<String, String>> messages = new ArrayList<>();
 
         // system：人设 + 记忆 + RAG
-        String systemText = buildSystemText(session, currentUserMessage);
+        String systemText = buildSystemText(session, currentUserMessage, modelId, refs);
         if (StringUtils.hasText(systemText)) {
             Map<String, String> sys = new HashMap<>();
             sys.put("role", "system");
@@ -262,9 +348,11 @@ public class AiChatSessionService {
     }
 
     /**
-     * 拼装 system 文本：人设 systemPrompt 为基，登录用户追加长期记忆，关联知识库时追加 RAG 检索片段。
+     * 拼装 system 文本：人设 systemPrompt 为基，登录用户追加长期记忆，RAG 检索注入（知识库 + 备忘笔记）。
+     * <p>RAG 走 {@link RagSearchService} 管线（改写→检索→RRF 融合→阈值→重排），
+     * 检索片段以 [来源N] 编号注入并引导 LLM 引用；同时把实际召回来源填入 refs 供消息溯源落库。
      */
-    private String buildSystemText(AiChatSession session, String query) {
+    private String buildSystemText(AiChatSession session, String query, Long modelId, List<RagSource> refs) {
         StringBuilder sb = new StringBuilder();
         // 人设
         if (session.getPersonaId() != null) {
@@ -287,16 +375,27 @@ public class AiChatSessionService {
                 }
             }
         }
-        // RAG 知识库检索（仅登录且关联了知识库）
-        if ("account".equals(session.getSubjectType()) && session.getKbId() != null) {
+        // RAG 检索（仅登录：知识库 + 备忘笔记双源；游客无 RAG 保持原行为）
+        if ("account".equals(session.getSubjectType())) {
             try {
-                List<String> chunks = knowledgeService.search(session.getKbId(), query, RAG_TOP_K);
-                if (!chunks.isEmpty()) {
-                    sb.append("以下是与用户问题相关的知识库资料，请结合资料回答：\n");
-                    for (int i = 0; i < chunks.size(); i++) {
-                        sb.append("--- 资料").append(i + 1).append(" ---\n").append(chunks.get(i)).append('\n');
+                RetrievalResult result = ragSearchService.search(query, session.getKbId(), true, modelId);
+                List<RagHit> hits = result.hits();
+                if (!hits.isEmpty()) {
+                    sb.append("以下是与用户问题相关的参考资料（可能来自知识库或你的备忘笔记），请结合资料回答；"
+                            + "引用资料时用 [来源N] 标注；资料无法覆盖时请明确说明：\n");
+                    for (int i = 0; i < hits.size(); i++) {
+                        RagHit h = hits.get(i);
+                        sb.append("[来源").append(i + 1).append("] ");
+                        if (StringUtils.hasText(h.title())) {
+                            sb.append(h.title()).append("：");
+                        }
+                        sb.append(h.text()).append('\n');
                     }
                     sb.append('\n');
+                }
+                // 溯源：实际召回注入的来源落 refs（前端气泡"参考"链接 + 期4 评估集原料）
+                for (RagHit h : hits) {
+                    refs.add(new RagSource(h.source(), h.sourceKey(), h.title(), h.url(), h.score()));
                 }
             } catch (Exception e) {
                 log.warn("[AI聊天] RAG 检索失败 session={}: {}", session.getId(), e.getMessage());

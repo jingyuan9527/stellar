@@ -146,6 +146,22 @@ onMounted(loadData)
                   class="msg-audio"
                 />
                 <span v-if="m.content" class="msg-text">{{ m.content }}</span>
+                <div v-if="m.role === 'assistant' && m.refs && m.refs.length" class="msg-refs">
+                  <div class="refs-label">参考</div>
+                  <div class="refs-list">
+                    <template v-for="(r, i) in m.refs" :key="r.source + ':' + r.sourceKey">
+                      <a
+                        v-if="r.url"
+                        :href="r.url"
+                        target="_blank"
+                        rel="noopener"
+                        class="ref-link"
+                        :title="r.title ?? ''"
+                      >{{ r.title || '来源' + (i + 1) }}</a>
+                      <span v-else class="ref-text">{{ r.title || '来源' + (i + 1) }}</span>
+                    </template>
+                  </div>
+                </div>
               </div>
             </div>
           </template>
@@ -212,5 +228,44 @@ onMounted(loadData)
 }
 .msg-row.assistant .bubble {
   background: rgba(128, 128, 128, 0.1);
+}
+.msg-text {
+  display: block;
+}
+.msg-refs {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(128, 128, 128, 0.25);
+  font-size: 12px;
+}
+.refs-label {
+  opacity: 0.55;
+  margin-bottom: 4px;
+}
+.refs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ref-link,
+.ref-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(100, 150, 255, 0.1);
+  font-size: 12px;
+}
+.ref-link {
+  color: #2d8cf0;
+}
+.ref-link:hover {
+  text-decoration: underline;
+}
+.ref-text {
+  opacity: 0.8;
 }
 </style>

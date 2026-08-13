@@ -49,6 +49,14 @@ export function pageAllChatSessions(params: { pageNum: number; pageSize: number 
   return request<PageResult<AiChatSessionAdmin>>({ url: '/ai/chat/session/all', method: 'get', params })
 }
 
+/**
+ * 回复反馈（👍有用/👎没用/0 取消）：同一主体同一消息重复打分会覆盖。
+ * 评分进入 rag_feedback 表，是 RAG 数据飞轮评估集原料（复盘 bad case + 回归用）。
+ */
+export function submitFeedback(messageId: number, value: number, comment?: string) {
+  return request<void>({ url: '/ai/chat/feedback', method: 'post', data: { messageId, value, comment } })
+}
+
 export function getChatMessages(sessionId: number) {
   return request<AiChatMessage[]>({ url: `/ai/chat/session/${sessionId}/messages`, method: 'get' })
 }
