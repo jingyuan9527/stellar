@@ -381,8 +381,8 @@ public class AiChatSessionService {
                 RetrievalResult result = ragSearchService.search(query, session.getKbId(), true, modelId);
                 List<RagHit> hits = result.hits();
                 if (!hits.isEmpty()) {
-                    sb.append("以下是与用户问题相关的参考资料（可能来自知识库或你的备忘笔记），请结合资料回答；"
-                            + "引用资料时用 [来源N] 标注；资料无法覆盖时请明确说明：\n");
+                    sb.append("以下是从你的备忘笔记/知识库中检索到的相关资料（当用户要求\"搜索笔记\"、\"查找笔记\"、"
+                            + "\"查资料\"时，这些资料就是检索结果，直接基于它们回答，不要声称自己没有搜索能力）：\n");
                     for (int i = 0; i < hits.size(); i++) {
                         RagHit h = hits.get(i);
                         sb.append("[来源").append(i + 1).append("] ");
@@ -392,6 +392,9 @@ public class AiChatSessionService {
                         sb.append(h.text()).append('\n');
                     }
                     sb.append('\n');
+                } else {
+                    sb.append("用户要求搜索/查找笔记或资料时，本次未检索到相关内容，"
+                            + "请如实告知\"未在笔记中找到相关内容\"，不要编造资料。\n\n");
                 }
                 // 溯源：实际召回注入的来源落 refs（前端气泡"参考"链接 + 期4 评估集原料）
                 for (RagHit h : hits) {
@@ -405,7 +408,9 @@ public class AiChatSessionService {
         if ("account".equals(session.getSubjectType())) {
             sb.append("你具备以下能力，请主动识别用户意图并调用对应工具，不要只用文字回复代替：\n");
             sb.append("- 用户想要图片/画作/视觉图像时，调用 generate_image 工具\n");
-            sb.append("- 用户想要语音/朗读/听到声音时，调用 synthesize_speech 工具\n\n");
+            sb.append("- 用户想要语音/朗读/听到声音时，调用 synthesize_speech 工具\n");
+            sb.append("- 用户要求搜索/查找笔记、知识库或资料时，无需调用工具——检索结果已注入上方 system"
+                    + "内容，直接基于它们回答并标注 [来源N]\n\n");
         }
         return sb.toString().trim();
     }
