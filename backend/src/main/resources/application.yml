@@ -43,7 +43,9 @@ spring:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # SQL 日志开关：默认 NoLoggingImpl 关闭（Preparing/Parameters 噪声大）
+    # 需要调试 SQL 时设环境变量 MYBATIS_LOG_IMPL=org.apache.ibatis.logging.slf4j.Slf4jImpl（走 logback 级别控制）
+    log-impl: ${MYBATIS_LOG_IMPL:org.apache.ibatis.logging.nologging.NoLoggingImpl}
   global-config:
     db-config:
       id-type: auto
