@@ -277,6 +277,22 @@ public class AiVideoService {
         log.info("[AI视频] 删除历史记录 taskId={} fileId={}", taskId, task.getFileId());
     }
 
+    /**
+     * 校验视频任务归属当前主体（无任务行或归属不匹配时拒绝）。
+     * <p>供状态查询入口防越权用：videoId 为供应商生成的全局标识，若不校验归属，
+     * 任意登录用户拿他人 videoId 即可读取他人视频，且在任务完成后反过来改写他人
+     * 本地留痕行（IDOR）；校验放在可外部触达的 controller 层，不影响 worker 内部轮询。
+     */
+    public void assertVideoOwner(String videoId, String subjectType, String subjectId) {
+        AiTask task = findLocalTask(videoId);
+        if (task == null) {
+            throw new BusinessException("视频任务不存在");
+        }
+        if (!subjectType.equals(task.getSubjectType()) || !subjectId.equals(task.getSubjectId())) {
+            throw new BusinessException("无权访问该视频任务");
+        }
+    }
+
     private String buildVideoExtra(Long modelId, String ratio, Integer duration, String videoId) {
         Map<String, Object> extra = new HashMap<>();
         extra.put("model_id", modelId);

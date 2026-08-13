@@ -53,6 +53,9 @@ public class AiVideoController {
     @Log(title = "AI视频状态", type = OperationType.QUERY)
     public Result<AiVideoStatusVO> status(@RequestParam Long modelId,
                                           @RequestParam String videoId) {
+        String subjectId = StpUtil.getLoginIdAsString();
+        // 防越权：videoId 为全局标识，先校验归属再查询（详见 AiVideoService.assertVideoOwner）
+        aiVideoService.assertVideoOwner(videoId, "account", subjectId);
         return Result.success(aiVideoService.getTask(modelId, videoId));
     }
 

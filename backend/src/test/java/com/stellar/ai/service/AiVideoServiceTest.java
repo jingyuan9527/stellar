@@ -258,4 +258,31 @@ class AiVideoServiceTest {
         verify(fileMapper).deleteById(9L);
         verify(aiTaskMapper).deleteById(1L);
     }
+
+    @Test
+    void assertVideoOwner_无本地任务_抛() {
+        when(aiTaskMapper.selectVideoTaskByVideoId("vid1")).thenReturn(null);
+        assertThrows(BusinessException.class,
+                () -> service.assertVideoOwner("vid1", "account", "1"));
+    }
+
+    @Test
+    void assertVideoOwner_主体不符_抛() {
+        AiTask t = new AiTask();
+        t.setSubjectType("account");
+        t.setSubjectId("2");
+        when(aiTaskMapper.selectVideoTaskByVideoId("vid1")).thenReturn(t);
+        assertThrows(BusinessException.class,
+                () -> service.assertVideoOwner("vid1", "account", "1"));
+    }
+
+    @Test
+    void assertVideoOwner_归属匹配_通过() {
+        AiTask t = new AiTask();
+        t.setSubjectType("account");
+        t.setSubjectId("1");
+        when(aiTaskMapper.selectVideoTaskByVideoId("vid1")).thenReturn(t);
+        service.assertVideoOwner("vid1", "account", "1");
+        verify(aiTaskMapper).selectVideoTaskByVideoId("vid1");
+    }
 }

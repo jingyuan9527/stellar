@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -48,11 +49,27 @@ class AiVideoControllerTest {
     }
 
     @Test
-    void status_正常() {
+    void status_正常_先校验归属() {
         AiVideoStatusVO vo = new AiVideoStatusVO();
         vo.setStatus("completed");
-        when(aiVideoService.getTask(2L, "v1")).thenReturn(vo);
-        assertEquals("completed", controller.status(2L, "v1").getData().getStatus());
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getLoginIdAsString).thenReturn("u1");
+            when(aiVideoService.getTask(2L, "v1")).thenReturn(vo);
+            assertEquals("completed", controller.status(2L, "v1").getData().getStatus());
+        }
+        verify(aiVideoService).assertVideoOwner("v1", "account", "u1");
+        verify(aiVideoService).getTask(2L, "v1");
+    }
+
+    @Test
+    void status_归属校验抛出_不透传到查询() {
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getLoginIdAsString).thenReturn("u1");
+            doThrow(new RuntimeException("无权访问该视频任务"))
+                    .when(aiVideoService).assertVideoOwner("v1", "account", "u1");
+            assertThrows(RuntimeException.class, () -> controller.status(2L, "v1"));
+        }
+        verify(aiVideoService, never()).getTask(any(), any());
     }
 
     @Test
