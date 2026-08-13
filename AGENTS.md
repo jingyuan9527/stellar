@@ -48,7 +48,7 @@ Two independent packages, **no shared workspace tooling**:- `frontend/` — Vue3
 **后端按领域分子包**：`com.stellar.ai.*`（controller/service/entity/mapper/dto/vo/event）、`com.stellar.tts.*`、`com.stellar.game.*`、`com.stellar.system.*`、`com.stellar.memos.*`（备忘同步）、`com.stellar.infra`（SseEmitterManager/ExternalCallLogger/RateLimitService/SubjectUtils）。公共基础（common/config/interceptor/aspect/annotation/enums）保持根级。
 
 **前端导航结构**（阶段12重构后）：
-- `AI创作 /ai`（order 3）：创作组（聊天/文案/图片/视频/语音合成）+ 管理组（模板/会话/记忆/知识库/人设）
+- `AI创作 /ai`（order 3）：二级分组路由 `/ai/create`（创作工具：聊天/文案/图片/视频/语音合成，组路由 redirect 到 `/ai/chat`）+ `/ai/manage`（管理：模板/会话/记忆/知识库/人设/RAG评估，redirect 到 `/ai/template`）。子路由全部用**绝对路径**（`/ai/chat` 等）保持 URL/菜单 key/publicKeys 不变；游客仅创作组可见（管理组整组隐藏）。RAG评估（order 11）在管理组下。
 - `工具 /tools`（order 5）：封面工具/JSON 格式化
 - `游戏 /game`（order 6）：数学游戏/神奇海螺/海螺预设
 - `备忘同步 /memos`（order 7）：Memos 笔记备份 + AI 打标签 + 标签写回（需登录）
