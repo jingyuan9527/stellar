@@ -27,9 +27,10 @@ FROM maven:3.9-eclipse-temurin-21 AS build
 ENV NODE_VERSION=v22.12.0 \
     NODE_OPTIONS="--max-old-space-size=1152" \
     MAVEN_OPTS="-Xmx768m -Xms384m -XX:+UseContainerSupport"
-# Node 22 官方 linux-x64 tarball（29MB，解压到 /opt，软链到 PATH）
-RUN curl -fsSL https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz \
-        | tar -xJ -C /opt \
+# Node 22 官方 linux-x64 tarball（.tar.gz 54MB，解压到 /opt，软链到 PATH）
+# 注意必须用 .tar.gz 而非 .tar.xz：maven 镜像（Ubuntu 底）无 xz 工具，tar 解压 .xz 会失败
+RUN curl -fsSL https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.gz \
+        | tar -xz -C /opt \
     && ln -s /opt/node-${NODE_VERSION}-linux-x64/bin/node /usr/local/bin/node \
     && ln -s /opt/node-${NODE_VERSION}-linux-x64/bin/npm /usr/local/bin/npm \
     && ln -s /opt/node-${NODE_VERSION}-linux-x64/bin/corepack /usr/local/bin/corepack
