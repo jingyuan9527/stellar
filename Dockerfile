@@ -24,10 +24,12 @@
 # 两个工具链共存于同一 stage，构建进程同时只跑一个，内存峰值不叠加。
 FROM maven:3.9-eclipse-temurin-21 AS build
 # NODE_OPTIONS 压到 1152M / MAVEN_OPTS 压到 768M：2G 机器构建峰值 ≈ max(1.3G, 1G)
-ENV NODE_VERSION=v22.12.0 \
-    PATH="/opt/node-${NODE_VERSION}-linux-x64/bin:${PATH}" \
-    NODE_OPTIONS="--max-old-space-size=1152" \
-    MAVEN_OPTS="-Xmx768m -Xms384m -XX:+UseContainerSupport"
+# NODE_VERSION 用 ARG + 独立 ENV：同一 ENV 指令内跨行引用变量 buildkit 不识别（UndefinedVar）
+ARG NODE_VERSION=v22.12.0
+ENV NODE_VERSION=${NODE_VERSION}
+ENV PATH=/opt/node-${NODE_VERSION}-linux-x64/bin:${PATH}
+ENV NODE_OPTIONS="--max-old-space-size=1152"
+ENV MAVEN_OPTS="-Xmx768m -Xms384m -XX:+UseContainerSupport"
 # Node 22 官方 linux-x64 tarball（.tar.gz 54MB，解压到 /opt）
 # 注意必须用 .tar.gz 而非 .tar.xz：maven 镜像（Ubuntu 底）无 xz 工具，tar 解压 .xz 会失败
 # node bin 目录直接进 PATH：npm -g 默认 prefix 是 node 真实安装目录，软链到 /usr/local/bin 会导致全局包（如 pnpm）落盘后不在 PATH
