@@ -25,19 +25,23 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 # NODE_OPTIONS 压到 1152M / MAVEN_OPTS 压到 768M：2G 机器构建峰值 ≈ max(1.3G, 1G)
 # NODE_VERSION 用 ARG + 独立 ENV：同一 ENV 指令内跨行引用变量 buildkit 不识别（UndefinedVar）
-# TARGETARCH 由 buildx 注入（amd64/arm64），node tarball 与 PATH 按平台取对应目录
+# TARGETARCH 由 buildx 注入（amd64/arm64）；node tarball 命名是 linux-x64/linux-arm64，需映射
 ARG NODE_VERSION=v22.12.0
 ARG TARGETARCH
 ENV NODE_VERSION=${NODE_VERSION}
 ENV TARGETARCH=${TARGETARCH}
-ENV PATH=/opt/node-${NODE_VERSION}-linux-${TARGETARCH}/bin:${PATH}
+ENV PATH=/opt/node-${NODE_VERSION}/bin:${PATH}
 ENV NODE_OPTIONS="--max-old-space-size=1152"
 ENV MAVEN_OPTS="-Xmx768m -Xms384m -XX:+UseContainerSupport"
-# Node 22 官方 linux tarball（.tar.gz，解压到 /opt）
-# 注意必须用 .tar.gz 而非 .tar.xz：maven 镜像（Ubuntu 底）无 xz 工具，tar 解压 .xz 会失败
-# node bin 目录直接进 PATH：npm -g 默认 prefix 是 node 真实安装目录，软链到 /usr/local/bin 会导致全局包（如 pnpm）落盘后不在 PATH
-RUN curl -fsSL https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${TARGETARCH}.tar.gz \
-        | tar -xz -C /opt
+# Node 22 官方 linux tarball（.tar.gz，解压到 /opt 后重命名固定目录）
+# 平台映射：先试 linux-${TARGETARCH}（arm64 命中），amd64 不存在则 || 兜底 linux-x64
+# 避免 shell 计算变量（buildkit 的 $$ 转义/未定义变量替换行为不可靠），全部用 Docker 侧 ENV 替换 + glob
+# .tar.gz 而非 .tar.xz：maven 镜像（Ubuntu 底）无 xz 工具；node bin 目录直接进 PATH（npm -g 全局包落盘到 node 真实目录）
+RUN curl -fsSL -o /tmp/node.tar.gz "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${TARGETARCH}.tar.gz" \
+    || curl -fsSL -o /tmp/node.tar.gz "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.gz" \
+    && tar -xz -C /opt -f /tmp/node.tar.gz \
+    && mv /opt/node-${NODE_VERSION}-linux-* /opt/node-${NODE_VERSION} \
+    && rm /tmp/node.tar.gz
 # pnpm 用 npm 全局安装（corepack 在 tarball 环境的 shim 机制不稳定，CI 上 enable/prepare 报错）
 RUN npm install -g pnpm@10.12.4
 WORKDIR /app
