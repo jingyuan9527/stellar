@@ -35,7 +35,10 @@ public class SaTokenConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/auth/login",
                         "/auth/register",
-                        "/error"
+                        "/error",
+                        // 健康探针：公开访问，仅此一个 Actuator 端点（其余未暴露）
+                        "/actuator/health",
+                        "/actuator/health/**"
                 );
         // 限流：识别 @RateLimit 按 IP 单日计数，超限 429（注册在鉴权之后）
         registry.addInterceptor(new RateLimitInterceptor(rateLimitService))
