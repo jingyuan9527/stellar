@@ -17,6 +17,7 @@ import org.springframework.boot.actuate.health.HealthContributorRegistry;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.boot.actuate.health.NamedContributor;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -33,6 +34,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import jakarta.annotation.PostConstruct;
 
 /**
  * 系统监控服务：采集实时快照（JVM / 系统 / HTTP / HikariCP / 应用 / 健康）。
@@ -60,6 +63,32 @@ public class MonitorService {
             "G1HeapRegionSize", "MaxGCPauseMillis", "ParallelGCThreads", "ConcGCThreads",
             "SurvivorRatio", "MaxTenuringThreshold",
             "HeapDumpOnOutOfMemoryError", "HeapDumpPath");
+
+    /** 慢变量缓存：CPU/磁盘/文件句柄（2s 后台采样，读取为瞬时值会阻塞请求线程） */
+    private volatile MonitorOverviewVO.SystemMetrics cachedSystem;
+    /** 慢变量缓存：JVM 生效参数（运行期不变，启动采样一次） */
+    private volatile List<MonitorOverviewVO.JvmArgStat> cachedJvmArgs;
+
+    @PostConstruct
+    void init() {
+        // 启动先采一次，避免首帧空缓存；JVM 参数只采一次（运行期不变）
+        cachedSystem = sampleSystemMetrics();
+        cachedJvmArgs = collectKeyJvmArgs();
+        log.info("系统监控采样缓存就绪：CPU/磁盘/句柄 2s 定时采样，JVM 参数启动采样一次");
+    }
+
+    /**
+     * 定时采样慢变量：CPU/磁盘/句柄。采样本身耗时（Windows 上 getSystemCpuLoad 可达数百 ms），
+     * 放后台线程执行，overview 请求只读缓存，避免监控页轮询阻塞请求线程。
+     */
+    @Scheduled(fixedRate = 2000)
+    void sampleSlowMetrics() {
+        try {
+            cachedSystem = sampleSystemMetrics();
+        } catch (Exception e) {
+            log.warn("定时采样系统指标失败，保留上次缓存: {}", e.getMessage());
+        }
+    }
 
     /**
      * 组装监控概览。
@@ -207,7 +236,11 @@ public class MonitorService {
 
         ClassLoadingMXBean cl = ManagementFactory.getClassLoadingMXBean();
         m.setLoadedClasses(cl.getLoadedClassCount());
-        m.setKeyJvmArgs(collectKeyJvmArgs());
+        // 生效参数为慢变量：启动采样一次，运行期不变
+        if (cachedJvmArgs == null) {
+            cachedJvmArgs = collectKeyJvmArgs();
+        }
+        m.setKeyJvmArgs(cachedJvmArgs);
         return m;
     }
 
@@ -273,7 +306,18 @@ public class MonitorService {
 
     // ===== 系统 =====
 
+    /** overview 读取：返回 2s 采样缓存，避免阻塞请求线程；缓存未就绪时懒采样兜底 */
     private MonitorOverviewVO.SystemMetrics systemMetrics() {
+        MonitorOverviewVO.SystemMetrics cached = cachedSystem;
+        if (cached == null) {
+            cachedSystem = sampleSystemMetrics();
+            cached = cachedSystem;
+        }
+        return cached;
+    }
+
+    /** 采样系统指标（耗时调用，仅后台定时线程与懒初始化执行） */
+    private MonitorOverviewVO.SystemMetrics sampleSystemMetrics() {
         MonitorOverviewVO.SystemMetrics m = new MonitorOverviewVO.SystemMetrics();
         OperatingSystemMXBean os = ManagementFactory.getPlatformMXBean(OperatingSystemMXBean.class);
         m.setProcessCpuUsage(clampLoad(os.getProcessCpuLoad()));

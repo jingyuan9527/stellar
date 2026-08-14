@@ -18,7 +18,9 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
@@ -97,6 +99,25 @@ class MonitorServiceTest {
         assertTrue(vo.getApp().getStartCostMs() >= 0);
 
         assertNotNull(vo.getHealth());
+    }
+
+    @Test
+    void overview_慢变量走缓存复用同一实例() {
+        MonitorOverviewVO first = service.overview();
+        MonitorOverviewVO second = service.overview();
+        assertSame(first.getSystem(), second.getSystem());
+        assertSame(first.getJvm().getKeyJvmArgs(), second.getJvm().getKeyJvmArgs());
+    }
+
+    @Test
+    void sampleSlowMetrics_更新缓存() {
+        MonitorOverviewVO.SystemMetrics oldSys = service.overview().getSystem();
+        service.sampleSlowMetrics();
+        MonitorOverviewVO.SystemMetrics newSys = service.overview().getSystem();
+        assertNotNull(newSys);
+        assertTrue(newSys.getDiskTotal() > 0);
+        assertNotSame(oldSys, newSys);
+        assertTrue(newSys.getProcessCpuUsage() >= -1);
     }
 
     @Test
