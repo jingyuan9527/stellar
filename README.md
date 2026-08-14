@@ -75,7 +75,21 @@ psql -h <host> -U <user> -d soybean -f backend/src/main/resources/schema.sql
 
 > 管理员账号由 `DataInitializer` 在应用首次启动时自动播种，无需手动插入。
 
-### 3. 构建并启动
+### 3. 部署
+
+**推荐：CI 打包，服务器零构建负担**（镜像由 GitHub Actions 推送到 ghcr.io）：
+
+```bash
+# 确保服务器 docker-compose.yml 与仓库同步（含 image: ghcr.io/jingyuan9527/stellar:latest）
+git pull          # 若部署目录是 git clone，否则手动替换 docker-compose.yml
+docker compose pull && docker compose up -d
+```
+
+- 首次使用需到 GitHub Packages（`ghcr.io/jingyuan9527/stellar`）确认包可见性为 **Public**，否则 pull 报 401
+- 回滚：把 compose 中 `image: ...:latest` 改为 `:sha`（每次 CI 构建打 sha tag）再 `docker compose up -d`
+- **常见坑**：服务器 compose 未与仓库同步时会用旧 `image: stellar:latest`（无 ghcr 前缀）拉本地镜像名 → `pull access denied`，先 `git pull` 同步 compose 文件
+
+**兜底：服务器本地构建**（低内存服务器见 Dockerfile 头部注释）：
 
 ```bash
 docker compose up -d --build
