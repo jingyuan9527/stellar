@@ -67,7 +67,7 @@ class MemosRagServiceTest {
 
         assertEquals(2, hits.size());
         assertEquals("u-a", hits.get(0).uid());
-        assertEquals("https://memo.booksy.cf/m/u-a", hits.get(0).url());
+        assertEquals("https://memo.booksy.cf/memos/u-a", hits.get(0).url());
         assertEquals("标题A", hits.get(0).title());
         assertEquals("u-b", hits.get(1).uid());
         assertTrue(hits.get(0).score() > hits.get(1).score());

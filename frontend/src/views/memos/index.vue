@@ -287,6 +287,22 @@ const deletedOptions: SelectOption[] = [
   { label: '远端已删', value: 1 },
 ]
 
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** 命中关键词包 <mark> 高亮；无命中关键词时返回原文本 */
+function highlightContent(text: string, keyword: string) {
+  const words = keyword.trim().split(/[\s,，、;；]+/).filter(Boolean)
+  if (!words.length) return text
+  const pattern = new RegExp(`(${words.map(escapeRegExp).join('|')})`, 'gi')
+  return text.split(pattern).map((part) =>
+    words.some((w) => part.toLowerCase() === w.toLowerCase())
+      ? h('mark', { class: 'search-hit' }, part)
+      : part,
+  )
+}
+
 const allColumns: DataTableColumns<MemosNote> = [
   { type: 'selection', fixed: 'left' },
   { title: 'ID', key: 'id', width: 70 },
@@ -301,7 +317,7 @@ const allColumns: DataTableColumns<MemosNote> = [
         h(NIcon, { size: 14, style: `color:${color};vertical-align:-2px;margin-left:4px;flex-shrink:0` },
           { default: () => h(iconMap[ic]) })
       return h('span', { class: 'content-cell', title: row.content }, [
-        h('span', { class: 'content-text' }, row.content),
+        h('span', { class: 'content-text' }, highlightContent(row.content, query.keyword)),
         hasImage ? icon('image', '#f0a020') : null,
         hasLink ? icon('link', '#2080f0') : null,
       ])
@@ -473,8 +489,8 @@ onMounted(() => {
       <NCard title="笔记备份" size="small" class="table-card">
         <template #header-extra>
           <NSpace :size="8">
-            <NInput v-model:value="query.keyword" placeholder="搜索内容/UID/标签" clearable
-              style="width: 180px" @keyup.enter="handleSearch" />
+            <NInput v-model:value="query.keyword" placeholder="搜索内容/UID/标签，空格或逗号分隔多词" clearable
+              style="width: 240px" @keyup.enter="handleSearch" />
             <NSelect v-model:value="query.remoteDeleted" :options="deletedOptions" style="width: 120px" />
             <NButton type="primary" size="small" @click="handleSearch">查询</NButton>
           </NSpace>
@@ -674,6 +690,12 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.search-hit {
+  background: rgba(240, 160, 32, 0.28);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
 }
 :deep(.row-deleted) {
   opacity: 0.55;

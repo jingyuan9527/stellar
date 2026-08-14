@@ -1,6 +1,8 @@
 package com.stellar.memos.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.ai.service.AiChatService;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -528,6 +531,33 @@ class MemosServiceTest {
         assertEquals(1, vo.getRecords().size());
         assertEquals(List.of("a", "b"), vo.getRecords().get(0).getTags());
         assertEquals(1, vo.getTotal());
+    }
+
+    @Test
+    void page_多词keyword_按词AND匹配() {
+        // 纯 Mockito 下 lambda 列解析需先注册实体元数据（同 DashboardServiceTest 做法）
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), MemosNote.class);
+        when(memosNoteMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class)))
+                .thenReturn(new Page<>(1, 10, 0));
+
+        MemosQueryDTO q = new MemosQueryDTO();
+        q.setPageNum(1);
+        q.setPageSize(10);
+        q.setKeyword("git, ai");
+
+        service.page(q);
+
+        ArgumentCaptor<LambdaQueryWrapper<MemosNote>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(memosNoteMapper).selectPage(any(Page.class), captor.capture());
+        LambdaQueryWrapper<MemosNote> captured = captor.getValue();
+        // MP 3.5.7 参数惰性填充：先触发 getSqlSegment() 生成占位符，参数值才写入 map
+        String sql = captured.getSqlSegment();
+        // 分词后每个词都进入 like 参数（词间 AND；MP 的 like 值自带 % 通配符）
+        Map<String, Object> params = captured.getParamNameValuePairs();
+        assertTrue(sql.contains("LIKE"), "sql missing LIKE: " + sql);
+        assertTrue(sql.contains("AND"), "sql missing AND: " + sql);
+        assertTrue(params.containsValue("%git%"), "missing git: " + params);
+        assertTrue(params.containsValue("%ai%"), "missing ai: " + params);
     }
 
     @Test

@@ -11,6 +11,7 @@ import { useAiNotifyStore, type AiNotifyMessage } from '@/store/aiNotify'
 import type { AiModel, AiVideoHistory } from '@/types/api'
 import { formatTime } from '@/utils/format'
 import { useIsMobile } from '@/composables/useBreakpoint'
+import { useTaskFallback } from '@/composables/useTaskFallback'
 
 const message = useMessage()
 const aiNotifyStore = useAiNotifyStore()
@@ -24,6 +25,9 @@ const ratio = ref('16:9')
 const duration = ref('5')
 const creating = ref(false)
 const generating = ref(false)
+
+// 本次生成任务的历史行 id（SSE 断线兜底轮询用，成功/失败后复位）
+const pendingVideoId = ref<number | null>(null)
 
 // 历史
 const history = ref<AiVideoHistory[]>([])
@@ -194,6 +198,8 @@ async function handleCreate() {
     generating.value = true
     message.success('任务已创建，正在生成...')
     await refreshHistory()
+    // 新任务必在历史第一页第一条（创建时间倒序），快照其行 id 供兜底轮询匹配
+    pendingVideoId.value = history.value[0]?.id ?? null
   } catch {
     // 错误已由拦截器提示
   } finally {
@@ -215,6 +221,7 @@ async function handleDelete(taskId: number) {
 function onTaskNotify(msg: AiNotifyMessage) {
   if (disposed || msg.type !== 'video') return
   generating.value = false
+  pendingVideoId.value = null
   if (msg.status === 'completed') {
     message.success('视频生成完成')
     refreshHistory().then(() => {
@@ -225,6 +232,36 @@ function onTaskNotify(msg: AiNotifyMessage) {
     refreshHistory()
   }
 }
+
+// SSE 断线/通知丢失兜底：轮询检测到本次任务已结束（completed/failed）或超时后复位 loading
+function isVideoTaskSettled(): boolean {
+  if (pendingVideoId.value === null) return false
+  const row = history.value.find((h) => h.id === pendingVideoId.value)
+  return !!row && (row.status === 'completed' || row.status === 'failed')
+}
+
+async function handleGeneratingSettled(viaFallback: boolean) {
+  const rowId = pendingVideoId.value
+  pendingVideoId.value = null
+  await refreshHistory()
+  const row = rowId !== null ? history.value.find((h) => h.id === rowId) : undefined
+  if (row?.status === 'completed') {
+    message.success('视频生成完成')
+    openDrawer(row)
+  } else if (row?.status === 'failed') {
+    message.error(row.errorMsg || '视频生成失败')
+  } else {
+    message.info(viaFallback ? '生成任务已结束，请在历史中查看结果' : '生成任务已结束')
+  }
+}
+
+// 生成中：SSE 断线时低频轮询兜底，超时 15 分钟强制复位（SSE 正常时不干预）
+useTaskFallback({
+  generating,
+  isSettled: isVideoTaskSettled,
+  onSettled: handleGeneratingSettled,
+  timeoutMs: 15 * 60 * 1000,
+})
 
 let offNotify: (() => void) | null = null
 

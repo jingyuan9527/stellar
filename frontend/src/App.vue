@@ -2,6 +2,7 @@
 import { computed, watchEffect } from 'vue'
 import { darkTheme, zhCN, dateZhCN, type GlobalThemeOverrides } from 'naive-ui'
 import { useThemeStore } from '@/store/theme'
+import ErrorBoundary from '@/components/ErrorBoundary.vue'
 
 const themeStore = useThemeStore()
 
@@ -26,7 +27,9 @@ watchEffect(() => {
       <NDialogProvider>
         <NMessageProvider>
           <NNotificationProvider>
-            <RouterView />
+            <ErrorBoundary>
+              <RouterView />
+            </ErrorBoundary>
           </NNotificationProvider>
         </NMessageProvider>
       </NDialogProvider>

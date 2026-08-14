@@ -517,10 +517,19 @@ public class MemosService {
     public Page<MemosNoteVO> page(MemosQueryDTO query) {
         LambdaQueryWrapper<MemosNote> wrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(query.getKeyword())) {
-            String kw = query.getKeyword().trim();
-            wrapper.and(w -> w.like(MemosNote::getContent, kw)
-                    .or().like(MemosNote::getUid, kw)
-                    .or().like(MemosNote::getTags, kw));
+            // 全文搜索：支持空格/中英文逗号/顿号/分号分隔多词，词间 AND；
+            // 每个词命中 content/uid/tags 任一即可（如 "git ai" = 同时含 git 与 ai）
+            String[] words = query.getKeyword().trim().split("[\\s,，、;；]+");
+            wrapper.and(w -> {
+                for (String word : words) {
+                    if (word.isBlank()) {
+                        continue;
+                    }
+                    w.and(inner -> inner.like(MemosNote::getContent, word)
+                            .or().like(MemosNote::getUid, word)
+                            .or().like(MemosNote::getTags, word));
+                }
+            });
         }
         if (query.getRemoteDeleted() != null) {
             wrapper.eq(MemosNote::getRemoteDeleted, query.getRemoteDeleted());

@@ -21,6 +21,10 @@
         <java.version>21</java.version>
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
         <sa-token.version>1.38.0</sa-token.version>
+        <!-- JDK 21+ 默认禁止动态加载 Java agent（JEP 451）：Mockito inline mock maker / jacoco 均依赖 ByteBuddy agent，
+             必须显式允许 self-attach + 动态加载，否则全部 mock 测试报 "Could not self-attach to current VM"。
+             jacoco prepare-agent 默认 append=true，会在此值后追加 -javaagent 参数。 -->
+        <argLine>-XX:+EnableDynamicAgentLoading -Djdk.attach.allowAttachSelf=true</argLine>
     </properties>
 
     <dependencies>

@@ -6,6 +6,7 @@ import com.stellar.system.dto.LoginRequest;
 import com.stellar.system.dto.LoginResult;
 import com.stellar.enums.OperationType;
 import com.stellar.system.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,8 +23,8 @@ public class AuthController {
 
     @PostMapping("/login")
     @Log(title = "认证管理", type = OperationType.LOGIN)
-    public Result<LoginResult> login(@Valid @RequestBody LoginRequest request) {
-        return Result.success(authService.login(request));
+    public Result<LoginResult> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        return Result.success(authService.login(request, httpRequest));
     }
 
     @PostMapping("/logout")

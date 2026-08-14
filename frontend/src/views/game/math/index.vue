@@ -621,7 +621,7 @@ onBeforeUnmount(() => {
 }
 .rank-item {
   display: grid;
-  grid-template-columns: 40px 1fr auto auto auto auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto auto auto;
   gap: 12px;
   align-items: center;
   padding: 8px 12px;
@@ -636,7 +636,12 @@ onBeforeUnmount(() => {
   opacity: 0.6;
 }
 .rank-no.top { color: #f0a020; opacity: 1; }
-.rank-name { font-weight: 600; }
+.rank-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .rank-score { color: #18a058; font-weight: 600; }
 .rank-time { opacity: 0.7; }
 .rank-acc { opacity: 0.7; }
@@ -789,8 +794,10 @@ onBeforeUnmount(() => {
   .stats-grid { grid-template-columns: 1fr; }
   .answer-form { flex-direction: column; }
   .rank-item {
-    grid-template-columns: 32px 1fr auto auto;
+    grid-template-columns: 32px minmax(0, 1fr) auto auto;
     font-size: 12px;
+    gap: 8px;
+    padding: 6px 8px;
   }
   .rank-acc, .rank-date { display: none; }
 }

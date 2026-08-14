@@ -3,6 +3,7 @@ package com.stellar.system.controller;
 import com.stellar.system.dto.LoginRequest;
 import com.stellar.system.dto.LoginResult;
 import com.stellar.system.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,13 +14,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
 /**
- * {@link AuthController} 单测：login 透传返回 token，logout 调用服务。
+ * {@link AuthController} 单测：login 透传 request 返回 token，logout 调用服务。
  */
 @ExtendWith(MockitoExtension.class)
 class AuthControllerTest {
 
     @Mock
     AuthService authService;
+    @Mock
+    HttpServletRequest httpRequest;
 
     AuthController controller;
 
@@ -35,12 +38,12 @@ class AuthControllerTest {
         req.setPassword("123456");
         LoginResult result = new LoginResult();
         result.setToken("tk-1");
-        when(authService.login(req)).thenReturn(result);
+        when(authService.login(req, httpRequest)).thenReturn(result);
 
-        LoginResult r = controller.login(req).getData();
+        LoginResult r = controller.login(req, httpRequest).getData();
 
         assertEquals("tk-1", r.getToken());
-        verify(authService).login(req);
+        verify(authService).login(req, httpRequest);
     }
 
     @Test

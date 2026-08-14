@@ -12,6 +12,7 @@ import { useAiNotifyStore, type AiNotifyMessage } from '@/store/aiNotify'
 import type { AiModel, AiImageTask } from '@/types/api'
 import { formatTime } from '@/utils/format'
 import { useIsMobile } from '@/composables/useBreakpoint'
+import { useTaskFallback } from '@/composables/useTaskFallback'
 
 const message = useMessage()
 const authStore = useAuthStore()
@@ -26,6 +27,9 @@ const size = ref('1K')
 const ratio = ref('1:1')
 const creating = ref(false)
 const generating = ref(false)
+
+// 本次生成任务的 taskId（SSE 断线兜底轮询用，成功/失败后复位）
+const pendingTaskId = ref<number | null>(null)
 
 // 历史
 const history = ref<AiImageTask[]>([])
@@ -179,13 +183,14 @@ async function handleCreate() {
   }
   creating.value = true
   try {
-    await createAiImage({
+    const taskId = await createAiImage({
       modelId: modelId.value,
       prompt: prompt.value.trim(),
       size: size.value,
       ratio: ratio.value,
     })
     if (disposed) return
+    pendingTaskId.value = taskId
     generating.value = true
     message.success('任务已创建，正在生成...')
     await refreshHistory()
@@ -210,6 +215,7 @@ async function handleDelete(taskId: number) {
 function onTaskNotify(msg: AiNotifyMessage) {
   if (disposed || msg.type !== 'image') return
   generating.value = false
+  pendingTaskId.value = null
   if (msg.status === 'completed') {
     message.success('图片生成完成')
     refreshHistory().then(() => {
@@ -220,6 +226,36 @@ function onTaskNotify(msg: AiNotifyMessage) {
     refreshHistory()
   }
 }
+
+// SSE 断线/通知丢失兜底：轮询检测到本次任务已结束（completed/failed）或超时后复位 loading
+function isImageTaskSettled(): boolean {
+  if (pendingTaskId.value === null) return false
+  const row = history.value.find((h) => h.taskId === pendingTaskId.value)
+  return !!row && (row.status === 'completed' || row.status === 'failed')
+}
+
+async function handleGeneratingSettled(viaFallback: boolean) {
+  const taskId = pendingTaskId.value
+  pendingTaskId.value = null
+  await refreshHistory()
+  const row = taskId !== null ? history.value.find((h) => h.taskId === taskId) : undefined
+  if (row?.status === 'completed') {
+    message.success('图片生成完成')
+    openDrawer(row)
+  } else if (row?.status === 'failed') {
+    message.error(row.errorMsg || '图片生成失败')
+  } else {
+    message.info(viaFallback ? '生成任务已结束，请在历史中查看结果' : '生成任务已结束')
+  }
+}
+
+// 生成中：SSE 断线时低频轮询兜底，超时 5 分钟强制复位（SSE 正常时不干预）
+useTaskFallback({
+  generating,
+  isSettled: isImageTaskSettled,
+  onSettled: handleGeneratingSettled,
+  timeoutMs: 5 * 60 * 1000,
+})
 
 let offNotify: (() => void) | null = null
 

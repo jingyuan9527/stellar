@@ -78,6 +78,12 @@ stellar:
     loop-max-rounds: 3
     router-enabled: true
     router-simple-length: 12
+  # 登录爆破防护（AuthService）
+  security:
+    login-max-fail: 5
+    login-lock-minutes: 15
+    login-ip-max-attempts: 10
+    login-ip-window-minutes: 10
 
 logging:
   level:
