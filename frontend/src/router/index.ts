@@ -177,7 +177,7 @@ export const routes: RouteRecordRaw[] = [
         path: 'memos',
         name: 'Memos',
         component: () => import('@/views/memos/index.vue'),
-        meta: { title: '备忘同步', icon: 'sync', order: 7 },
+        meta: { title: 'Memos 管理', icon: 'sync', order: 7 },
       },
       {
         path: 'system',

@@ -4,9 +4,9 @@ import MarkdownIt from 'markdown-it'
 import {
   NCard, NForm, NFormItem, NInput, NButton, NSpace, NDataTable, NTag,
   NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem, NIcon, NSelect,
-  NAlert, useMessage,
+  NAlert, NDropdown, NModal, useMessage,
 } from 'naive-ui'
-import type { DataTableColumns, SelectOption } from 'naive-ui'
+import type { DataTableColumns, SelectOption, DropdownOption } from 'naive-ui'
 import {
   getMemosConfig, saveMemosConfig, pullMemos, tagMemos, pushMemosTags,
   getMemosPage, getMemosStats, getMemosWebhookConfig, saveMemosWebhookSecret,
@@ -21,6 +21,9 @@ import { useIsMobile } from '@/composables/useBreakpoint'
 const message = useMessage()
 const isMobile = useIsMobile()
 const drawerWidth = computed(() => (isMobile.value ? '100%' : 660))
+// 撑满视口：header 56px + 多标签页 40px + 内容区上下 padding（桌面 16×2 / 移动 12×2）
+// 不用 height:100% 链（NLayout 滚动容器高度链不可靠），直接按视口计算，表格内部滚动
+const pageHeight = computed(() => (isMobile.value ? 'calc(100vh - 120px)' : 'calc(100vh - 128px)'))
 
 // 详情原文 Markdown 渲染（html=false 防 XSS，linkify 自动识别裸链接）
 const markdown = new MarkdownIt({ html: false, linkify: true })
@@ -107,12 +110,26 @@ async function copyWebhookUrl() {
   }
 }
 
-// ===== 三个动作按钮 =====
+// ===== 动作按钮 =====
 
 const pulling = ref(false)
 const tagging = ref(false)
 const pushing = ref(false)
 const rebuilding = ref(false)
+
+// 设置抽屉 / AI 打标签弹窗
+const settingShow = ref(false)
+const tagShow = ref(false)
+
+function openTagModal() {
+  if (!checkedKeys.value.length) return
+  tagShow.value = true
+}
+
+async function confirmTag() {
+  tagShow.value = false
+  await handleTag()
+}
 
 async function handlePull() {
   pulling.value = true
@@ -206,6 +223,20 @@ async function handleRebuildRag() {
   } finally {
     rebuilding.value = false
   }
+}
+
+// ===== 更多操作（下拉） =====
+
+const moreOptions: DropdownOption[] = [
+  { label: '同步标签到 Memos', key: 'push' },
+  { label: '重建RAG索引', key: 'rebuild' },
+  { label: '设置', key: 'setting' },
+]
+
+function handleMoreSelect(key: string) {
+  if (key === 'push') void handlePushTags()
+  else if (key === 'rebuild') void handleRebuildRag()
+  else if (key === 'setting') settingShow.value = true
 }
 
 // ===== RAG 索引状态（是否已构建：已向量化数/总数 + 上次全量重建时间）=====
@@ -385,81 +416,50 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="memos-page">
-    <NSpace vertical :size="16">
-      <NCard title="Memos 配置" size="small">
-        <NForm label-placement="left" :label-width="90" :show-feedback="false">
-          <NFormItem label="域名">
-            <NInput v-model:value="config.baseUrl" placeholder="https://memo.booksy.cf" :disabled="configLoading" />
-          </NFormItem>
-          <NFormItem label="Token">
-            <NInput v-model:value="config.token" type="password" show-password-on="click"
-              :placeholder="config.tokenConfigured ? '已配置（留空不修改）' : '请输入 Memos API Token'" :disabled="configLoading" />
-          </NFormItem>
-          <NFormItem label="打标提示词">
-            <NInput v-model:value="config.promptTemplate" type="textarea" :rows="4"
-              placeholder="支持 {{content}} 占位符替换笔记内容" :disabled="configLoading" />
-          </NFormItem>
-          <NFormItem label=" ">
-            <NButton type="primary" :loading="configLoading" @click="handleSaveConfig">保存配置</NButton>
-          </NFormItem>
-        </NForm>
-</NCard>
-
-      <NCard title="Webhook 实时同步" size="small">
-        <NForm label-placement="left" :label-width="90" :show-feedback="false">
-          <NFormItem label="回调地址">
-            <NSpace :size="8" style="width: 100%">
-              <NInput :value="webhookUrl" readonly></NInput>
-              <NButton size="small" :disabled="!webhookUrl" @click="copyWebhookUrl">复制</NButton>
-            </NSpace>
-          </NFormItem>
-          <NFormItem label="签名密钥">
-            <NInput v-model:value="webhookSecret" type="password" show-password-on="click"
-              :placeholder="webhookSecretConfigured ? '已配置（留空不修改）' : '请输入 webhook 签名密钥'" />
-          </NFormItem>
-          <NFormItem label=" ">
-            <NButton type="primary" :loading="webhookSaving" :disabled="!webhookSecret.trim()"
-              @click="handleSaveWebhookSecret">保存密钥</NButton>
-          </NFormItem>
-        </NForm>
-        <NAlert type="info" :bordered="false">
-          在 Memos 设置 → 我的 Webhooks 中新建回调：URL 填上面的回调地址，创建后复制签名密钥（whsec_ 开头）填到这里保存。
-          此后 Memos 创建/更新/删除笔记时实时推送到本地，与「立即同步」并行、互不影响。
-        </NAlert>
-      </NCard>
-
-      <NCard title="同步操作" size="small">
-        <template #header-extra>
-          <NSpace :size="8">
-            <NTag v-for="s in statTags" :key="s.label" size="small" type="info">
-              {{ s.label }} {{ s.value }}
-            </NTag>
-          </NSpace>
-        </template>
-        <NSpace vertical :size="12">
-        <NSpace :size="12" wrap>
+  <div class="memos-page" :style="{ height: pageHeight }">
+      <NCard :bordered="false" class="action-bar">
+        <div class="bar-row">
+          <NSpace :size="8" wrap class="bar-actions">
             <NButton type="primary" :loading="pulling" @click="handlePull">
               <template #icon><NIcon><component :is="iconMap.sync" /></NIcon></template>
               立即同步
             </NButton>
-            <NSpace :size="8" align="center">
-              <NSelect v-model:value="selectedProviderId" :options="providerOptions" placeholder="供应商"
-                size="small" :loading="modelLoading" style="width: 140px" clearable
-                :disabled="providerOptions.length === 0" @update:value="handleProviderChange" />
-              <NSelect v-model:value="selectedModelId" :options="modelOptions" placeholder="AI 模型"
-                size="small" style="width: 200px" clearable
-                :disabled="modelOptions.length === 0" />
-            </NSpace>
-            <NButton type="info" :loading="tagging" :disabled="checkedKeys.length === 0" @click="handleTag">
+            <NButton type="info" :loading="tagging" :disabled="checkedKeys.length === 0" @click="openTagModal">
               AI 打标签<template v-if="checkedKeys.length">({{ checkedKeys.length }})</template>
             </NButton>
-            <NButton type="warning" :loading="pushing" @click="handlePushTags">同步标签到 Memos</NButton>
-            <NButton type="tertiary" :loading="rebuilding" @click="handleRebuildRag">
-              重建RAG索引
-            </NButton>
+
+            <template v-if="isMobile">
+              <!-- 移动端空间不足：低频动作收进「更多」 -->
+              <NDropdown :options="moreOptions" trigger="click" @select="handleMoreSelect">
+                <NButton :loading="pushing || rebuilding" :disabled="pushing || rebuilding">
+                  … 更多
+                </NButton>
+              </NDropdown>
+            </template>
+            <template v-else>
+              <!-- 桌面平铺全部动作，设置归入动作组（中性样式），右侧只留数据状态 -->
+              <NButton :loading="pushing" @click="handlePushTags">同步标签到 Memos</NButton>
+              <NButton :loading="rebuilding" @click="handleRebuildRag">重建RAG索引</NButton>
+              <NDivider vertical style="height: 20px; margin: 0 2px" />
+              <NButton quaternary @click="settingShow = true">
+                <template #icon><NIcon><component :is="iconMap.settings" /></NIcon></template>
+                设置
+              </NButton>
+            </template>
+          </NSpace>
+
+          <NSpace :size="8" align="center" wrap class="bar-info">
+            <template v-if="isMobile">
+              <NTag size="tiny" type="info" :bordered="false">总数 {{ stats.total }}</NTag>
+              <NTag size="tiny" type="warning" :bordered="false">待写回 {{ stats.pendingPush }}</NTag>
+            </template>
+            <template v-else>
+              <NTag v-for="s in statTags" :key="s.label" size="tiny" type="info" :bordered="false">
+                {{ s.label }} {{ s.value }}
+              </NTag>
+            </template>
             <template v-if="ragStatus">
-              <NTag size="small" :type="ragStatus.pending === 0 ? 'success' : 'warning'" :bordered="false">
+              <NTag size="tiny" :type="ragStatus.pending === 0 ? 'success' : 'warning'" :bordered="false">
                 RAG索引 {{ ragStatus.embedded }}/{{ ragStatus.total }}
               </NTag>
               <span v-if="ragStatus.lastRebuildAt" class="rag-status-time">
@@ -467,15 +467,10 @@ onMounted(() => {
               </span>
             </template>
           </NSpace>
-          <NAlert type="info" :bordered="false">
-            立即同步：全量拉取远端笔记备份到本地，远端已删除的笔记在本地标记删除（不删数据）。
-            勾选笔记后选供应商/模型（留空用默认 TEXT 模型），点「AI 打标签」：AI 生成标签（与现有标签合并），打标成功后自动写回远端；写回失败的笔记保持待写回状态，可点「同步标签到 Memos」手动重试。
-            笔记同步后自动向量化供 AI 聊天 RAG 检索（登录后问自己的笔记）；「重建RAG索引」用于新增向量化失败的笔记或更换向量模型后全量重算。
-          </NAlert>
-        </NSpace>
+        </div>
       </NCard>
 
-      <NCard title="笔记备份" size="small">
+      <NCard title="笔记备份" size="small" class="table-card">
         <template #header-extra>
           <NSpace :size="8">
             <NInput v-model:value="query.keyword" placeholder="搜索内容/UID/标签" clearable
@@ -486,10 +481,87 @@ onMounted(() => {
         </template>
         <NDataTable :columns="columns" :data="tableData" :loading="loading" :pagination="pagination"
           :row-key="(row: MemosNote) => row.id" v-model:checked-row-keys="checkedKeys"
-          :row-props="rowProps"
+          :row-props="rowProps" flex-height
           :scroll-x="isMobile ? 900 : 1180" remote striped size="small" />
       </NCard>
-    </NSpace>
+  </div>
+
+    <!-- 设置抽屉：同步配置 + Webhook 配置（低频，收进弹层） -->
+    <NDrawer v-model:show="settingShow" :width="drawerWidth">
+      <NDrawerContent title="Memos 设置" :native-scrollbar="false" closable>
+        <NSpace vertical :size="16">
+          <NCard title="同步配置" size="small">
+            <NForm label-placement="left" :label-width="90" :show-feedback="false">
+              <NFormItem label="域名">
+                <NInput v-model:value="config.baseUrl" placeholder="https://memo.booksy.cf" :disabled="configLoading" />
+              </NFormItem>
+              <NFormItem label="Token">
+                <NInput v-model:value="config.token" type="password" show-password-on="click"
+                  :placeholder="config.tokenConfigured ? '已配置（留空不修改）' : '请输入 Memos API Token'" :disabled="configLoading" />
+              </NFormItem>
+              <NFormItem label="打标提示词">
+                <NInput v-model:value="config.promptTemplate" type="textarea" :rows="4"
+                  placeholder="支持 \{\{content\}\} 占位符替换笔记内容" :disabled="configLoading" />
+              </NFormItem>
+              <NFormItem label=" ">
+                <NButton type="primary" :loading="configLoading" @click="handleSaveConfig">保存配置</NButton>
+              </NFormItem>
+            </NForm>
+          </NCard>
+
+          <NCard title="Webhook 实时同步" size="small">
+            <NForm label-placement="left" :label-width="90" :show-feedback="false">
+              <NFormItem label="回调地址">
+                <NSpace :size="8" style="width: 100%">
+                  <NInput :value="webhookUrl" readonly></NInput>
+                  <NButton size="small" :disabled="!webhookUrl" @click="copyWebhookUrl">复制</NButton>
+                </NSpace>
+              </NFormItem>
+              <NFormItem label="签名密钥">
+                <NInput v-model:value="webhookSecret" type="password" show-password-on="click"
+                  :placeholder="webhookSecretConfigured ? '已配置（留空不修改）' : '请输入 webhook 签名密钥'" />
+              </NFormItem>
+              <NFormItem label=" ">
+                <NButton type="primary" :loading="webhookSaving" :disabled="!webhookSecret.trim()"
+                  @click="handleSaveWebhookSecret">保存密钥</NButton>
+              </NFormItem>
+            </NForm>
+            <NAlert type="info" :bordered="false">
+              在 Memos 设置 → 我的 Webhooks 中新建回调：URL 填上面的回调地址，创建后复制签名密钥（whsec_ 开头）填到这里保存。
+              此后 Memos 创建/更新/删除笔记时实时推送到本地，与「立即同步」并行、互不影响。
+            </NAlert>
+          </NCard>
+        </NSpace>
+      </NDrawerContent>
+    </NDrawer>
+
+    <!-- AI 打标签弹窗：勾选笔记后点工具条按钮弹出 -->
+    <NModal v-model:show="tagShow" preset="card" title="AI 打标签" :style="{ width: '480px', maxWidth: '90vw' }">
+      <NSpace vertical :size="16">
+        <NAlert type="info" :bordered="false">
+          已勾选 <b>{{ checkedKeys.length }}</b> 条笔记。AI 生成标签并与现有标签合并，成功后自动写回远端；供应商/模型留空则用默认 TEXT 模型。
+        </NAlert>
+        <div class="tag-model-row">
+          <div class="tag-model-label">供应商</div>
+          <NSelect v-model:value="selectedProviderId" :options="providerOptions" placeholder="供应商"
+            size="small" :loading="modelLoading" clearable
+            :disabled="providerOptions.length === 0" @update:value="handleProviderChange" />
+        </div>
+        <div class="tag-model-row">
+          <div class="tag-model-label">AI 模型</div>
+          <NSelect v-model:value="selectedModelId" :options="modelOptions" placeholder="AI 模型"
+            size="small" clearable :disabled="modelOptions.length === 0" />
+        </div>
+      </NSpace>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="tagShow = false">取消</NButton>
+          <NButton type="primary" :loading="tagging" :disabled="checkedKeys.length === 0" @click="confirmTag">
+            开始打标签
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
 
     <NDrawer v-model:show="drawerOpen" :width="drawerWidth">
       <NDrawerContent title="笔记详情" closable>
@@ -523,10 +595,72 @@ onMounted(() => {
         </template>
       </NDrawerContent>
     </NDrawer>
-  </div>
 </template>
 
 <style scoped>
+/* 撑满视口：工具条固定、表格卡占剩余高度，页面本身不滚动（表格内部滚动） */
+.memos-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.action-bar {
+  flex: none;
+}
+
+.table-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Naive NCard 内容区类名是 n-card-content（注意是单下划线，不是 n-card__content） */
+.table-card :deep(.n-card-content) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* flex-height 表格：作为 flex item 填充父容器；min-height 兜底，即使高度链断裂也至少显示 200px 数据行 */
+.table-card :deep(.n-data-table) {
+  flex: 1;
+  min-height: 200px;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bar-actions {
+  flex-shrink: 0;
+}
+
+.bar-info {
+  margin-left: auto;
+}
+
+.tag-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-model-label {
+  font-size: 13px;
+  opacity: 0.8;
+  white-space: nowrap;
+  width: 60px;
+  text-align: right;
+}
+
 .rag-status-time {
   font-size: 12px;
   opacity: 0.6;
