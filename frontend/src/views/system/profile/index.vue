@@ -174,7 +174,7 @@ onMounted(() => {
 
 <template>
   <div class="profile-admin-page">
-    <NCard title="个人资料" :bordered="false">
+    <NCard title="个人主页" :bordered="false">
       <NSpace vertical :size="16" style="max-width: 640px">
         <NFormItem label="昵称">
           <NInput v-model:value="form.nickname" placeholder="展示昵称" />

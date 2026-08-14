@@ -31,7 +31,7 @@ function renderIcon(name: string) {
 }
 
 const userOptions: DropdownOption[] = [
-  { label: '用户资料', key: 'profile', icon: () => renderIcon('person') },
+  { label: '账号安全', key: 'profile', icon: () => renderIcon('person') },
   { label: '修改密码', key: 'change-password', icon: () => renderIcon('lock') },
   { type: 'divider', key: 'd1' },
   { label: '退出登录', key: 'logout', icon: () => renderIcon('logout') },

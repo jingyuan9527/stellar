@@ -246,7 +246,7 @@ onBeforeUnmount(() => {
       <template #aside>
         <NSpace vertical :size="16">
           <NAlert v-if="models.length === 0" type="warning" :bordered="false">
-            暂无可用的图片模型，请联系管理员在 系统管理 → AI 配置 中添加 IMAGE 类型模型。
+            暂无可用的图片模型，请联系管理员在 AI创作 → 管理 → AI 配置 中添加 IMAGE 类型模型。
           </NAlert>
 
           <div>

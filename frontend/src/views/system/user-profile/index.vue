@@ -12,7 +12,7 @@ const user = computed(() => authStore.userInfo)
 
 <template>
   <div class="profile-page">
-    <NCard title="用户资料" :bordered="false">
+    <NCard title="账号安全" :bordered="false">
       <div class="profile-header">
         <NAvatar round size="large" :color="themeStore.primaryColor">
           {{ user?.nickname?.charAt(0) || 'U' }}

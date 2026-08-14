@@ -296,7 +296,7 @@ onMounted(() => {
         <NButton type="primary" @click="startAddKb">新增知识库</NButton>
       </template>
       <NAlert v-if="embeddingModels.length === 0" type="warning" :bordered="false" style="margin-bottom: 12px">
-        未配置 EMBEDDING 类型模型，请在 系统管理 → AI 配置 中添加并向量化。无配置时文档可分块入库但无法语义检索。
+        未配置 EMBEDDING 类型模型，请在 AI创作 → 管理 → AI 配置 中添加并向量化。无配置时文档可分块入库但无法语义检索。
       </NAlert>
       <NDataTable
         :columns="kbColumns"
