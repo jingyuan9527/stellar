@@ -87,7 +87,7 @@ function handleReset(id: string) {
     v-model:show="show"
     preset="card"
     title="模板编辑"
-    :style="{ width: '680px' }"
+    :style="{ width: '680px', maxWidth: '90vw' }"
   >
     <template #footer>
       <NButton @click="show = false">关闭</NButton>
@@ -134,7 +134,7 @@ function handleReset(id: string) {
     v-model:show="formShow"
     preset="card"
     :title="editing?.id ? '编辑模板' : '新增模板'"
-    :style="{ width: '680px' }"
+    :style="{ width: '680px', maxWidth: '90vw' }"
   >
     <NSpace v-if="editing" vertical :size="16">
       <div>

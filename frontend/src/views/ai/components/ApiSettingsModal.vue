@@ -84,7 +84,7 @@ function handleSave() {
     v-model:show="show"
     preset="card"
     title="API 设置"
-    :style="{ width: '560px' }"
+    :style="{ width: '560px', maxWidth: '90vw' }"
   >
     <NForm label-placement="top">
       <NFormItem label="接口地址">

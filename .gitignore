@@ -42,3 +42,6 @@ desktop.ini
 # ===== 本机 AI 工具运行态（.reasonix 桌面会话 / .workbuddy 记忆）=====
 .reasonix/
 .workbuddy/
+
+# ===== pnpm 本地 store（误入工作区）=====
+.pnpm-store/

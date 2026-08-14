@@ -522,7 +522,7 @@ onBeforeUnmount(() => {
             <span class="detail-icon">
               <span v-if="d.isCorrect === true">✅</span>
               <span v-else-if="d.isCorrect === false">❌</span>
-              <span v-else>⏸️</span>
+              <span v-else>—</span>
             </span>
           </div>
         </div>

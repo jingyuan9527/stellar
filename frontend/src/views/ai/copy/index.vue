@@ -185,7 +185,7 @@ async function refreshHistory() {
 
 async function generate() {
   if (!topic.value.trim()) {
-    message.warning('请输入视频主题')
+    message.warning('请输入文案主题')
     return
   }
   const tpl = templates.value.find((t) => t.id === templateId.value)
@@ -296,12 +296,12 @@ onMounted(() => {
           </NAlert>
 
           <div>
-            <div class="field-label">视频主题</div>
+            <div class="field-label">文案主题</div>
             <NInput
               v-model:value="topic"
               type="textarea"
               :autosize="{ minRows: 2, maxRows: 4 }"
-              placeholder="输入视频主题"
+              placeholder="输入要创作的主题，如：周末露营穿搭分享"
             />
           </div>
 

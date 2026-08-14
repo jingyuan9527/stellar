@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import {
-  NSpace, NButton, NInput, NSelect, NEmpty, NAlert, NPopconfirm, NSpin, useMessage,
+  NSpace, NButton, NInput, NSelect, NEmpty, NAlert, NPopconfirm, NPopover, NSpin, useMessage,
 } from 'naive-ui'
 import { useAuthStore } from '@/store/auth'
 import { useIsMobile } from '@/composables/useBreakpoint'
@@ -18,6 +18,8 @@ const authStore = useAuthStore()
 const message = useMessage()
 const isMobile = useIsMobile()
 const sessionCollapsed = ref(true)
+// 乐观消息临时 id（负数，避免与后端真实 id 冲突导致 v-for 重复 key）
+let tmpMsgId = 0
 let disposed = false
 
 // ===== 会话 =====
@@ -231,7 +233,7 @@ async function send() {
   // 乐观：本地先追加 user + 空 assistant
   const now = new Date().toISOString()
   messages.value.push({
-    id: 0, sessionId: currentSessionId.value, role: 'user', content: text,
+    id: --tmpMsgId, sessionId: currentSessionId.value, role: 'user', content: text,
     tokens: null, createTime: now, attachmentType: null, attachmentFileId: null,
     attachmentUrl: null, ragRefs: null, refs: null, feedbackValue: null,
   })
@@ -261,7 +263,7 @@ async function send() {
     // 流式完成：先把 assistant 乐观加入消息列表，再关 streaming 行——
     // 让回答从 streaming 行无缝衔接到消息流，避免“消失再重现”的闪烁
     messages.value.push({
-      id: 0,
+      id: --tmpMsgId,
       sessionId: currentSessionId.value!,
       role: 'assistant',
       content: streamingContent.value,
@@ -387,39 +389,82 @@ onMounted(() => {
             style="width: 160px"
           />
         </div>
-        <div v-if="authStore.isLogin" class="header-field">
-          <span class="field-label">知识库</span>
-          <NSelect
-            v-model:value="kbId"
-            :options="kbOptions"
-            size="small"
-            style="width: 180px"
-            clearable
-            placeholder="不关联"
-          />
-        </div>
-        <div v-if="authStore.isLogin && modelOptions.length > 0" class="header-field">
-          <span class="field-label">模型</span>
-          <NSelect
-            v-model:value="modelId"
-            :options="modelOptions"
-            size="small"
-            style="width: 200px"
-            clearable
-          />
-        </div>
-        <div v-if="authStore.isLogin" class="header-field">
-          <span class="field-label">TTS音色</span>
-          <NSelect
-            v-model:value="ttsVoice"
-            :options="chatVoiceOptions"
-            size="small"
-            style="width: 160px"
-            clearable
-            placeholder="按系统开关"
-          />
-        </div>
-        <span class="header-hint">人设/知识库将用于新对话</span>
+        <!-- 桌面端：设置项平铺 -->
+        <template v-if="!isMobile">
+          <div v-if="authStore.isLogin" class="header-field">
+            <span class="field-label">知识库</span>
+            <NSelect
+              v-model:value="kbId"
+              :options="kbOptions"
+              size="small"
+              style="width: 180px"
+              clearable
+              placeholder="不关联"
+            />
+          </div>
+          <div v-if="authStore.isLogin && modelOptions.length > 0" class="header-field">
+            <span class="field-label">模型</span>
+            <NSelect
+              v-model:value="modelId"
+              :options="modelOptions"
+              size="small"
+              style="width: 200px"
+              clearable
+            />
+          </div>
+          <div v-if="authStore.isLogin" class="header-field">
+            <span class="field-label">TTS音色</span>
+            <NSelect
+              v-model:value="ttsVoice"
+              :options="chatVoiceOptions"
+              size="small"
+              style="width: 160px"
+              clearable
+              placeholder="按系统开关"
+            />
+          </div>
+          <span class="header-hint">人设/知识库将用于新对话</span>
+        </template>
+        <!-- 移动端：登录用户的设置项收进弹层，避免头部堆叠 4 行挤占消息区 -->
+        <template v-else>
+          <NPopover v-if="authStore.isLogin" trigger="click" placement="bottom-end" style="width: 260px">
+            <template #trigger>
+              <NButton size="small" secondary>设置</NButton>
+            </template>
+            <div class="mobile-settings">
+              <div class="header-field">
+                <span class="field-label">知识库</span>
+                <NSelect
+                  v-model:value="kbId"
+                  :options="kbOptions"
+                  size="small"
+                  clearable
+                  placeholder="不关联"
+                />
+              </div>
+              <div v-if="modelOptions.length > 0" class="header-field">
+                <span class="field-label">模型</span>
+                <NSelect
+                  v-model:value="modelId"
+                  :options="modelOptions"
+                  size="small"
+                  clearable
+                />
+              </div>
+              <div class="header-field">
+                <span class="field-label">TTS音色</span>
+                <NSelect
+                  v-model:value="ttsVoice"
+                  :options="chatVoiceOptions"
+                  size="small"
+                  clearable
+                  placeholder="按系统开关"
+                />
+              </div>
+              <p class="mobile-hint">人设/知识库将用于新对话</p>
+            </div>
+          </NPopover>
+        </template>
       </header>
 
       <div ref="messageListRef" class="message-list">
@@ -628,6 +673,27 @@ onMounted(() => {
   font-size: 12px;
   opacity: 0.5;
 }
+
+/* 移动端设置弹层内字段纵向排列 */
+.mobile-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mobile-settings .header-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.mobile-settings :deep(.n-base-selection) {
+  width: 100% !important;
+}
+.mobile-hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.5;
+}
 .message-list {
   flex: 1;
   overflow-y: auto;
@@ -781,9 +847,6 @@ onMounted(() => {
   .session-panel {
     width: 100%;
     max-height: 200px;
-  }
-  .session-panel.collapsed {
-    max-height: none;
   }
   .chat-header {
     gap: 8px;

@@ -218,7 +218,7 @@ onMounted(loadData)
       v-model:show="editShow"
       preset="card"
       :title="editing?.id ? '编辑模板' : '新增模板'"
-      :style="{ width: '680px' }"
+      :style="{ width: '680px', maxWidth: '90vw' }"
     >
       <NSpace v-if="editing" vertical :size="16">
         <NFormItem label="名称">

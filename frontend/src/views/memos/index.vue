@@ -240,7 +240,7 @@ const statTags = computed(() => [
 
 const query = reactive({
   keyword: '',
-  remoteDeleted: null as number | null,
+  remoteDeleted: -1 as number,
   pageNum: 1,
   pageSize: 10,
 })
@@ -251,7 +251,7 @@ const total = ref(0)
 const checkedKeys = ref<number[]>([])
 
 const deletedOptions: SelectOption[] = [
-  { label: '全部', value: null as unknown as string },
+  { label: '全部', value: -1 },
   { label: '存活', value: 0 },
   { label: '远端已删', value: 1 },
 ]
@@ -348,7 +348,7 @@ async function loadData() {
       pageNum: query.pageNum,
       pageSize: query.pageSize,
       keyword: query.keyword || undefined,
-      remoteDeleted: query.remoteDeleted ?? undefined,
+      remoteDeleted: query.remoteDeleted === -1 ? undefined : query.remoteDeleted,
     })
     tableData.value = r.records
     total.value = r.total

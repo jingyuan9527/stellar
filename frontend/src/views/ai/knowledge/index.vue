@@ -338,7 +338,7 @@ onMounted(() => {
       v-model:show="kbEditShow"
       preset="card"
       :title="kbEditing?.id ? '编辑知识库' : '新增知识库'"
-      :style="{ width: '560px' }"
+      :style="{ width: '560px', maxWidth: '90vw' }"
     >
       <NSpace v-if="kbEditing" vertical :size="16">
         <NFormItem label="名称">
@@ -368,7 +368,7 @@ onMounted(() => {
       v-model:show="docShow"
       preset="card"
       title="添加文档"
-      :style="{ width: '640px' }"
+      :style="{ width: '640px', maxWidth: '90vw' }"
     >
       <NSpace vertical :size="16">
         <NFormItem label="来源名称">

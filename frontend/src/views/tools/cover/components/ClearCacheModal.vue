@@ -40,7 +40,7 @@ function handleOk() {
     v-model:show="show"
     preset="card"
     title="清空缓存"
-    :style="{ width: '440px' }"
+    :style="{ width: '440px', maxWidth: '90vw' }"
   >
     <p style="margin-bottom: 12px">选择要清空的数据（默认全选）：</p>
     <NCheckboxGroup v-model:value="checked">

@@ -14,11 +14,12 @@ import { useIsMobile } from '@/composables/useBreakpoint'
 
 const message = useMessage()
 const isMobile = useIsMobile()
+const drawerWidth = computed(() => (isMobile.value ? '100%' : 520))
 
 const query = reactive<SysLogQuery>({
   module: '',
   operator: '',
-  status: null,
+  status: -1,
   startTime: null,
   endTime: null,
   pageNum: 1,
@@ -32,7 +33,7 @@ const tableData = ref<SysLog[]>([])
 const total = ref(0)
 
 const statusOptions: SelectOption[] = [
-  { label: '全部', value: null as unknown as number },
+  { label: '全部', value: -1 },
   { label: '成功', value: 1 },
   { label: '失败', value: 0 },
 ]
@@ -102,6 +103,11 @@ const pagination = reactive({
   },
 })
 
+/** -1 为「全部」哨兵值，提交时转回 null */
+function buildQuery(): SysLogQuery {
+  return { ...query, status: query.status === -1 ? null : query.status }
+}
+
 async function loadData() {
   loading.value = true
   try {
@@ -112,7 +118,7 @@ async function loadData() {
       query.startTime = null
       query.endTime = null
     }
-    const res = await getLogPage(query)
+    const res = await getLogPage(buildQuery())
     tableData.value = res.records
     total.value = res.total
     pagination.itemCount = res.total
@@ -132,7 +138,7 @@ function handleSearch() {
 function handleReset() {
   query.module = ''
   query.operator = ''
-  query.status = null
+  query.status = -1
   timeRange.value = null
   handleSearch()
 }
@@ -165,7 +171,7 @@ async function handleExport() {
       query.startTime = null
       query.endTime = null
     }
-    const blob = await exportLogs(query)
+    const blob = await exportLogs(buildQuery())
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -199,7 +205,7 @@ onMounted(loadData)
           <NSelect v-model:value="query.status" :options="statusOptions" style="width: 110px" />
         </NFormItem>
         <NFormItem label="时间范围">
-          <NDatePicker v-model:value="timeRange" type="datetimerange" clearable style="width: 360px" />
+          <NDatePicker v-model:value="timeRange" type="datetimerange" clearable style="width: 100%; max-width: 360px" />
         </NFormItem>
         <NSpace>
           <NButton type="primary" @click="handleSearch">
@@ -231,7 +237,7 @@ onMounted(loadData)
       />
     </NCard>
 
-    <NDrawer v-model:show="detailShow" :width="520" placement="right">
+    <NDrawer v-model:show="detailShow" :width="drawerWidth" placement="right">
       <NDrawerContent title="日志详情" :native-scrollbar="false" closable>
         <NDescriptions v-if="detail" :column="1" label-placement="left" bordered size="small">
           <NDescriptionsItem label="ID">{{ detail.id }}</NDescriptionsItem>
