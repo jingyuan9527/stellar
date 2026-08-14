@@ -4,6 +4,7 @@ import com.stellar.interceptor.AuthInterceptor;
 import com.stellar.interceptor.RateLimitInterceptor;
 import com.stellar.interceptor.RequestLogInterceptor;
 import com.stellar.infra.RateLimitService;
+import com.stellar.monitor.HttpRequestMetrics;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,6 +19,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class SaTokenConfig implements WebMvcConfigurer {
 
     private final RateLimitService rateLimitService;
+    private final HttpRequestMetrics httpRequestMetrics;
 
     /**
      * 鉴权拦截器：默认所有接口要求登录，仅标注 {@link com.stellar.common.annotation.PublicAccess}
@@ -27,7 +29,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         // 请求日志 + traceId：最先执行（preHandle 设 traceId，afterCompletion 记耗时）
-        registry.addInterceptor(new RequestLogInterceptor())
+        registry.addInterceptor(new RequestLogInterceptor(httpRequestMetrics))
                 .addPathPatterns("/**");
         // 鉴权：默认全拦，仅 @PublicAccess 放行
         registry.addInterceptor(new AuthInterceptor())

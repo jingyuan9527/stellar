@@ -588,3 +588,63 @@ export interface MemosStats {
   untagged: number
   pendingPush: number
 }
+
+export interface MonitorOverview {
+  jvm: {
+    heapUsed: number
+    heapMax: number
+    heapInit: number
+    nonHeapUsed: number
+    nonHeapMax: number
+    youngGcCount: number
+    youngGcTimeMs: number
+    fullGcCount: number
+    fullGcTimeMs: number
+threadActive: number
+    threadDaemon: number
+    threadPeak: number
+    loadedClasses: number
+    gcCollectors: {
+      name: string
+      count: number
+      timeMs: number
+      avgTimeMs: number
+    }[]
+    keyJvmArgs: {
+      name: string
+      value: string
+    }[]
+  }
+  system: {
+    processCpuUsage: number
+    systemCpuUsage: number
+    diskTotal: number
+    diskFree: number
+    fileOpenDescriptors: number | null
+    fileMaxDescriptors: number | null
+  }
+  http: {
+    totalRequests: number
+    status2xx: number
+    status4xx: number
+    status5xx: number
+    maxCostMs: number
+    avgCostMs: number
+    activeRequests: number
+  }
+  hikariPool: {
+    idleConnections: number
+    activeConnections: number
+    pendingConnections: number
+    maximumPoolSize: number
+  }
+  app: {
+    upTimeSeconds: number
+    startCostMs: number
+    startTimeMillis: number
+  }
+  health: {
+    status: string
+    components: Record<string, string>
+  }
+}

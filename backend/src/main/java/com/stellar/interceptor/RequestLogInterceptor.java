@@ -1,7 +1,9 @@
 package com.stellar.interceptor;
 
+import com.stellar.monitor.HttpRequestMetrics;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -10,21 +12,26 @@ import java.util.UUID;
 
 /**
  * 请求日志拦截器：为每个请求生成 traceId 放入 MDC（logback 格式自动输出），
- * 记录请求方法/URI/HTTP状态/耗时。注册在所有拦截器之前，确保 traceId 贯穿全链路。
+ * 记录请求方法/URI/HTTP状态/耗时，并驱动 {@link HttpRequestMetrics} 实时计数。
+ * 注册在所有拦截器之前，确保 traceId 贯穿全链路。
  *
  * @author stellar
  */
 @Slf4j
+@RequiredArgsConstructor
 public class RequestLogInterceptor implements HandlerInterceptor {
 
     private static final String TRACE_ID = "traceId";
     private static final String START_TIME = "requestStartTime";
+
+    private final HttpRequestMetrics httpMetrics;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String traceId = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         MDC.put(TRACE_ID, traceId);
         request.setAttribute(START_TIME, System.currentTimeMillis());
+        httpMetrics.requestIn(request.getRequestURI());
         return true;
     }
 
@@ -42,6 +49,7 @@ public class RequestLogInterceptor implements HandlerInterceptor {
             } else {
                 log.info("请求完成 {} {} status={} 耗时={}ms", request.getMethod(), uri, status, elapsed);
             }
+            httpMetrics.requestOut(request.getRequestURI(), status, elapsed);
         } finally {
             MDC.remove(TRACE_ID);
         }

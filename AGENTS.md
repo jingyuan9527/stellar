@@ -52,7 +52,7 @@ Two independent packages, **no shared workspace tooling**:- `frontend/` — Vue3
 - `实用工具 /tools`（order 5）：封面工具/JSON 格式化
 - `游戏 /game`（order 6）：数学游戏/神奇海螺/海螺管理
 - `Memos 管理 /memos`（order 7）：Memos 笔记备份 + AI 打标签 + 标签写回（需登录）；页面为顶部工具条（立即同步 / AI 打标签 / …更多下拉）+ 笔记表格主体，同步配置与 Webhook 配置收进"设置"抽屉，打标签的供应商/模型选择在弹窗内。关键字搜索为**全文搜索**：支持空格/中英文逗号/顿号/分号分隔多词（后端词间 AND，content/uid/tags 任一命中），命中词在内容列 `<mark>` 高亮（`highlightContent`/`.search-hit`）
-- `系统管理 /system`（order 99）：账号安全/日志/游客访问配置/个人主页/文件管理（账号安全=用户资料页，个人主页=个人资料页，改名消除近义混淆）
+- `系统管理 /system`（order 99）：账号安全/日志/游客访问配置/个人主页/文件管理/**系统监控**（账号安全=用户资料页，个人主页=个人资料页，改名消除近义混淆）。系统监控页 `/system/monitor`（`views/system/monitor/index.vue`，需登录）实时快照轮询（4s）：应用信息（运行时长/启动耗时/启动时间/整体健康）+ 健康组件徽章（`HealthContributorRegistry` 展平，过滤 readiness/liveness 探针）+ JVM（堆/非堆环形、线程、类加载、GC 汇总+收集器明细表（名称/次数/耗时/平均单次）、JVM 生效参数 `HotSpotDiagnosticMXBean.getVMOption` 逐个读关键项含默认值）+ 系统（进程/系统 CPU 环形、磁盘环形、文件句柄 Linux 可用否则 N/A）+ HTTP（2xx/4xx/5xx echarts 柱状 + 总数/最大/平均耗时/活跃请求）+ HikariCP（连接分布柱状 + 等待队列>0 红色预警）。**导出报告**：`GET /monitor/export`（需登录）返回 Markdown 报告（`text/markdown` + attachment 文件名 `stellar-monitor-时间戳.md`，含全部快照区块与 JVM 参数表，可直接粘贴给 AI 分析 JVM 调优），前端顶部"导出报告"按钮 blob 下载。后端 `com.stellar.monitor`：`MonitorController`（`/monitor/overview` 需登录无 `@PublicAccess`）、`MonitorService`（读 ManagementFactory/HikariPoolMXBean/ObjectProvider/HealthContributorRegistry，`ApplicationReadyEvent` 记启动耗时）、`HttpRequestMetrics`（`RequestLogInterceptor` 原子计数，排除 `/monitor/**` `/actuator/**` 自污染）。echarts 依赖已引入，监控页为唯一使用方。
 
 Run them as two separate processes; there is no root-level build that covers both.
 

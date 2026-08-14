@@ -221,6 +221,12 @@ export const routes: RouteRecordRaw[] = [
             component: () => import('@/views/system/file/index.vue'),
             meta: { title: '文件管理', icon: 'folder', order: 5 },
           },
+          {
+            path: 'monitor',
+            name: 'SystemMonitor',
+            component: () => import('@/views/system/monitor/index.vue'),
+            meta: { title: '系统监控', icon: 'pulse', order: 6 },
+          },
         ],
       },
     ],

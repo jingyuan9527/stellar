@@ -1,7 +1,9 @@
 package com.stellar.interceptor;
 
+import com.stellar.monitor.HttpRequestMetrics;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -22,10 +24,18 @@ class RequestLogInterceptorTest {
     HttpServletRequest request;
     @Mock
     HttpServletResponse response;
+    @Mock
+    HttpRequestMetrics httpMetrics;
+
+    RequestLogInterceptor interceptor;
+
+    @BeforeEach
+    void setup() {
+        interceptor = new RequestLogInterceptor(httpMetrics);
+    }
 
     @Test
     void preHandle_写入traceId与开始时间() {
-        RequestLogInterceptor interceptor = new RequestLogInterceptor();
         boolean result = interceptor.preHandle(request, response, new Object());
 
         assertTrue(result);
@@ -34,12 +44,12 @@ class RequestLogInterceptorTest {
         assertEquals(8, traceId.length());
         assertFalse(traceId.contains("-"));
         verify(request).setAttribute(eq("requestStartTime"), anyLong());
+        verify(httpMetrics).requestIn(any());
         MDC.clear();
     }
 
     @Test
     void afterCompletion_正常请求_清理MDC() {
-        RequestLogInterceptor interceptor = new RequestLogInterceptor();
         interceptor.preHandle(request, response, new Object());
         when(request.getQueryString()).thenReturn(null);
         when(request.getRequestURI()).thenReturn("/home");
@@ -49,11 +59,11 @@ class RequestLogInterceptorTest {
         interceptor.afterCompletion(request, response, new Object(), null);
 
         assertNull(MDC.get("traceId"));
+        verify(httpMetrics).requestOut(eq("/home"), eq(200), anyLong());
     }
 
     @Test
     void afterCompletion_带queryString与4xx() {
-        RequestLogInterceptor interceptor = new RequestLogInterceptor();
         when(request.getAttribute("requestStartTime")).thenReturn(System.currentTimeMillis() - 123L);
         when(request.getQueryString()).thenReturn("a=1");
         when(request.getRequestURI()).thenReturn("/home");
@@ -67,7 +77,6 @@ class RequestLogInterceptorTest {
 
     @Test
     void afterCompletion_无开始时间_耗时降级() {
-        RequestLogInterceptor interceptor = new RequestLogInterceptor();
         when(request.getAttribute("requestStartTime")).thenReturn(null);
         when(request.getQueryString()).thenReturn(null);
         when(request.getRequestURI()).thenReturn("/error");
