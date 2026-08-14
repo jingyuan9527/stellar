@@ -41,7 +41,7 @@ public class AuthService {
      * 登录（带爆破防护）：
      * 1. IP 维度短窗口尝试次数限制（10 次 / 10 分钟，配置化）；
      * 2. 账号维度失败锁定（连续失败 {loginMaxFail} 次锁 {loginLockMinutes} 分钟）；
-     * 3. 成功登录清空失败计数。
+     * 3. 成功登录清空失败计数与 IP 尝试计数。
      */
     public LoginResult login(LoginRequest request, HttpServletRequest httpRequest) {
         String username = request.getUsername();
@@ -64,6 +64,7 @@ public class AuthService {
             throw new BusinessException("账号已被禁用");
         }
         clearFail(username);
+        clearIpAttempt(ip);
         StpUtil.login(user.getId());
         LoginResult result = new LoginResult();
         result.setToken(StpUtil.getTokenValue());
@@ -107,5 +108,10 @@ public class AuthService {
     /** 登录成功清空失败计数 */
     private void clearFail(String username) {
         stringRedisTemplate.delete(LOGIN_FAIL_PREFIX + username);
+    }
+
+    /** 登录成功清空 IP 尝试计数（合法用户周期性重回，不被自身正常登录耗尽配额） */
+    private void clearIpAttempt(String ip) {
+        stringRedisTemplate.delete(LOGIN_ATTEMPT_PREFIX + ip);
     }
 }

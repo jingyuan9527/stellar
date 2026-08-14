@@ -4,11 +4,20 @@
  * 并把错误上报到后端（落 sys_log 模块=前端错误）。
  * 使用：<ErrorBoundary><RouterView /></ErrorBoundary>
  */
-import { onErrorCaptured, ref } from 'vue'
+import { onErrorCaptured, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { reportClientError } from '@/utils/clientError'
 
 const hasError = ref(false)
 const errorMessage = ref('')
+
+// 路由切换时复位错误态：错误多由具体页面渲染引发，换页应回到正常渲染，
+// 避免 ErrorBoundary 包住 RouterView 后一次渲染错误卡死整个应用的导航。
+const route = useRoute()
+watch(() => route.fullPath, () => {
+  hasError.value = false
+  errorMessage.value = ''
+})
 
 onErrorCaptured((err: unknown, _instance: unknown, info: string) => {
   hasError.value = true

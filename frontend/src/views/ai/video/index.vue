@@ -233,7 +233,7 @@ function onTaskNotify(msg: AiNotifyMessage) {
   }
 }
 
-// SSE 断线/通知丢失兜底：轮询检测到本次任务已结束（completed/failed）或超时后复位 loading
+// SSE 断线/通知丢失兜底：轮询先 refreshHistory 拉服务端最新历史，再按 id 判本次任务是否结束
 function isVideoTaskSettled(): boolean {
   if (pendingVideoId.value === null) return false
   const row = history.value.find((h) => h.id === pendingVideoId.value)
@@ -255,10 +255,11 @@ async function handleGeneratingSettled(viaFallback: boolean) {
   }
 }
 
-// 生成中：SSE 断线时低频轮询兜底，超时 15 分钟强制复位（SSE 正常时不干预）
+// 生成中：SSE 断线时低频轮询兜底（轮询前 refreshHistory 刷新状态），超时 15 分钟强制复位（SSE 正常时不干预）
 useTaskFallback({
   generating,
   isSettled: isVideoTaskSettled,
+  refresh: refreshHistory,
   onSettled: handleGeneratingSettled,
   timeoutMs: 15 * 60 * 1000,
 })

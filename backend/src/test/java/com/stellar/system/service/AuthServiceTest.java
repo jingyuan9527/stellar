@@ -127,6 +127,7 @@ class AuthServiceTest {
             assertEquals("admin", result.getUserInfo().getUsername());
         }
         verify(stringRedisTemplate).delete(AuthService.LOGIN_FAIL_PREFIX + "admin");
+        verify(stringRedisTemplate).delete(AuthService.LOGIN_ATTEMPT_PREFIX + "1.2.3.4");
     }
 
     @Test

@@ -6,7 +6,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import AiGeneratorLayout from '../components/AiGeneratorLayout.vue'
-import { createAiImage, deleteAiImage, getAiImagePage, getAiModelsByType } from '@/api/ai'
+import { createAiImage, deleteAiImage, getAiImagePage, getAiImageTask, getAiModelsByType } from '@/api/ai'
 import { useAuthStore } from '@/store/auth'
 import { useAiNotifyStore, type AiNotifyMessage } from '@/store/aiNotify'
 import type { AiModel, AiImageTask } from '@/types/api'
@@ -227,11 +227,15 @@ function onTaskNotify(msg: AiNotifyMessage) {
   }
 }
 
-// SSE 断线/通知丢失兜底：轮询检测到本次任务已结束（completed/failed）或超时后复位 loading
-function isImageTaskSettled(): boolean {
+// SSE 断线/通知丢失兜底：轮询直查单任务接口（每次拉服务端最新状态，避免读陈旧历史）
+async function isImageTaskSettled(): Promise<boolean> {
   if (pendingTaskId.value === null) return false
-  const row = history.value.find((h) => h.taskId === pendingTaskId.value)
-  return !!row && (row.status === 'completed' || row.status === 'failed')
+  try {
+    const task = await getAiImageTask(pendingTaskId.value)
+    return task.status === 'completed' || task.status === 'failed'
+  } catch {
+    return false
+  }
 }
 
 async function handleGeneratingSettled(viaFallback: boolean) {
