@@ -32,9 +32,9 @@ ENV NODE_VERSION=v22.12.0 \
 RUN curl -fsSL https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.gz \
         | tar -xz -C /opt \
     && ln -s /opt/node-${NODE_VERSION}-linux-x64/bin/node /usr/local/bin/node \
-    && ln -s /opt/node-${NODE_VERSION}-linux-x64/bin/npm /usr/local/bin/npm \
-    && ln -s /opt/node-${NODE_VERSION}-linux-x64/bin/corepack /usr/local/bin/corepack
-RUN corepack enable && corepack prepare pnpm@10.12.4 --activate
+    && ln -s /opt/node-${NODE_VERSION}-linux-x64/bin/npm /usr/local/bin/npm
+# pnpm 用 npm 全局安装（corepack 在 tarball 环境的 shim 机制不稳定，CI 上 enable/prepare 报错）
+RUN npm install -g pnpm@10.12.4
 WORKDIR /app
 
 # ---- 前端：先拷锁文件与 pnpm 配置利用层缓存恢复依赖（pnpm-workspace.yaml 含 allowBuilds 审批，必须同时拷入）----
