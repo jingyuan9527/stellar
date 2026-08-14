@@ -2,22 +2,41 @@
 # =============================================================================
 # Stellar 单镜像：前端(Nginx) + 后端(Spring Boot) 双进程，由 supervisord 托管。
 # 构建上下文为项目根目录：
-#   低内存服务器（≤8G）构建请带 --memory 兜底，防止编译进程挤爆宿主：
-#   docker build --memory=6g --memory-swap=6g -t stellar:latest .
+#
+#   低内存服务器（≤2G 内存）构建要点：
+#   - 前后端构建合并为单 stage **串行**执行——多 stage 会被 BuildKit 并发跑，
+#     node(3G) + maven(2G) 内存峰值叠加，2G 机器必被 OOM killer 打挂
+#   - 内存上限已压到 1152M(node) / 768M(maven)，串行峰值 ≈ max(1.3G, 1G)
+#   - 强烈建议服务器加 swap 兜底（防构建进程挤爆宿主）：
+#       fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile
+#       && swapon /swapfile   # 并写入 /etc/fstab 持久化
+#   - 若仍想再保险，可带 --memory 限制（构建失败而非挂宿主）：
+#       docker build --memory=1536m --memory-swap=1536m -t stellar:latest .
 # -----------------------------------------------------------------------------
 # 设计要点：
-#   - 多阶段构建：node 构建前端 dist → maven 构建后端 jar → 合并到运行镜像
+#   - 构建：maven 镜像 + node tarball 合体单 stage，先 pnpm 构建前端再 mvn 打包后端
 #   - 运行镜像基于 alpine，安装 nginx + supervisor，一个容器跑两个进程
 #   - 文件上传存数据库(sys_file)，无磁盘卷依赖；Nginx 反代 /api /file 到本机后端
 # =============================================================================
 
-# ---------- 前端构建阶段 ----------
-# Node 22 + pnpm 固定版本（与 pnpm-lock.yaml v9 生成环境一致，镜像内 corepack 启用 pnpm）
-FROM node:22-alpine AS frontend-build
-ENV NODE_OPTIONS="--max-old-space-size=3072"
+# ---------- 构建阶段（串行：前端 → 后端） ----------
+# maven 镜像（Ubuntu 底）提供 JDK21 + Maven，另装 Node 22 官方 tarball 提供前端工具链。
+# 两个工具链共存于同一 stage，构建进程同时只跑一个，内存峰值不叠加。
+FROM maven:3.9-eclipse-temurin-21 AS build
+# NODE_OPTIONS 压到 1152M / MAVEN_OPTS 压到 768M：2G 机器构建峰值 ≈ max(1.3G, 1G)
+ENV NODE_VERSION=v22.12.0 \
+    NODE_OPTIONS="--max-old-space-size=1152" \
+    MAVEN_OPTS="-Xmx768m -Xms384m -XX:+UseContainerSupport"
+# Node 22 官方 linux-x64 tarball（29MB，解压到 /opt，软链到 PATH）
+RUN curl -fsSL https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz \
+        | tar -xJ -C /opt \
+    && ln -s /opt/node-${NODE_VERSION}-linux-x64/bin/node /usr/local/bin/node \
+    && ln -s /opt/node-${NODE_VERSION}-linux-x64/bin/npm /usr/local/bin/npm \
+    && ln -s /opt/node-${NODE_VERSION}-linux-x64/bin/corepack /usr/local/bin/corepack
 RUN corepack enable && corepack prepare pnpm@10.12.4 --activate
 WORKDIR /app
-# 先拷锁文件与 pnpm 配置利用层缓存恢复依赖（pnpm-workspace.yaml 含 allowBuilds 审批，必须同时拷入）
+
+# ---- 前端：先拷锁文件与 pnpm 配置利用层缓存恢复依赖（pnpm-workspace.yaml 含 allowBuilds 审批，必须同时拷入）----
 # 挂 pnpm store 缓存卷，依赖包跨构建复用，避免每次全部重下
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
@@ -26,11 +45,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 COPY frontend/ .
 RUN pnpm build
 
-# ---------- 后端构建阶段 ----------
-FROM maven:3.9-eclipse-temurin-21 AS backend-build
-ENV MAVEN_OPTS="-Xmx2g -Xms1g -XX:+UseContainerSupport"
-WORKDIR /app
-# 先拷 pom 利用层缓存下载依赖（挂 ~/.m2 缓存卷，Maven 依赖跨构建复用，避免每次全量重下）
+# ---- 后端：先拷 pom 利用层缓存下载依赖（挂 ~/.m2 缓存卷，Maven 依赖跨构建复用）----
 COPY backend/pom.xml .
 RUN --mount=type=cache,target=/root/.m2 \
     mvn -B -q dependency:go-offline
@@ -45,9 +60,9 @@ FROM eclipse-temurin:21-jre-alpine
 RUN apk add --no-cache nginx supervisor
 WORKDIR /app
 # 拷后端 jar
-COPY --from=backend-build /app/target/*.jar /app/app.jar
+COPY --from=build /app/target/*.jar /app/app.jar
 # 拷前端静态产物到 Nginx 目录
-COPY --from=frontend-build /app/dist /usr/share/nginx/html
+COPY --from=build /app/dist /usr/share/nginx/html
 # Nginx 配置（直接覆盖主配置，不依赖 http.d include，确保反代生效）
 COPY frontend/nginx.conf /etc/nginx/nginx.conf
 # supervisord 配置
