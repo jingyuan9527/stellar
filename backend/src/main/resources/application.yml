@@ -13,6 +13,12 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/soybean}
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
+    hikari:
+      # 个人站并发低，收敛连接池省内存/连接（每连接 ~1MB 堆外）
+      maximum-pool-size: 8
+      minimum-idle: 2
+      connection-timeout: 3000
+      max-lifetime: 1800000
   data:
     redis:
       url: ${REDIS_URL:}
@@ -20,10 +26,11 @@ spring:
       database: ${REDIS_DATABASE:0}
       lettuce:
         pool:
-          max-active: 8
-          max-idle: 8
+          # 个人站并发低，收敛连接数省内存；max-wait 有界避免无限阻塞
+          max-active: 4
+          max-idle: 4
           min-idle: 0
-          max-wait: -1ms
+          max-wait: 1000ms
   cache:
     type: redis
     redis:
@@ -55,7 +62,8 @@ mybatis-plus:
 
 sa-token:
   token-name: Authorization
-  timeout: 2592000
+  # 登录态绝对有效期 7 天（原 30 天），期间不因活跃续期（active-timeout=-1），避免 Redis 会话长期堆积
+  timeout: 604800
   active-timeout: -1
   is-share: false
   token-style: uuid
@@ -98,4 +106,4 @@ stellar:
 
 logging:
   level:
-    com.stellar: debug
+    com.stellar: ${APP_LOG_LEVEL:debug}

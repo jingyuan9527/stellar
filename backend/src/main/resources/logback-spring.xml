@@ -6,6 +6,8 @@
     <property name="MAX_FILE_SIZE" value="50MB"/>
     <property name="MAX_HISTORY" value="30"/>
     <property name="TOTAL_SIZE_CAP" value="2GB"/>
+    <!-- com.stellar 包日志级别：生产用 INFO 减少 CPU/IO，调试设环境变量 LOG_LEVEL=DEBUG -->
+    <property name="APP_LOG_LEVEL" value="${LOG_LEVEL:-INFO}"/>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
@@ -28,7 +30,7 @@
         </encoder>
     </appender>
 
-    <logger name="com.stellar" level="DEBUG"/>
+    <logger name="com.stellar" level="${APP_LOG_LEVEL}"/>
 
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
