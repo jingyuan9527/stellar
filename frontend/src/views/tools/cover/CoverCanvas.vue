@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import type { CSSProperties } from 'vue'
 import { useCoverStore } from './store/cover'
 import { getGradient } from './lib/gradients'
@@ -159,27 +159,60 @@ watch(
 defineExpose({
   getEl: () => rootRef.value,
 })
+
+// 懒加载：画布进入视口附近才渲染内容，离开视口则只留占位，降低内存占用
+const isVisible = ref(false)
+
+let observer: IntersectionObserver | null = null
+
+onMounted(() => {
+  if (!rootRef.value) return
+  observer = new IntersectionObserver(
+    ([entry]) => {
+      isVisible.value = entry.isIntersecting
+    },
+    { rootMargin: '100px' },
+  )
+  observer.observe(rootRef.value)
+})
+
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  observer = null
+})
+
+// 内容随 isVisible 首次挂载后才真正落 DOM，此时需重新执行文字适配（immediate watcher 已提前跑过一次但 refs 为空）
+watch(isVisible, (v) => {
+  if (v) {
+    nextTick(() => {
+      fitTitle()
+      fitSubtitle()
+    })
+  }
+})
 </script>
 
 <template>
   <article ref="rootRef" :style="canvasStyle">
-    <div :style="highlightStyle" />
-    <div v-if="s.backgroundImage" :style="{
-      position: 'absolute',
-      inset: 0,
-      backgroundImage: `url(${s.backgroundImage})`,
-      backgroundPosition: 'center',
-      backgroundRepeat: 'no-repeat',
-      backgroundSize: 'cover',
-    }" />
-    <div :style="overlayStyle" />
-    <div :style="topGradientStyle" />
-    <div :style="tc.frameStyle">
-      <div :style="tc.stackStyle">
-        <span v-if="s.badgeVisible && badgeText" :style="badgeStyle">{{ badgeText }}</span>
-        <h3 ref="titleRef" :style="titleStyle">{{ titleText }}</h3>
-        <p ref="subtitleRef" :style="subtitleStyle">{{ subtitleText }}</p>
+    <template v-if="isVisible">
+      <div :style="highlightStyle" />
+      <div v-if="s.backgroundImage" :style="{
+        position: 'absolute',
+        inset: 0,
+        backgroundImage: `url(${s.backgroundImage})`,
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: 'cover',
+      }" />
+      <div :style="overlayStyle" />
+      <div :style="topGradientStyle" />
+      <div :style="tc.frameStyle">
+        <div :style="tc.stackStyle">
+          <span v-if="s.badgeVisible && badgeText" :style="badgeStyle">{{ badgeText }}</span>
+          <h3 ref="titleRef" :style="titleStyle">{{ titleText }}</h3>
+          <p ref="subtitleRef" :style="subtitleStyle">{{ subtitleText }}</p>
+        </div>
       </div>
-    </div>
+    </template>
   </article>
 </template>

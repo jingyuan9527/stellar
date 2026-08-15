@@ -4,6 +4,8 @@ import type { CoverDraft, CoverState } from '../types'
 import { createDebouncedPersist } from './debouncedPersist'
 
 const STORAGE_KEY = 'stellar-video:cover-drafts'
+/** localStorage 草稿条数上限，避免草稿无限增长撑满存储 */
+const MAX_DRAFTS = 20
 
 function loadState(): CoverDraft[] {
   try {
@@ -28,6 +30,9 @@ export const useCoverDraftsStore = defineStore('video-cover-drafts', () => {
       },
       ...drafts.value,
     ]
+    if (drafts.value.length > MAX_DRAFTS) {
+      drafts.value = drafts.value.slice(0, MAX_DRAFTS)
+    }
   }
 
   function renameDraft(id: string, name: string) {

@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import type { ECharts, EChartsCoreOption } from 'echarts/core'
+import { PieChart, BarChart } from 'echarts/charts'
+import { TooltipComponent, GridComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { NButton, NCard, NGrid, NGridItem, NIcon, NStatistic, NTag } from 'naive-ui'
 import { DownloadOutline } from '@vicons/ionicons5'
 import { exportMonitorReport, getMonitorOverview } from '@/api/monitor'
 import type { MonitorOverview } from '@/types/api'
+
+// 按需注册监控页用到的 echarts 组件，缩小该 chunk 体积（pie/bar + tooltip/grid 已覆盖本页全部图表）
+echarts.use([PieChart, BarChart, TooltipComponent, GridComponent, CanvasRenderer])
 
 const overview = ref<MonitorOverview | null>(null)
 const loading = ref(true)
@@ -15,11 +22,11 @@ const diskChartRef = ref<HTMLDivElement>()
 const httpChartRef = ref<HTMLDivElement>()
 const poolChartRef = ref<HTMLDivElement>()
 
-let heapChart: echarts.ECharts | null = null
-let cpuChart: echarts.ECharts | null = null
-let diskChart: echarts.ECharts | null = null
-let httpChart: echarts.ECharts | null = null
-let poolChart: echarts.ECharts | null = null
+let heapChart: ECharts | null = null
+let cpuChart: ECharts | null = null
+let diskChart: ECharts | null = null
+let httpChart: ECharts | null = null
+let poolChart: ECharts | null = null
 
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -144,7 +151,7 @@ function resizeCharts() {
   poolChart?.resize()
 }
 
-function ringOption(percent: number, color: string, label: string): echarts.EChartsOption {
+function ringOption(percent: number, color: string, label: string): EChartsCoreOption {
   return {
     series: [
       {
