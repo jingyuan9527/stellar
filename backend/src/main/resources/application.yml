@@ -2,6 +2,12 @@ server:
   port: 8080
   servlet:
     context-path: /
+  # 个人站并发低，收敛 Tomcat 工作线程（默认 200）省线程栈内存（每线程 ~1MB）
+  tomcat:
+    threads:
+      max: 40
+      min-spare: 4
+    accept-count: 100
 
 spring:
   application:
