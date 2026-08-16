@@ -45,3 +45,6 @@ desktop.ini
 
 # ===== pnpm 本地 store（误入工作区）=====
 .pnpm-store/
+
+# ===== 本地应用数据库（.freebuff 桌面端会话数据，勿提交）=====
+.freebuff/
