@@ -249,16 +249,41 @@ async function loadData() {
   updateCharts()
 }
 
+function startPolling() {
+  stopPolling()
+  timer = setInterval(loadData, 4000)
+}
+
+function stopPolling() {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+}
+
+function onVisibilityChange() {
+  if (document.hidden) {
+    // 切后台暂停轮询，避免后台持续打 overview 浪费资源
+    stopPolling()
+  } else {
+    // 回前台立即刷新一次再恢复轮询
+    loadData()
+    startPolling()
+  }
+}
+
 onMounted(async () => {
   await loadData()
   await nextTick()
   initCharts()
   updateCharts()
-  timer = setInterval(loadData, 4000)
+  startPolling()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onBeforeUnmount(() => {
-  if (timer) clearInterval(timer)
+  stopPolling()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('resize', resizeCharts)
   heapChart?.dispose()
   cpuChart?.dispose()

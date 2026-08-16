@@ -1,13 +1,20 @@
 name: docker-build-push
 
-# Stellar 镜像 CI 打包：push master / 手动触发时构建镜像推 ghcr.io，服务器零构建负担。
+# Stellar 镜像 CI 打包：push master / 打 v* tag / 手动触发时构建镜像推 ghcr.io，服务器零构建负担。
+# 版本号规则：打 git tag（如 v1.0.0）→ 推 :v1.0.0；手动触发填 version 输入 → 推该版本号；
+# 均不指定（push master 或手动留空）→ 推 commit sha。latest 始终跟随最新构建。
 # 首次推送后包默认为 private，需到 GitHub → Packages → stellar → Settings → Change visibility 设为 Public，
 # 服务器才可免登录 pull；或服务器用 read:packages PAT `docker login ghcr.io`。
 
 on:
   push:
     branches: [master]
+    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: '镜像版本号（如 v1.0.0）。留空则用 git tag 名（tag 触发）或 commit sha'
+        required: false
 
 permissions:
   contents: read
@@ -32,6 +39,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve version tag
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "value=${{ github.ref_name }}"
+          elif [[ "${{ github.event.inputs.version }}" != "" ]]; then
+            echo "value=${{ github.event.inputs.version }}"
+          else
+            echo "value=${{ github.sha }}"
+          fi
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -41,6 +59,6 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
