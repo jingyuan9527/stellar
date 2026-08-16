@@ -7,8 +7,8 @@ import com.stellar.ai.vo.AiUsageStatsVO;
 
 /**
  * 仪表盘聚合统计：AI 调用 token + 各模块任务/文件/TTS 概览。
- * <p>聚合自多张表（sys_ai_usage/sys_ai_chat_record/sys_ai_image_task/sys_ai_video_task/sys_file/tts_record），
- * 只读查询，供管理后台仪表盘展示。
+ * <p>聚合自多张表（sys_ai_usage/ai_task/sys_file），其中文案/图片/视频/TTS 任务均读统一 ai_task 表
+ * （task_type=text/image/video/tts），只读查询，供管理后台仪表盘展示。
  */
 @Data
 public class DashboardStatsVO {
@@ -16,19 +16,19 @@ public class DashboardStatsVO {
     /** AI token 调用统计（总/今日 token、调用次数、近 7 日趋势、按类型/供应商分组） */
     private AiUsageStatsVO aiUsage;
 
-    /** AI 文案记录统计（sys_ai_chat_record） */
+    /** AI 文案任务统计（ai_task task_type=text） */
     private TaskStat textGen;
 
-    /** AI 图片任务统计（sys_ai_image_task） */
+    /** AI 图片任务统计（ai_task task_type=image） */
     private TaskStat imageTask;
 
-    /** AI 视频任务统计（sys_ai_video_task） */
+    /** AI 视频任务统计（ai_task task_type=video） */
     private TaskStat videoTask;
 
     /** 文件统计（sys_file） */
     private FileStat file;
 
-    /** TTS 合成统计（tts_record） */
+    /** TTS 合成统计（ai_task task_type=tts） */
     private TtsStat tts;
 
     /**

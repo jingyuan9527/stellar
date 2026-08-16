@@ -339,7 +339,7 @@ public class AiChatService {
     }
 
     // ===== 多轮聊天（AI 聊天模块用）=====
-    // 不落 sys_ai_chat_record（扁平单轮表）；消息历史由 AiChatSessionService 落 ai_chat_message。
+    // 多轮流式不落 ai_task；消息历史由 AiChatSessionService 落 ai_chat_message。
     // 仅记 token usage（计费）。messages 为 OpenAI 格式 [{role,content}]，含 system/user/assistant。
 
     /**

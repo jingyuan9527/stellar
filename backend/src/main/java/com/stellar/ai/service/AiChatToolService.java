@@ -25,8 +25,8 @@ import com.stellar.tts.service.TtsService;
  * <p>由 {@link AiChatService#streamMultiChatWithTools} 在第一次非流式拿到 LLM 的 tool_calls 后调用执行。
  * <p>工具：
  * <ul>
- *   <li>generate_image：调 {@link AiImageService#generateImageSync} 同步生成图片，存 sys_file + 写 sys_ai_image_task</li>
- *   <li>synthesize_speech：按音色/系统开关决定引擎，AI TTS 失败自动降级 Edge TTS，存 sys_file + 写 tts_record</li>
+ *   <li>generate_image：调 {@link AiImageService#generateImageSync} 同步生成图片，存 sys_file + 写 ai_task(task_type=image)</li>
+ *   <li>synthesize_speech：按音色/系统开关决定引擎，AI TTS 失败自动降级 Edge TTS，存 sys_file + 写 ai_task(task_type=tts)</li>
  * </ul>
  * <p>工具结果 content 为 JSON 字符串回传给 LLM（含 status/type/fileId/url 或 status=failed/error）。
  */
@@ -198,7 +198,7 @@ public class AiChatToolService {
                 "^[a-z]{2,3}-[A-Z]{2}(?:-[a-z0-9]+)*-[A-Za-z][A-Za-z0-9]{0,63}Neural$");
     }
 
-    /** 存 sys_file + 写 tts_record（让 TTS 历史页可见） */
+    /** 存 sys_file + 写 ai_task(task_type=tts)（让 TTS 历史页可见） */
     private Long saveAudioFile(String text, String voice, byte[] audio, String ext, String contentType,
                                String subjectType, String subjectId) {
         SysFile file = new SysFile();

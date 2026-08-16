@@ -4,17 +4,17 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
-import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.time.LocalDateTime;
 
 /**
- * 语音合成记录
+ * 语音合成记录视图 VO。
+ * <p>数据统一存于 {@code ai_task} 表（task_type=tts），本类由 {@code TtsRecordService} 从
+ * {@code AiTask} 映射而来供前端展示/试听，并非独立的 tts_record 实体表。
  */
 @Data
-@TableName("tts_record")
 public class TtsRecord {
 
     @TableId(type = IdType.AUTO)

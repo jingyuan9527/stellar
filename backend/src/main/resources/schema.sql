@@ -723,8 +723,9 @@ SELECT '写作助手', '你是一位优秀的写作搭档，擅长润色、改�
 WHERE NOT EXISTS (SELECT 1 FROM ai_persona WHERE name = '写作助手' AND built_in = 1);
 
 -- ============================================================
--- 统一 AI 任务历史表（合并 sys_ai_chat_record / sys_ai_image_task / sys_ai_video_task / tts_record 四张表的查询视图）
--- 旧表保留不删，新写入走此表，旧数据通过下方 DO 块幂等迁移
+-- 统一 AI 任务历史表（文案/图片/视频/TTS 四类任务共用，task_type 鉴别）
+-- 历史遗留：早期分表 sys_ai_chat_record/sys_ai_image_task/sys_ai_video_task/tts_record
+-- 已整体统一到本表，schema 不再建旧表；新写入与查询全部走 ai_task
 -- ============================================================
 CREATE TABLE IF NOT EXISTS ai_task (
     id            BIGSERIAL PRIMARY KEY,

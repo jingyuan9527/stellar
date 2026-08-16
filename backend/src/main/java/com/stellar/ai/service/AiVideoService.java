@@ -45,7 +45,7 @@ import com.stellar.infra.ExternalCallLogger;
  * AI 视频生成服务：异步任务模式（创建任务 → 后端 worker 轮询结果 → SSE 通知）。
  * <p>创建任务 POST /v1/videos 返回 video_id；查询 GET /agnesapi?video_id=xxx，
  * completed 时下载 mp4 存 sys_file 永久化。
- * <p>本地留痕：createTask 落库 sys_ai_video_task，getTask 被 AiVideoTaskWorker 调用更新本地行，
+ * <p>本地留痕：createTask 落库 ai_task(task_type=video)，getTask 被 AiVideoTaskWorker 调用更新本地行，
  * pageHistory 按主体分页查询历史。
  */
 @Slf4j
