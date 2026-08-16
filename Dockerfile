@@ -1,6 +1,5 @@
-# syntax=docker/dockerfile:1
 # =============================================================================
-# Stellar 单镜像：前端(Nginx) + 后端(Spring Boot) 双进程，由 supervisord 托管。
+# Stellar 单镜像：前端(Nginx) + 后端(Spring Boot) 双进程，由 entrypoint.sh 托管。
 # 构建上下文为项目根目录：
 #
 #   低内存服务器（≤2G 内存）构建要点：
@@ -15,7 +14,8 @@
 # -----------------------------------------------------------------------------
 # 设计要点：
 #   - 构建：maven 镜像 + node tarball 合体单 stage，先 pnpm 构建前端再 mvn 打包后端
-#   - 运行镜像基于 alpine，安装 nginx + supervisor，一个容器跑两个进程
+#   - jlink 阶段：alpine JDK 按模块清单裁剪出 musl 版最小 JRE（约 1/3 体积）
+#   - 运行镜像：纯 alpine + jlink JRE + nginx + entrypoint.sh（无 supervisor/python）
 #   - 文件上传存数据库(sys_file)，无磁盘卷依赖；Nginx 反代 /api /file 到本机后端
 # =============================================================================
 
@@ -64,20 +64,46 @@ COPY backend/src ./src
 RUN --mount=type=cache,target=/root/.m2 \
     mvn -B -q clean package -DskipTests
 
+# ---------- JRE 裁剪阶段 ----------
+# 运行镜像换纯 alpine（musl libc），JRE 必须同为 musl 版，故用 alpine JDK 做 jlink。
+# 模块清单 = jdeps 静态分析基线 + 反射/隐式依赖补足（本应用技术栈相关）：
+#   jdeps 基线: java.compiler java.desktop java.instrument java.net.http java.prefs
+#               java.rmi java.scripting java.security.jgss java.sql.rowset
+#               java.xml.crypto jdk.attach jdk.jdi jdk.jfr jdk.management jdk.net
+#               jdk.unsupported（java.base 自动含）
+#   补足: java.management(Actuator/Micrometer/Tomcat JMX) java.naming(JNDI)
+#         java.sql(JDBC/PG驱动) java.transaction.xa(HikariCP) java.xml(JAXB/POI)
+#         java.security.sasl(认证库间接引用) jdk.crypto.ec(HTTPS/TLS 必需)
+#         jdk.charsets(GBK 等扩展字符集) jdk.localedata(中文 Locale，仅保留 en/zh)
+# 若日后新增依赖出现 NoClassDefFoundError，用 jdeps 复查补模块即可。
+FROM eclipse-temurin:21-jdk-alpine AS jlink
+RUN jlink \
+    --add-modules java.base,java.compiler,java.desktop,java.instrument,java.management,java.naming,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.security.sasl,java.sql,java.sql.rowset,java.transaction.xa,java.xml,java.xml.crypto,jdk.attach,jdk.charsets,jdk.crypto.ec,jdk.jdi,jdk.jfr,jdk.localedata,jdk.management,jdk.net,jdk.unsupported \
+    --no-man-pages \
+    --no-header-files \
+    --compress=zip-6 \
+    --include-locales=en,zh \
+    --output /jre
+
 # ---------- 运行阶段 ----------
-FROM eclipse-temurin:21-jre-alpine
-# 安装 Nginx + supervisord（进程管理，任一进程崩溃自动重启）
-RUN apk add --no-cache nginx supervisor
+FROM alpine:3.20
+# nginx + JVM 动态库依赖（libstdc++/libgcc）+ tzdata（系统时区文件，供 Nginx 日志时间）
+RUN apk add --no-cache nginx tzdata libstdc++ libgcc \
+    && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" > /etc/timezone
 WORKDIR /app
-# 拷后端 jar
+ENV JAVA_HOME=/jre
+ENV PATH=${JAVA_HOME}/bin:${PATH}
+ENV TZ=Asia/Shanghai
+# 拷后端 jar + jlink 裁剪 JRE（musl 版，与 alpine 兼容）
+COPY --from=jlink /jre /jre
 COPY --from=build /app/target/*.jar /app/app.jar
 # 拷前端静态产物到 Nginx 目录
 COPY --from=build /app/dist /usr/share/nginx/html
 # Nginx 配置（直接覆盖主配置，不依赖 http.d include，确保反代生效）
 COPY frontend/nginx.conf /etc/nginx/nginx.conf
-# supervisord 配置
-COPY supervisord.conf /etc/supervisord.conf
-# 时区东八区
-ENV TZ=Asia/Shanghai
+# 进程托管脚本（替代 supervisor，无 python 依赖，行为等价 autorestart）
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 EXPOSE 80
-CMD ["supervisord", "-c", "/etc/supervisord.conf"]
+CMD ["/entrypoint.sh"]

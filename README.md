@@ -41,8 +41,8 @@ stellar/
 │  │  ├─ schema.sql            # 全量建表（幂等 IF NOT EXISTS）
 │  │  └─ db/init.sql           # 最小初始化脚本
 │  └─ pom.xml
-├─ Dockerfile           # 单镜像多阶段构建：前端 dist + 后端 jar -> alpine(nginx+supervisor)
-├─ supervisord.conf     # 双进程管理：nginx + java
+├─ Dockerfile           # 单镜像多阶段构建：前端 dist + 后端 jar -> alpine(nginx+entrypoint.sh, jlink 裁剪 JRE)
+├─ entrypoint.sh        # 双进程托管：nginx + java（替代 supervisor，自动重启+优雅退出）
 ├─ docker-compose.yml   # 单容器编排（PostgreSQL 外置）
 ├─ .env.example         # 环境变量模板
 └─ LICENSE              # Apache-2.0
@@ -69,33 +69,70 @@ cp .env.example .env
 # 创建数据库（数据库名需与 DB_URL 中一致）
 psql -h <host> -U <user> -c "CREATE DATABASE soybean;"
 
-# 执行全量建表
-psql -h <host> -U <user> -d soybean -f backend/src/main/resources/schema.sql
+# 执行全量建表（schema.sql 路径见下方「部署」：方式 A 用仓库内文件，方式 B/C 需先下载）
+psql -h <host> -U <user> -d soybean -f <schema.sql 路径>
 ```
 
 > 管理员账号由 `DataInitializer` 在应用首次启动时自动播种，无需手动插入。
 
 ### 3. 部署
 
-**推荐：CI 打包，服务器零构建负担**（镜像由 GitHub Actions 推送到 ghcr.io）：
+三种方式任选其一：
+
+| 方式 | 适用人群 | 特点 |
+| --- | --- | --- |
+| **A. 源码构建** | 想改代码/自定义配置 | 服务器需能访问 GitHub、Docker Hub |
+| **B. 官方镜像**（推荐） | 直接部署 | 零构建负担，服务器无需源码与工具链 |
+| **C. Fork 自建镜像** | 想维护自己的版本 | 镜像推送到你自己的 ghcr 空间 |
+
+#### 方式 A：拉取源码，服务器本地构建
 
 ```bash
-# 确保服务器 docker-compose.yml 与仓库同步（含 image: ghcr.io/jingyuan9527/stellar:latest）
-git pull          # 若部署目录是 git clone，否则手动替换 docker-compose.yml
-docker compose pull && docker compose up -d
-```
-
-- 首次使用需到 GitHub Packages（`ghcr.io/jingyuan9527/stellar`）确认包可见性为 **Public**，否则 pull 报 401
-- 回滚：把 compose 中 `image: ...:latest` 改为 `:sha`（每次 CI 构建打 sha tag）再 `docker compose up -d`
-- **常见坑**：服务器 compose 未与仓库同步时会用旧 `image: stellar:latest`（无 ghcr 前缀）拉本地镜像名 → `pull access denied`，先 `git pull` 同步 compose 文件
-
-**兜底：服务器本地构建**（低内存服务器见 Dockerfile 头部注释）：
-
-```bash
+git clone https://github.com/jingyuan9527/stellar.git
+cd stellar
+cp .env.example .env        # 填写 .env 中数据库连接等（见「环境变量」）
 docker compose up -d --build
 ```
 
-- 访问：`http://localhost:${FRONTEND_PORT:-80}`（Nginx 托管前端 + 反代后端，单容器内双进程）
+- 数据库初始化：建库 + 执行仓库内 `backend/src/main/resources/schema.sql`（见上）
+- 低内存服务器（≤2G）构建前请阅读 `Dockerfile` 头部注释（内存上限与 swap 建议）
+- 日常更新：`git pull && docker compose up -d --build`
+
+#### 方式 B：直接使用官方镜像（推荐）
+
+服务器无需源码与构建工具链，镜像由 GitHub Actions 构建并推送到 ghcr.io：
+
+```bash
+# 1. 拉取部署文件（compose + env 模板 + 建表脚本），无需克隆仓库
+curl -O https://raw.githubusercontent.com/jingyuan9527/stellar/master/docker-compose.yml
+curl -O https://raw.githubusercontent.com/jingyuan9527/stellar/master/.env.example
+curl -O https://raw.githubusercontent.com/jingyuan9527/stellar/master/backend/src/main/resources/schema.sql
+cp .env.example .env
+
+# 2. 初始化数据库（建库 + 执行上一步下载的 schema.sql，见上）
+
+# 3. 拉取镜像并启动
+docker compose pull && docker compose up -d
+```
+
+- **首次使用**需到 GitHub Packages（`ghcr.io/jingyuan9527/stellar`）确认包可见性为 **Public**，否则 pull 报 401
+- 日常更新：`docker compose pull && docker compose up -d`
+- 回滚：`docker-compose.yml` 中 `image: ghcr.io/jingyuan9527/stellar:latest` 改为 `:sha`（每次 CI 构建打 sha tag）再 `docker compose up -d`
+
+#### 方式 C：Fork 仓库，构建自己的镜像
+
+维护自己的版本与镜像空间：
+
+1. Fork 本仓库
+2. 修改 `.github/workflows/docker-build-push.yml` 中镜像名 `ghcr.io/jingyuan9527/stellar` → `ghcr.io/<你的用户名>/stellar`
+3. 仓库 Settings → Actions → General → **Workflow permissions** 勾选 *Read and write permissions*（推送镜像到 ghcr 需要）
+4. push master 触发 CI：自动构建镜像并推送到你的 ghcr
+5. 到 GitHub Packages 确认你的包可见性为 **Public**（或服务器 `docker login ghcr.io` 使用私有包）
+6. 服务器按方式 B 部署，但把 `docker-compose.yml` 的 image 改为 `ghcr.io/<你的用户名>/stellar:latest`
+
+---
+
+部署完成后访问：`http://<服务器IP>:${FRONTEND_PORT:-80}`（Nginx 托管前端 + 反代后端，单容器内双进程）。
 
 ### 4. 默认账号
 
