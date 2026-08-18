@@ -8,7 +8,7 @@ import type { DataTableColumns, UploadCustomRequestOptions } from 'naive-ui'
 import {
   listKnowledgeBases, createKnowledgeBase, updateKnowledgeBase, deleteKnowledgeBase,
   pageKnowledgeChunks, addKnowledgeDocument, uploadKnowledgeDocument,
-  deleteKnowledgeChunk, rebuildKnowledgeBase,
+  deleteKnowledgeChunk, rebuildKnowledgeBase, updateKnowledgeDocument, listKnowledgeSources,
 } from '@/api/chat'
 import { formatTime } from '@/utils/format'
 import { getAiModelsByType } from '@/api/ai'
@@ -283,6 +283,53 @@ async function handleUpload({ file }: UploadCustomRequestOptions) {
   }
 }
 
+// ===== 更新文档 =====
+const docUpdateShow = ref(false)
+const docUpdateSources = ref<string[]>([])
+const docUpdateSource = ref<string | null>(null)
+const docUpdateText = ref('')
+const docUpdating = ref(false)
+
+async function openUpdateDoc() {
+  if (!selectedKbId.value) return
+  try {
+    docUpdateSources.value = await listKnowledgeSources(selectedKbId.value)
+  } catch {
+    // 错误已由拦截器提示
+  }
+  docUpdateSource.value = null
+  docUpdateText.value = ''
+  docUpdateShow.value = true
+}
+
+async function handleUpdateDoc() {
+  if (!selectedKbId.value) return
+  if (!docUpdateSource.value) {
+    message.warning('请选择要更新的文档来源')
+    return false
+  }
+  if (!docUpdateText.value.trim()) {
+    message.warning('文档内容不能为空')
+    return false
+  }
+  docUpdating.value = true
+  try {
+    const count = await updateKnowledgeDocument(selectedKbId.value, {
+      text: docUpdateText.value,
+      sourceName: docUpdateSource.value,
+    })
+    message.success(`已替换为 ${count} 条新分块`)
+    docUpdateShow.value = false
+    loadChunks()
+    loadKbs()
+  } catch {
+    // 错误已由拦截器提示
+    return false
+  } finally {
+    docUpdating.value = false
+  }
+}
+
 onMounted(() => {
   loadEmbeddingModels()
   loadKbs()
@@ -312,6 +359,7 @@ onMounted(() => {
     <NCard v-if="selectedKb" :title="`分块管理：${selectedKb.name}`" :bordered="false">
       <template #header-extra>
         <NSpace>
+          <NButton @click="openUpdateDoc">更新文档</NButton>
           <NButton @click="docShow = true">添加文档</NButton>
           <NUpload
             :show-file-list="false"
@@ -360,6 +408,38 @@ onMounted(() => {
         <NSpace justify="end">
           <NButton @click="kbEditShow = false">取消</NButton>
           <NButton type="primary" @click="handleSaveKb">保存</NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
+    <NModal
+      v-model:show="docUpdateShow"
+      preset="card"
+      title="更新文档"
+      :style="{ width: '640px', maxWidth: '90vw' }"
+    >
+      <NSpace vertical :size="16">
+        <NFormItem label="来源名称">
+          <NSelect
+            v-model:value="docUpdateSource"
+            :options="docUpdateSources.map((s) => ({ label: s, value: s }))"
+            filterable
+            placeholder="选择要替换的文档来源（替换其全部分块）"
+          />
+        </NFormItem>
+        <NFormItem label="新文档内容">
+          <NInput
+            v-model:value="docUpdateText"
+            type="textarea"
+            :autosize="{ minRows: 10, maxRows: 20 }"
+            placeholder="粘贴新内容，将删除该来源旧分块并重新分块 + 向量化"
+          />
+        </NFormItem>
+      </NSpace>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="docUpdateShow = false">取消</NButton>
+          <NButton type="primary" :loading="docUpdating" @click="handleUpdateDoc">替换分块</NButton>
         </NSpace>
       </template>
     </NModal>

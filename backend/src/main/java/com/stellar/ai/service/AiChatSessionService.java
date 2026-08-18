@@ -20,6 +20,7 @@ import com.stellar.ai.service.rag.RagSearchService;
 import com.stellar.ai.service.rag.RetrievalResult;
 import com.stellar.ai.vo.AiChatResult;
 import com.stellar.ai.vo.RagSource;
+import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 /**
@@ -56,6 +58,10 @@ public class AiChatSessionService {
     private final AiChatToolService aiChatToolService;
     private final RagSearchService ragSearchService;
     private final RagFeedbackMapper ragFeedbackMapper;
+
+    /** 异步编排线程池：streamChat 先返回 emitter，检索+流式在后台线程执行（首 token 前可推检索进度） */
+    @Resource(name = "aiTaskExecutor")
+    private Executor ragExecutor;
 
     private static final int HISTORY_LIMIT = 20;
 
@@ -245,7 +251,7 @@ public class AiChatSessionService {
             throw new BusinessException("消息不能为空");
         }
 
-        // 1. 存 user 消息
+        // 1. 存 user 消息（同步）
         AiChatMessage userMsg = new AiChatMessage();
         userMsg.setSessionId(sessionId);
         userMsg.setRole("user");
@@ -254,51 +260,103 @@ public class AiChatSessionService {
         userMsg.setCreateTime(LocalDateTime.now());
         messageMapper.insert(userMsg);
 
-        // 2. 组装 messages（含 RAG 检索：知识库 + 备忘笔记，refs 收集实际召回来源用于溯源）
-        List<RagSource> refs = new ArrayList<>();
-        List<Map<String, String>> messages = buildMessages(session, userMessage, modelId, refs);
+        // 2. 主线程解析主体（异步线程无 sa-token/request 上下文）
+        boolean isLogin = StpUtil.isLogin();
+        String subjectType = isLogin ? "account" : "ip";
+        String subjectId = isLogin ? StpUtil.getLoginIdAsString() : getClientIp();
 
-        // 3. 流式
-        if (StpUtil.isLogin()) {
-            // 登录：带 tools（function calling），落 assistant 消息含附件
-            List<Map<String, Object>> messagesObj = messages.stream()
-                    .map(m -> new HashMap<String, Object>(m))
-                    .collect(Collectors.toList());
-            return aiChatService.streamMultiChatWithTools(messagesObj, modelId,
-                    aiChatToolService.getToolDefinitions(), voice, ar -> {
-                        if (!StringUtils.hasText(ar.content()) && ar.attachmentFileId() == null) {
-                            log.warn("[AI聊天] 工具流无文本且无附件，不保存 assistant sessionId={}", sessionId);
-                            return;
-                        }
-                        AiChatMessage aMsg = new AiChatMessage();
-                        aMsg.setSessionId(sessionId);
-                        aMsg.setRole("assistant");
-                        aMsg.setContent(ar.content() == null ? "" : ar.content());
-                        aMsg.setTokens(ar.content() == null ? 0 : ar.content().length());
-                        aMsg.setAttachmentType(ar.attachmentType());
-                        aMsg.setAttachmentFileId(ar.attachmentFileId());
-                        // RAG 溯源：回答实际召回并注入的资料（前端气泡渲染"参考"链接）
-                        aMsg.setRagRefs(RagSource.toJson(refs));
-                        aMsg.setCreateTime(LocalDateTime.now());
-                        messageMapper.insert(aMsg);
-                        updateSessionTitle(session, userMessage);
-                    });
-        }
-        // 游客：纯文本，无 tools（无 RAG，refs 恒空）
-        return aiChatService.streamMultiChat(messages, modelId, fullText -> {
-            if (!StringUtils.hasText(fullText)) {
-                log.warn("[AI聊天] 游客流返回空文本，不保存 assistant sessionId={}", sessionId);
-                return;
+        // 捕获请求属性供异步线程 re-bind（SSE 异步期间容器保持请求存活，读头安全）：
+        // 不 re-bind 的话 RAG 管线内 LLM 调用（改写/重排/判定/工具轮）在 currentSubject()
+        // 里拿不到请求上下文，会把登录主体的 token 消费错记成 ip:unknown。
+        ServletRequestAttributes requestAttrs =
+                (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        Thread submitThread = Thread.currentThread();
+
+        // 3. 先建 emitter 再异步跑检索+流式：客户端连接建立后即可收到检索进度事件，
+        //    解决 RAG 检索（embedding+改写+重排+判定）在首 token 前 10s+ 无反馈的问题
+        SseEmitter emitter = aiChatService.createChatEmitter();
+        String finalUserMessage = userMessage;
+        Long finalModelId = modelId;
+        ragExecutor.execute(() -> {
+            // 异步线程 re-bind 请求上下文（同步执行时当前线程已有，无需碰）；finally 清理防池化线程泄漏
+            boolean rebound = false;
+            if (requestAttrs != null && Thread.currentThread() != submitThread) {
+                RequestContextHolder.setRequestAttributes(requestAttrs);
+                rebound = true;
             }
-            AiChatMessage aMsg = new AiChatMessage();
-            aMsg.setSessionId(sessionId);
-            aMsg.setRole("assistant");
-            aMsg.setContent(fullText);
-            aMsg.setTokens(fullText == null ? 0 : fullText.length());
-            aMsg.setCreateTime(LocalDateTime.now());
-            messageMapper.insert(aMsg);
-            updateSessionTitle(session, userMessage);
+            try {
+                // 4a. 检索阶段提示（RAG 检索 + 消息组装在异步线程，完成后进入流式）
+                aiChatService.sendStatus(emitter, "retrieving");
+                List<RagSource> refs = new ArrayList<>();
+                List<Map<String, String>> messages = buildMessages(session, finalUserMessage, finalModelId, refs);
+                if (isLogin) {
+                    // 登录：带 tools（function calling），落 assistant 消息含附件
+                    List<Map<String, Object>> messagesObj = messages.stream()
+                            .map(m -> new HashMap<String, Object>(m))
+                            .collect(Collectors.toList());
+                    aiChatService.streamMultiChatWithTools(emitter, messagesObj, finalModelId,
+                            aiChatToolService.getToolDefinitions(), voice,
+                            ar -> saveAssistantMessage(session, ar, refs, finalUserMessage),
+                            subjectType, subjectId);
+                } else {
+                    // 游客：纯文本，无 tools（无 RAG，refs 恒空）
+                    aiChatService.streamMultiChat(emitter, messages, finalModelId,
+                            fullText -> saveGuestMessage(session, fullText, finalUserMessage),
+                            subjectType, subjectId);
+                }
+            } catch (Exception e) {
+                log.error("[AI聊天] 异步组装/启动流式失败 sessionId={}: {}", sessionId, e.getMessage(), e);
+                try {
+                    emitter.send(SseEmitter.event().data(
+                            Map.of("error", StringUtils.hasText(e.getMessage()) ? e.getMessage() : "内部错误"),
+                            org.springframework.http.MediaType.APPLICATION_JSON));
+                } catch (Exception ignore) {
+                    // 连接已断则忽略
+                }
+                emitter.complete();
+            } finally {
+                if (rebound) {
+                    RequestContextHolder.resetRequestAttributes();
+                }
+            }
         });
+        return emitter;
+    }
+
+    /** 登录助手消息落库（含 RAG 溯源 refs 与附件）。 */
+    private void saveAssistantMessage(AiChatSession session, AiChatResult ar, List<RagSource> refs, String userMessage) {
+        if (!StringUtils.hasText(ar.content()) && ar.attachmentFileId() == null) {
+            log.warn("[AI聊天] 工具流无文本且无附件，不保存 assistant sessionId={}", session.getId());
+            return;
+        }
+        AiChatMessage aMsg = new AiChatMessage();
+        aMsg.setSessionId(session.getId());
+        aMsg.setRole("assistant");
+        aMsg.setContent(ar.content() == null ? "" : ar.content());
+        aMsg.setTokens(ar.content() == null ? 0 : ar.content().length());
+        aMsg.setAttachmentType(ar.attachmentType());
+        aMsg.setAttachmentFileId(ar.attachmentFileId());
+        // RAG 溯源：回答实际召回并注入的资料（前端气泡渲染"参考"链接）
+        aMsg.setRagRefs(RagSource.toJson(refs));
+        aMsg.setCreateTime(LocalDateTime.now());
+        messageMapper.insert(aMsg);
+        updateSessionTitle(session, userMessage);
+    }
+
+    /** 游客助手消息落库（纯文本，无 RAG 溯源）。 */
+    private void saveGuestMessage(AiChatSession session, String fullText, String userMessage) {
+        if (!StringUtils.hasText(fullText)) {
+            log.warn("[AI聊天] 游客流返回空文本，不保存 assistant sessionId={}", session.getId());
+            return;
+        }
+        AiChatMessage aMsg = new AiChatMessage();
+        aMsg.setSessionId(session.getId());
+        aMsg.setRole("assistant");
+        aMsg.setContent(fullText);
+        aMsg.setTokens(fullText.length());
+        aMsg.setCreateTime(LocalDateTime.now());
+        messageMapper.insert(aMsg);
+        updateSessionTitle(session, userMessage);
     }
 
     /** 首轮用用户消息截断生成标题；每轮更新会话时间 */
@@ -322,8 +380,16 @@ public class AiChatSessionService {
                                                     Long modelId, List<RagSource> refs) {
         List<Map<String, String>> messages = new ArrayList<>();
 
-        // system：人设 + 记忆 + RAG
-        String systemText = buildSystemText(session, currentUserMessage, modelId, refs);
+        // 历史：最近 N 条（倒序取后正序），含刚存的 user 消息
+        List<AiChatMessage> recent = messageMapper.selectList(new LambdaQueryWrapper<AiChatMessage>()
+                .eq(AiChatMessage::getSessionId, session.getId())
+                .orderByDesc(AiChatMessage::getCreateTime)
+                .last("LIMIT " + HISTORY_LIMIT));
+        Collections.reverse(recent);
+
+        // system：人设 + 记忆 + RAG（RAG 改写器带会话历史，多轮追问补全指代）
+        String systemText = buildSystemText(session, currentUserMessage, modelId, refs,
+                toHistory(recent, currentUserMessage));
         if (StringUtils.hasText(systemText)) {
             Map<String, String> sys = new HashMap<>();
             sys.put("role", "system");
@@ -331,12 +397,6 @@ public class AiChatSessionService {
             messages.add(sys);
         }
 
-        // 历史：最近 N 条（倒序取后正序），含刚存的 user 消息
-        List<AiChatMessage> recent = messageMapper.selectList(new LambdaQueryWrapper<AiChatMessage>()
-                .eq(AiChatMessage::getSessionId, session.getId())
-                .orderByDesc(AiChatMessage::getCreateTime)
-                .last("LIMIT " + HISTORY_LIMIT));
-        Collections.reverse(recent);
         for (AiChatMessage m : recent) {
             if ("system".equals(m.getRole())) continue;
             Map<String, String> msg = new HashMap<>();
@@ -348,11 +408,35 @@ public class AiChatSessionService {
     }
 
     /**
+     * 组装 RAG 改写用的对话上下文：最近的 user/assistant 轮次（不含刚存入的当前句——
+     * 它正是被改写对象）。按时间正序，最新在后。
+     */
+    private List<Map<String, String>> toHistory(List<AiChatMessage> recent, String currentUserMessage) {
+        List<Map<String, String>> history = new ArrayList<>();
+        int end = recent.size();
+        // 最后一条是刚存入的当前用户消息（时间最新），排除在历史外
+        if (!recent.isEmpty() && "user".equals(recent.get(recent.size() - 1).getRole())
+                && currentUserMessage.equals(recent.get(recent.size() - 1).getContent())) {
+            end = recent.size() - 1;
+        }
+        for (int i = 0; i < end; i++) {
+            AiChatMessage m = recent.get(i);
+            if ("system".equals(m.getRole())) continue;
+            Map<String, String> turn = new HashMap<>();
+            turn.put("role", m.getRole());
+            turn.put("content", m.getContent());
+            history.add(turn);
+        }
+        return history;
+    }
+
+    /**
      * 拼装 system 文本：人设 systemPrompt 为基，登录用户追加长期记忆，RAG 检索注入（知识库 + 备忘笔记）。
      * <p>RAG 走 {@link RagSearchService} 管线（改写→检索→RRF 融合→阈值→重排），
      * 检索片段以 [来源N] 编号注入并引导 LLM 引用；同时把实际召回来源填入 refs 供消息溯源落库。
      */
-    private String buildSystemText(AiChatSession session, String query, Long modelId, List<RagSource> refs) {
+    private String buildSystemText(AiChatSession session, String query, Long modelId, List<RagSource> refs,
+                                   List<Map<String, String>> history) {
         StringBuilder sb = new StringBuilder();
         // 人设
         if (session.getPersonaId() != null) {
@@ -378,7 +462,7 @@ public class AiChatSessionService {
         // RAG 检索（仅登录：知识库 + 备忘笔记双源；游客无 RAG 保持原行为）
         if ("account".equals(session.getSubjectType())) {
             try {
-                RetrievalResult result = ragSearchService.search(query, session.getKbId(), true, modelId);
+                RetrievalResult result = ragSearchService.search(query, session.getKbId(), true, modelId, history);
                 List<RagHit> hits = result.hits();
                 if (!hits.isEmpty()) {
                     sb.append("以下是从你的备忘笔记/知识库中检索到的相关资料（当用户要求\"搜索笔记\"、\"查找笔记\"、"

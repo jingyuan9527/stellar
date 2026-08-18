@@ -24,10 +24,15 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -67,6 +72,8 @@ class AiChatSessionServiceTest {
     void setup() {
         service = new AiChatSessionService(sessionMapper, messageMapper, personaMapper, userMapper,
                 memoryService, aiChatService, aiChatToolService, ragSearchService, ragFeedbackMapper);
+        // 异步编排线程池注入同步 executor：测试里异步变同步，可确定性断言
+        ReflectionTestUtils.setField(service, "ragExecutor", (Executor) Runnable::run);
     }
 
     private AiChatSession accountSession(Long id, String subjectId) {
@@ -242,14 +249,93 @@ class AiChatSessionServiceTest {
             when(messageMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
             when(memoryService.listByUser(anyLong())).thenReturn(List.of());
             SseEmitter emitter = mock(SseEmitter.class);
-            when(aiChatService.streamMultiChatWithTools(any(), any(), any(), any(), any())).thenReturn(emitter);
+            when(aiChatService.createChatEmitter()).thenReturn(emitter);
+            when(aiChatService.streamMultiChatWithTools(any(), any(), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(emitter);
 
             SseEmitter r = service.streamChat(1L, "你好", 1L, null);
+
             assertNotNull(r);
             ArgumentCaptor<AiChatMessage> mcap = ArgumentCaptor.forClass(AiChatMessage.class);
             verify(messageMapper).insert(mcap.capture());
             assertEquals("user", mcap.getValue().getRole());
-            verify(aiChatService).streamMultiChatWithTools(any(), any(), any(), any(), any());
+            // 检索进度事件 + 异步组装后进入带 tools 流式（主体参数已从主线程解析传入）
+            verify(aiChatService).sendStatus(any(), eq("retrieving"));
+            verify(aiChatService).streamMultiChatWithTools(any(), any(), any(), any(), any(), any(), eq("account"), eq("1"));
+        }
+    }
+
+    @Test
+    void streamChat_游客_先建Emitter并走纯文本流() {
+        // 游客主体按 IP：补一个 mock request 让 getClientIp() 命中 1.2.3.4
+        HttpServletRequest req = mock(HttpServletRequest.class);
+        when(req.getHeader("X-Forwarded-For")).thenReturn(null);
+        when(req.getHeader("X-Real-IP")).thenReturn(null);
+        when(req.getRemoteAddr()).thenReturn("1.2.3.4");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(req));
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::isLogin).thenReturn(false);
+            AiChatSession s = new AiChatSession();
+            s.setId(1L);
+            s.setSubjectType("ip");
+            s.setSubjectId("1.2.3.4");
+            when(sessionMapper.selectById(1L)).thenReturn(s);
+            when(messageMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+            SseEmitter emitter = mock(SseEmitter.class);
+            when(aiChatService.createChatEmitter()).thenReturn(emitter);
+            when(aiChatService.streamMultiChat(any(), any(), any(), any(), any(), any())).thenReturn(emitter);
+
+            SseEmitter r = service.streamChat(1L, "你好", null, null);
+
+            assertNotNull(r);
+            verify(aiChatService).sendStatus(any(), eq("retrieving"));
+            verify(aiChatService).streamMultiChat(any(), any(), any(), any(), eq("ip"), any());
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    @Test
+    void streamChat_异步线程_rebind请求上下文供RAG管线解析主体() throws Exception {
+        // 回归：异步线程无请求上下文时，RAG 管线内 LLM 调用（改写/重排/判定）的 currentSubject()
+        // 会把登录主体错记成 ip:unknown。修复 = 主线程捕获 RequestContextHolder 并在异步线程 re-bind。
+        HttpServletRequest req = mock(HttpServletRequest.class);
+        ServletRequestAttributes attrs = new ServletRequestAttributes(req);
+        RequestContextHolder.setRequestAttributes(attrs);
+        List<Thread> spawned = new java.util.ArrayList<>();
+        // 真实独立线程执行（区别于其它用例的同步 executor），制造"不同线程无上下文"场景
+        ReflectionTestUtils.setField(service, "ragExecutor", (Executor) r -> {
+            Thread t = new Thread(r);
+            spawned.add(t);
+            t.start();
+        });
+        try (MockedStatic<StpUtil> stp = login("1")) {
+            when(sessionMapper.selectById(1L)).thenReturn(accountSession(1L, "1"));
+            when(messageMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+            when(memoryService.listByUser(anyLong())).thenReturn(List.of());
+            SseEmitter emitter = mock(SseEmitter.class);
+            when(aiChatService.createChatEmitter()).thenReturn(emitter);
+            // 在异步线程执行流式入口时捕获当前请求属性，断言 re-bind 生效
+            java.util.concurrent.atomic.AtomicReference<org.springframework.web.context.request.RequestAttributes> seen
+                    = new java.util.concurrent.atomic.AtomicReference<>();
+            when(aiChatService.streamMultiChatWithTools(any(), any(), any(), any(), any(), any(), any(), any()))
+                    .thenAnswer(inv -> {
+                        seen.set(RequestContextHolder.getRequestAttributes());
+                        return emitter;
+                    });
+
+            service.streamChat(1L, "你好", 1L, null);
+            for (Thread t : spawned) {
+                t.join(5000);
+            }
+
+            // 异步线程内能看到主线程的请求属性（主体可解析），而非 null/遗留池化值
+            assertSame(attrs, seen.get());
+            // 主线程上下文未被异步线程的 finally 清理波及
+            assertSame(attrs, RequestContextHolder.getRequestAttributes());
+            verify(aiChatService).streamMultiChatWithTools(any(), any(), any(), any(), any(), any(), eq("account"), eq("1"));
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
         }
     }
 }

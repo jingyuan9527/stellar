@@ -28,12 +28,16 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -115,6 +119,32 @@ class RagEvalServiceTest {
         } catch (com.stellar.common.BusinessException e) {
             assertTrue(e.getMessage().contains("评估集为空"));
         }
+    }
+
+    @Test
+    void runEvaluation_full模式_走完整管线并落库模式() {
+        when(caseMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(caseRow(1L, "问题A", "[\"memos:12\"]")));
+        when(ragSearchService.searchFull(eq("问题A"), eq(null), eq(true), isNull()))
+                .thenReturn(resultWith("memos:12"));
+
+        RagEvalRunVO vo = service.runEvaluation("full");
+
+        assertEquals("full", vo.mode());
+        assertEquals(1, vo.passCount());
+        // full 走 searchFull（完整管线、不吃相关性闸门），不走 searchTopK
+        verify(ragSearchService).searchFull(eq("问题A"), eq(null), eq(true), isNull());
+        verify(ragSearchService, never()).searchTopK(any(), any(), anyBoolean(), anyInt());
+        // 落库结果带模式标记
+        org.mockito.ArgumentCaptor<RagEvalResult> cap =
+                org.mockito.ArgumentCaptor.forClass(RagEvalResult.class);
+        verify(resultMapper).insert(cap.capture());
+        assertEquals("full", cap.getValue().getMode());
+    }
+
+    @Test
+    void runEvaluation_非法mode_抛异常() {
+        assertThrows(com.stellar.common.BusinessException.class, () -> service.runEvaluation("weird"));
     }
 
     @Test

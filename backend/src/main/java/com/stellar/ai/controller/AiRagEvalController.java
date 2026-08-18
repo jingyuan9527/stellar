@@ -67,12 +67,13 @@ public class AiRagEvalController {
     }
 
     /**
-     * 跑分：对全部评估用例跑纯检索路径（不调 LLM，秒级）。返回本次 run 汇总 + 明细。
+     * 跑分：默认纯检索路径（不调 LLM，秒级），mode=full 走完整管线（含改写/重排/loop，与线上一致，较慢）。
+     * 返回本次 run 汇总 + 明细。
      */
     @PostMapping("/run")
     @Log(title = "RAG评估", type = OperationType.OTHER)
-    public Result<RagEvalRunVO> run() {
-        return Result.success(ragEvalService.runEvaluation());
+    public Result<RagEvalRunVO> run(@RequestParam(defaultValue = "retrieval") String mode) {
+        return Result.success(ragEvalService.runEvaluation(mode));
     }
 
     /** 某次跑分批次的全部结果（按 runId 回看/回归对比）。 */

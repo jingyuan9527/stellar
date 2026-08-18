@@ -32,6 +32,16 @@ public class LlmQueryRewriter implements QueryRewriter {
             "\n\n注意：上一轮检索发现以下资料缺口，请把你改写出的查询向补足缺口信息的方向扩展"
                     + "（可换检索词/加限定词/拆成子主题，但仍是单个查询，不要多列问题）：\n";
 
+    /** 多轮上下文提示词前缀：把最近几轮对话提供给改写器补全指代。 */
+    static final String HISTORY_PROMPT =
+            "\n\n以下是对话历史（最近的几条，用于补全指代/理解上下文；不要改写历史，"
+                    + "只把最后的问题改写为适合检索的查询）：\n";
+
+    /** 参与上下文的历史轮次上限 */
+    private static final int HISTORY_TURNS = 4;
+    /** 单条历史内容截断长度（防 prompt 过长） */
+    private static final int HISTORY_LEN = 200;
+
     @Override
     public String rewrite(String query, Long modelId) {
         return rewrite(query, null, modelId);
@@ -39,12 +49,18 @@ public class LlmQueryRewriter implements QueryRewriter {
 
     @Override
     public String rewrite(String query, String gap, Long modelId) {
+        return rewrite(query, gap, modelId, null);
+    }
+
+    @Override
+    public String rewrite(String query, String gap, Long modelId, List<Map<String, String>> history) {
         if (!StringUtils.hasText(query)) {
             return query;
         }
         long start = System.currentTimeMillis();
         try {
             String prompt = REWRITE_PROMPT + query
+                    + historyPrompt(history)
                     + (StringUtils.hasText(gap) ? GAP_PROMPT + gap : "");
             String rewritten = aiChatService.chatCompletionWithMessages(
                     List.of(Map.of("role", "user", "content", prompt)), modelId);
@@ -64,6 +80,31 @@ public class LlmQueryRewriter implements QueryRewriter {
             log.warn("[RAG管线] 查询改写失败，回退原查询: {}", e.getMessage());
             return query;
         }
+    }
+
+    /** 拼装会话历史块（最多 HISTORY_TURNS 轮，单条截断 HISTORY_LEN 字；空/无则返回空串）。 */
+    private String historyPrompt(List<Map<String, String>> history) {
+        if (history == null || history.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(HISTORY_PROMPT);
+        int shown = 0;
+        for (Map<String, String> turn : history) {
+            if (shown >= HISTORY_TURNS) {
+                break;
+            }
+            String role = turn == null ? "user" : String.valueOf(turn.getOrDefault("role", "user"));
+            String content = turn == null ? "" : String.valueOf(turn.getOrDefault("content", ""));
+            if (content.isBlank()) {
+                continue;
+            }
+            if (content.length() > HISTORY_LEN) {
+                content = content.substring(0, HISTORY_LEN) + "…";
+            }
+            sb.append("assistant".equals(role) ? "助手：" : "用户：").append(content).append('\n');
+            shown++;
+        }
+        return sb.toString();
     }
 
     private String truncate(String s) {

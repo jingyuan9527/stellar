@@ -208,6 +208,16 @@ export function deleteKnowledgeChunk(id: number) {
   return request<void>({ url: `/ai/knowledge/chunk/${id}`, method: 'delete' })
 }
 
+/** 更新文档：按来源名替换全部旧分块并重新向量化 */
+export function updateKnowledgeDocument(kbId: number, data: { text: string; sourceName: string }) {
+  return request<number>({ url: `/ai/knowledge/${kbId}/document`, method: 'put', data, timeout: 120000 })
+}
+
+/** 知识库全部文档来源名（更新文档下拉用） */
+export function listKnowledgeSources(kbId: number) {
+  return request<string[]>({ url: `/ai/knowledge/${kbId}/sources`, method: 'get' })
+}
+
 export function rebuildKnowledgeBase(kbId: number) {
   return request<void>({ url: `/ai/knowledge/${kbId}/rebuild`, method: 'put', timeout: 300000 })
 }

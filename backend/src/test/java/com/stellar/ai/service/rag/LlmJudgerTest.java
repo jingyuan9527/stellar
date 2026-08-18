@@ -66,6 +66,14 @@ class LlmJudgerTest {
     }
 
     @Test
+    void judge_宽松回退_带空格变体() {
+        // 修复点（P3）：去空白后匹配，"sufficient: false"（带空格）也应判不足
+        when(aiChatService.chatCompletionWithMessages(any(), any()))
+                .thenReturn("sufficient: false 资料不足");
+        assertFalse(judger.judge("q", List.of(hit("1")), null).sufficient());
+    }
+
+    @Test
     void judge_无JSON_宽松回退默认放行() {
         when(aiChatService.chatCompletionWithMessages(any(), any()))
                 .thenReturn("我不确定，随便吧");

@@ -108,6 +108,23 @@ public class AiKnowledgeController {
         return Result.success(knowledgeService.addDocument(kbId, text, original));
     }
 
+    /**
+     * 更新文档：按来源名替换全部旧分块并重新向量化（解决"改文档只能删了重加"）。
+     */
+    @PutMapping("/{kbId}/document")
+    @Log(title = "知识库文档", type = OperationType.UPDATE)
+    public Result<Integer> updateDocument(@PathVariable Long kbId,
+                                          @Valid @RequestBody AiDocumentAddDTO dto) {
+        return Result.success(knowledgeService.updateDocument(kbId, dto.getSourceName(), dto.getText()));
+    }
+
+    /** 该知识库全部文档来源名（更新文档下拉用）。 */
+    @GetMapping("/{kbId}/sources")
+    @Log(title = "知识库", type = OperationType.QUERY)
+    public Result<List<String>> listSources(@PathVariable Long kbId) {
+        return Result.success(knowledgeService.listSources(kbId));
+    }
+
     @DeleteMapping("/chunk/{id}")
     @Log(title = "知识库分块", type = OperationType.DELETE)
     public Result<Void> deleteChunk(@PathVariable Long id) {

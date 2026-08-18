@@ -8,6 +8,7 @@ import com.stellar.ai.entity.AiKnowledgeBase;
 import com.stellar.ai.entity.AiKnowledgeChunk;
 import com.stellar.ai.mapper.AiKnowledgeBaseMapper;
 import com.stellar.ai.mapper.AiKnowledgeChunkMapper;
+import com.stellar.ai.service.rag.Bm25Index;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * AI 知识库 + RAG：KB CRUD、文档分块(500字+50 overlap)、向量化(调 /v1/embeddings)、语义检索 top-k。
@@ -54,6 +56,18 @@ public class AiKnowledgeService {
                     return size() > VECTOR_CACHE_MAX_KB;
                 }
             });
+
+    /** BM25 倒排索引缓存（与 vectorCache 同 key 同生命周期，随数据变更一起失效）。 */
+    private final Map<Long, Bm25Index> bm25Cache = Collections.synchronizedMap(
+            new LinkedHashMap<>(VECTOR_CACHE_MAX_KB, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Long, Bm25Index> eldest) {
+                    return size() > VECTOR_CACHE_MAX_KB;
+                }
+            });
+
+    /** 重建索引并发锁：连点/并发触发时拒绝后到者，避免重复向量化烧 token。 */
+    private final AtomicBoolean rebuildLock = new AtomicBoolean(false);
 
     // ===== 知识库 CRUD =====
 
@@ -92,11 +106,17 @@ public class AiKnowledgeService {
         }
         kb.setName(dto.getName().trim());
         kb.setDescription(dto.getDescription());
-        if (dto.getEmbeddingModelId() != null) {
+        if (dto.getEmbeddingModelId() != null && !dto.getEmbeddingModelId().equals(kb.getEmbeddingModelId())) {
+            // 换向量化模型：旧维度向量与新模型不兼容（cosine 维度不一致恒为 0，检索会静默返回垃圾），
+            // 直接清空该 KB 全部分块向量，检索返回空（明确语义），重建索引后恢复。
+            jdbcTemplate.update("UPDATE ai_knowledge_chunk SET embedding = NULL WHERE kb_id = ?", dto.getId());
+            log.warn("[知识库] 切换 embedding 模型 {} -> {}，已清空全部分块向量，请重建索引",
+                    kb.getEmbeddingModelId(), dto.getEmbeddingModelId());
             kb.setEmbeddingModelId(dto.getEmbeddingModelId());
         }
         kb.setUpdateTime(LocalDateTime.now());
         kbMapper.updateById(kb);
+        invalidateIndexCache(dto.getId());
         log.info("[知识库] 更新 id={} name={}", kb.getId(), kb.getName());
     }
 
@@ -104,7 +124,7 @@ public class AiKnowledgeService {
     public void deleteKb(Long id) {
         chunkMapper.delete(new LambdaQueryWrapper<AiKnowledgeChunk>().eq(AiKnowledgeChunk::getKbId, id));
         kbMapper.deleteById(id);
-        invalidateVectorCache(id);
+        invalidateIndexCache(id);
         log.info("[知识库] 删除 id={} (含分块)", id);
     }
 
@@ -125,7 +145,7 @@ public class AiKnowledgeService {
         }
         chunkMapper.deleteById(id);
         refreshChunkCount(chunk.getKbId());
-        invalidateVectorCache(chunk.getKbId());
+        invalidateIndexCache(chunk.getKbId());
     }
 
     /**
@@ -145,9 +165,44 @@ public class AiKnowledgeService {
         // 批量向量化回填 embedding 列（失败不阻断分块入库，仅日志告警）
         vectorizeChunks(kb, inserted);
         refreshChunkCount(kbId);
-        invalidateVectorCache(kbId);
+        invalidateIndexCache(kbId);
         log.info("[知识库] 添加文档 kbId={} source={} chunks={}", kbId, sourceName, inserted.size());
         return inserted.size();
+    }
+
+    /**
+     * 更新文档：按来源名替换全部旧分块（删旧 + 重新分块入库，同一事务），再向量化新分块。
+     * 解决"改文档只能删了重加"的问题。
+     */
+    public int updateDocument(Long kbId, String sourceName, String text) {
+        if (!StringUtils.hasText(sourceName)) {
+            throw new BusinessException("来源名称不能为空");
+        }
+        AiKnowledgeBase kb = getKb(kbId);
+        List<AiKnowledgeChunk> inserted = new TransactionTemplate(transactionManager)
+                .execute(status -> {
+                    chunkMapper.delete(new LambdaQueryWrapper<AiKnowledgeChunk>()
+                            .eq(AiKnowledgeChunk::getKbId, kbId)
+                            .eq(AiKnowledgeChunk::getSourceName, sourceName));
+                    List<String> pieces = chunk(text, CHUNK_SIZE, CHUNK_OVERLAP);
+                    if (pieces.isEmpty()) {
+                        throw new BusinessException("文档分块为空");
+                    }
+                    return insertChunks(kbId, pieces, sourceName);
+                });
+        vectorizeChunks(kb, inserted);
+        refreshChunkCount(kbId);
+        invalidateIndexCache(kbId);
+        log.info("[知识库] 更新文档 kbId={} source={} chunks={}", kbId, sourceName, inserted.size());
+        return inserted.size();
+    }
+
+    /** 该知识库全部文档来源名（分块管理页"更新文档"下拉用，DISTINCT 去重）。 */
+    public List<String> listSources(Long kbId) {
+        getKb(kbId);
+        return jdbcTemplate.queryForList(
+                "SELECT DISTINCT source_name FROM ai_knowledge_chunk WHERE kb_id=? "
+                        + "AND source_name IS NOT NULL ORDER BY source_name", String.class, kbId);
     }
 
     /** 分块持久化（由调用方通过 TransactionTemplate 包裹，保证全成功或全回滚）。 */
@@ -173,15 +228,22 @@ public class AiKnowledgeService {
      * <p>无原子性需求（向量化失败已 best-effort 捕获），不包裹事务，避免长网络调用占用 DB 连接。
      */
     public void rebuild(Long kbId) {
-        AiKnowledgeBase kb = getKb(kbId);
-        List<AiKnowledgeChunk> all = chunkMapper.selectList(
-                new LambdaQueryWrapper<AiKnowledgeChunk>().eq(AiKnowledgeChunk::getKbId, kbId));
-        if (all.isEmpty()) {
-            throw new BusinessException("知识库无分块");
+        if (!rebuildLock.compareAndSet(false, true)) {
+            throw new BusinessException("重建索引进行中，请稍后再试");
         }
-        vectorizeChunks(kb, all);
-        invalidateVectorCache(kbId);
-        log.info("[知识库] 重建索引完成 kbId={} chunks={}", kbId, all.size());
+        try {
+            AiKnowledgeBase kb = getKb(kbId);
+            List<AiKnowledgeChunk> all = chunkMapper.selectList(
+                    new LambdaQueryWrapper<AiKnowledgeChunk>().eq(AiKnowledgeChunk::getKbId, kbId));
+            if (all.isEmpty()) {
+                throw new BusinessException("知识库无分块");
+            }
+            vectorizeChunks(kb, all);
+            invalidateIndexCache(kbId);
+            log.info("[知识库] 重建索引完成 kbId={} chunks={}", kbId, all.size());
+        } finally {
+            rebuildLock.set(false);
+        }
     }
 
     /**
@@ -198,14 +260,47 @@ public class AiKnowledgeService {
             log.warn("[知识库] 查询向量化失败，RAG 跳过: {}", e.getMessage());
             return List.of();
         }
-        // 加载该 KB 全量带向量分块（embedding 不在实体默认 select，用手写 SQL 查）
-        List<CachedChunk> chunks = getCachedChunks(kbId);
+        return searchDetailedWithVector(kb, qvec, topK);
+    }
+
+    /**
+     * 检索主体（供 RAG 管线共享 query 向量时调用：调用方保证 qvec 已用本 KB 的 embedding 模型计算，
+     * 避免 KB 与备忘双源对同一 query 重复向量化）。kb/qvec 为 null 返回空（调用方已降级）。
+     */
+    public List<ScoredChunk> searchDetailedWithVector(AiKnowledgeBase kb, float[] qvec, int topK) {
+        if (kb == null || qvec == null) {
+            return List.of();
+        }
+        // 加载该 KB 全量分块（embedding 不在实体默认 select，用手写 SQL 查；未向量化分块 vector=null）
+        List<CachedChunk> chunks = getCachedChunks(kb.getId());
         if (chunks.isEmpty()) {
             return List.of();
         }
+        // 维度防御：切换 embedding 模型后旧分块向量维度不匹配，cosine 恒为 0 会静默返回垃圾 top-k。
+        // 策略：跳过维度不匹配的向量（记录告警），用剩余可用向量检索；全部不匹配才返回空（提示重建索引）。
+        // 不采用"任一不匹配即全空"：混合维度（部分旧模型）时不应把可用向量一起丢掉。
         List<Scored> scored = new ArrayList<>();
+        int dimSkipped = 0;
         for (CachedChunk chunk : chunks) {
-            scored.add(new Scored(chunk.id(), chunk.text(), chunk.sourceName(), VectorOps.cosine(qvec, chunk.vector())));
+            float[] v = chunk.vector();
+            if (v == null) {
+                continue;
+            }
+            if (v.length != qvec.length) {
+                dimSkipped++;
+                continue;
+            }
+            scored.add(new Scored(chunk.id(), chunk.text(), chunk.sourceName(), VectorOps.cosine(qvec, v)));
+        }
+        if (scored.isEmpty()) {
+            if (dimSkipped > 0) {
+                log.warn("[知识库] 全部分块向量维度不一致 kbId={} 查询维度={}，请重建索引（切模型后旧向量已失效）",
+                        kb.getId(), qvec.length);
+            }
+            return List.of();
+        }
+        if (dimSkipped > 0) {
+            log.warn("[知识库] 跳过 {} 条维度不匹配分块 kbId={} 查询维度={}，建议重建索引", dimSkipped, kb.getId(), qvec.length);
         }
         scored.sort((a, b) -> Double.compare(b.sim, a.sim));
         int k = topK > 0 ? topK : DEFAULT_TOP_K;
@@ -213,6 +308,35 @@ public class AiKnowledgeService {
         for (int i = 0; i < Math.min(k, scored.size()); i++) {
             Scored s = scored.get(i);
             result.add(new ScoredChunk(s.chunkId, s.chunkText, s.sourceName, s.sim));
+        }
+        return result;
+    }
+
+    /**
+     * 关键词检索（BM25 倒排，零依赖）：专有名词/编号/标签等精确词召回，
+     * 与 {@link #searchDetailed} 的稠密向量检索经 RRF 融合组成混合检索（见 RagSearchService）。
+     */
+    public List<ScoredChunk> searchDetailedKeyword(Long kbId, String query, int topK) {
+        return searchDetailedKeywordWith(getKb(kbId), query, topK);
+    }
+
+    /**
+     * BM25 主体（供 RAG 管线传入已解析的 KB，避免每轮重复存在性查询）。kb 为 null 返回空。
+     */
+    public List<ScoredChunk> searchDetailedKeywordWith(AiKnowledgeBase kb, String query, int topK) {
+        if (kb == null) {
+            return List.of();
+        }
+        List<CachedChunk> chunks = getCachedChunks(kb.getId());
+        if (chunks.isEmpty()) {
+            return List.of();
+        }
+        Bm25Index index = getBm25Index(kb.getId(), chunks);
+        List<Bm25Index.Score> scores = index.search(query, topK > 0 ? topK : DEFAULT_TOP_K);
+        List<ScoredChunk> result = new ArrayList<>(scores.size());
+        for (Bm25Index.Score s : scores) {
+            CachedChunk c = chunks.get(s.docIndex());
+            result.add(new ScoredChunk(c.id(), c.text(), c.sourceName(), s.score()));
         }
         return result;
     }
@@ -291,17 +415,20 @@ public class AiKnowledgeService {
             if (cached != null) {
                 return cached;
             }
+            // 全量加载（含未向量化分块 vector=null）：BM25 关键词通道不依赖向量，
+            // 向量化失败/切模型清空后关键词检索仍可用，与稠密通道互补
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                     "SELECT id, chunk_text, source_name, embedding FROM ai_knowledge_chunk "
-                            + "WHERE kb_id=? AND embedding IS NOT NULL", kbId);
+                            + "WHERE kb_id=?", kbId);
             List<CachedChunk> loaded = new ArrayList<>(rows.size());
             for (Map<String, Object> row : rows) {
-                float[] vector = VectorOps.parseVector((String) row.get("embedding"));
-                if (vector != null && vector.length > 0) {
-                    Number id = (Number) row.get("id");
-                    loaded.add(new CachedChunk(id.longValue(), (String) row.get("chunk_text"),
-                            (String) row.get("source_name"), vector));
+                Number id = (Number) row.get("id");
+                if (id == null) {
+                    continue;
                 }
+                float[] vector = VectorOps.parseVector((String) row.get("embedding"));
+                loaded.add(new CachedChunk(id.longValue(), (String) row.get("chunk_text"),
+                        (String) row.get("source_name"), vector == null || vector.length == 0 ? null : vector));
             }
             List<CachedChunk> immutable = List.copyOf(loaded);
             vectorCache.put(kbId, immutable);
@@ -309,17 +436,33 @@ public class AiKnowledgeService {
         }
     }
 
-    private void invalidateVectorCache(Long kbId) {
+    /** 数据变更（增删改文档/重建/切模型）后失效向量与 BM25 两套检索缓存。 */
+    private void invalidateIndexCache(Long kbId) {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
                     vectorCache.remove(kbId);
+                    bm25Cache.remove(kbId);
                 }
             });
             return;
         }
         vectorCache.remove(kbId);
+        bm25Cache.remove(kbId);
+    }
+
+    /** BM25 索引按 kbId 缓存（与 vectorCache 同源同序：docIndex 对齐 CachedChunk 列表下标）。 */
+    private Bm25Index getBm25Index(Long kbId, List<CachedChunk> chunks) {
+        synchronized (bm25Cache) {
+            Bm25Index idx = bm25Cache.get(kbId);
+            if (idx != null) {
+                return idx;
+            }
+            Bm25Index built = Bm25Index.build(chunks.stream().map(CachedChunk::text).toList());
+            bm25Cache.put(kbId, built);
+            return built;
+        }
     }
 
     /** 检索结果详情（含 chunkId/sourceName/score），供 RAG 管线使用。 */

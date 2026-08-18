@@ -104,10 +104,23 @@ public class RagEvalService {
     // ===== 跑分 =====
 
     /**
-     * 跑分：对全部评估用例走纯检索路径（不改写/不重排/不开 loop，不调 LLM），
-     * 算 recall@k（期望来源命中率）并按批次落 rag_eval_result 供回归对比。
+     * 跑分（默认纯检索路径）。
      */
     public RagEvalRunVO runEvaluation() {
+        return runEvaluation("retrieval");
+    }
+
+    /**
+     * 跑分：对全部评估用例算 recall@k（期望来源命中率）并按批次落 rag_eval_result 供回归对比。
+     *
+     * @param mode retrieval=纯检索路径（不改写/不重排/不开 loop，不调 LLM，秒级）；
+     *             full=完整管线（改写/混合检索/重排/loop，与线上行为一致但每条用例会调 LLM，较慢）
+     */
+    public RagEvalRunVO runEvaluation(String mode) {
+        boolean full = "full".equalsIgnoreCase(mode);
+        if (!full && !"retrieval".equalsIgnoreCase(mode)) {
+            throw new BusinessException("mode 仅支持 retrieval/full");
+        }
         List<RagEvalCase> cases = caseMapper.selectList(
                 new LambdaQueryWrapper<RagEvalCase>().orderByAsc(RagEvalCase::getId));
         if (cases.isEmpty()) {
@@ -123,7 +136,10 @@ public class RagEvalService {
 
         for (RagEvalCase c : cases) {
             List<String> expected = parseSources(c.getExpectedSources());
-            RetrievalResult rr = ragSearchService.searchTopK(c.getQuery(), c.getKbId(), true, topK);
+            // full 走 searchFull：完整管线但不吃相关性闸门（评估用例都是显式检索意图，短 query 不该被跳过）
+            RetrievalResult rr = full
+                    ? ragSearchService.searchFull(c.getQuery(), c.getKbId(), true, null)
+                    : ragSearchService.searchTopK(c.getQuery(), c.getKbId(), true, topK);
             Set<String> topKeys = new HashSet<>();
             List<RagEvalHitVO> hitVOs = new ArrayList<>(rr.hits().size());
             for (RagHit h : rr.hits()) {
@@ -147,16 +163,17 @@ public class RagEvalService {
             r.setTopHits(toJson(hitVOs));
             r.setPass(pass ? 1 : 0);
             r.setRecall(recall);
+            r.setMode(full ? "full" : "retrieval");
             r.setCreateTime(now);
             resultMapper.insert(r);
 
             details.add(new RagEvalDetailVO(c.getId(), c.getQuery(), pass, recall, hitVOs));
         }
         double recallAvg = cases.isEmpty() ? 0 : recallSum / cases.size();
-        log.info("[RAG评估] 跑分完成 runId={} total={} pass={} fail={} recallAvg={} 耗时={}ms",
-                runId, cases.size(), passCount, failCount,
+        log.info("[RAG评估] 跑分完成 runId={} mode={} total={} pass={} fail={} recallAvg={} 耗时={}ms",
+                runId, full ? "full" : "retrieval", cases.size(), passCount, failCount,
                 String.format("%.4f", recallAvg), System.currentTimeMillis() - start);
-        return new RagEvalRunVO(runId, cases.size(), passCount, failCount,
+        return new RagEvalRunVO(runId, full ? "full" : "retrieval", cases.size(), passCount, failCount,
                 Math.round(recallAvg * 10000) / 10000.0, details);
     }
 

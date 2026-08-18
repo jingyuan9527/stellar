@@ -3,6 +3,8 @@ package com.stellar.memos.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.stellar.ai.service.AiEmbeddingService;
 import com.stellar.ai.service.VectorOps;
+import com.stellar.ai.service.rag.Bm25Index;
+import com.stellar.common.BusinessException;
 import com.stellar.memos.entity.MemosNote;
 import com.stellar.memos.mapper.MemosNoteMapper;
 import com.stellar.memos.vo.MemosJobResultVO;
@@ -20,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 备忘笔记 RAG：把备份笔记向量化，聊天时按 IP 无关（仅登录）检索注入问答。
@@ -51,6 +54,12 @@ public class MemosRagService {
                 }
             });
 
+    /** BM25 倒排索引缓存（与 noteCache 同生命周期：getCachedNotes 重建时一并重建，invalidateCache 时清空）。 */
+    private volatile Bm25Index noteBm25;
+
+    /** 全量重建并发锁：连点/并发触发时拒绝后到者，避免重复向量化烧 token。 */
+    private final AtomicBoolean rebuildLock = new AtomicBoolean(false);
+
     /** 检索命中条目（供聊天注入与引用溯源）。 */
     public record MemoHit(long id, String uid, String content, String title, String url, double score) {
     }
@@ -81,40 +90,47 @@ public class MemosRagService {
      * 返回处理统计（processed/success/failed），失败仅告警并计数，不阻断整体。
      */
     public MemosJobResultVO rebuildAll() {
-        List<MemosNote> notes = memosNoteMapper.selectList(new LambdaQueryWrapper<MemosNote>()
-                .eq(MemosNote::getRemoteDeleted, 0));
-        if (notes.isEmpty()) {
-            log.warn("[备忘RAG] 重建索引：无存活笔记");
-            return emptyResult();
+        if (!rebuildLock.compareAndSet(false, true)) {
+            throw new BusinessException("重建索引进行中，请稍后再试");
         }
-        long start = System.currentTimeMillis();
-        int success = 0, failed = 0;
-        for (int i = 0; i < notes.size(); i += EMBED_BATCH) {
-            int end = Math.min(i + EMBED_BATCH, notes.size());
-            List<MemosNote> sub = notes.subList(i, end);
-            List<String> texts = sub.stream().map(n -> n.getContent() == null ? "" : n.getContent()).toList();
-            try {
-                List<float[]> vectors = embeddingService.embedBatch(texts, null);
-                for (int j = 0; j < sub.size() && j < vectors.size(); j++) {
-                    jdbcTemplate.update("UPDATE memos_note SET embedding = ? WHERE id = ?",
-                            VectorOps.toVectorLiteral(vectors.get(j)), sub.get(j).getId());
-                }
-                success += sub.size();
-            } catch (Exception e) {
-                failed += sub.size();
-                log.error("[备忘RAG] 批量向量化失败 batch={}..{}: {}", i, end, e.getMessage(), e);
+        try {
+            List<MemosNote> notes = memosNoteMapper.selectList(new LambdaQueryWrapper<MemosNote>()
+                    .eq(MemosNote::getRemoteDeleted, 0));
+            if (notes.isEmpty()) {
+                log.warn("[备忘RAG] 重建索引：无存活笔记");
+                return emptyResult();
             }
+            long start = System.currentTimeMillis();
+            int success = 0, failed = 0;
+            for (int i = 0; i < notes.size(); i += EMBED_BATCH) {
+                int end = Math.min(i + EMBED_BATCH, notes.size());
+                List<MemosNote> sub = notes.subList(i, end);
+                List<String> texts = sub.stream().map(n -> n.getContent() == null ? "" : n.getContent()).toList();
+                try {
+                    List<float[]> vectors = embeddingService.embedBatch(texts, null);
+                    for (int j = 0; j < sub.size() && j < vectors.size(); j++) {
+                        jdbcTemplate.update("UPDATE memos_note SET embedding = ? WHERE id = ?",
+                                VectorOps.toVectorLiteral(vectors.get(j)), sub.get(j).getId());
+                    }
+                    success += sub.size();
+                } catch (Exception e) {
+                    failed += sub.size();
+                    log.error("[备忘RAG] 批量向量化失败 batch={}..{}: {}", i, end, e.getMessage(), e);
+                }
+            }
+            invalidateCache();
+            sysSettingService.set(KEY_LAST_REBUILD, LocalDateTime.now().toString(),
+                    "备忘RAG上次全量重建时间");
+            log.info("[备忘RAG] 重建索引完成 total={} success={} failed={} 耗时={}ms",
+                    notes.size(), success, failed, System.currentTimeMillis() - start);
+            MemosJobResultVO vo = new MemosJobResultVO();
+            vo.setProcessed(notes.size());
+            vo.setSuccess(success);
+            vo.setFailed(failed);
+            return vo;
+        } finally {
+            rebuildLock.set(false);
         }
-        invalidateCache();
-        sysSettingService.set(KEY_LAST_REBUILD, LocalDateTime.now().toString(),
-                "备忘RAG上次全量重建时间");
-        log.info("[备忘RAG] 重建索引完成 total={} success={} failed={} 耗时={}ms",
-                notes.size(), success, failed, System.currentTimeMillis() - start);
-        MemosJobResultVO vo = new MemosJobResultVO();
-        vo.setProcessed(notes.size());
-        vo.setSuccess(success);
-        vo.setFailed(failed);
-        return vo;
     }
 
     /**
@@ -153,15 +169,47 @@ public class MemosRagService {
             log.warn("[备忘RAG] 查询向量化失败，RAG 跳过: {}", e.getMessage());
             return List.of();
         }
+        return searchWithVector(qvec, topK);
+    }
+
+    /**
+     * 检索主体（供 RAG 管线共享 query 向量时调用：qvec 必须用默认 EMBEDDING 模型计算，
+     * 避免 KB 与备忘双源对同一 query 重复向量化）。qvec 为 null 返回空。
+     */
+    public List<MemoHit> searchWithVector(float[] qvec, int topK) {
+        if (qvec == null) {
+            return List.of();
+        }
         List<CachedNote> notes = getCachedNotes();
         if (notes.isEmpty()) {
             return List.of();
         }
         String baseUrl = StringUtils.hasText(sysSettingService.get(KEY_BASE_URL, ""))
                 ? sysSettingService.get(KEY_BASE_URL, "") : null;
+        // 维度防御：默认 EMBEDDING 模型切换后旧笔记向量维度不匹配，cosine 恒为 0 会静默返回垃圾 top-k。
+        // 策略：跳过维度不匹配的向量（记录告警），用剩余可用向量检索；全部不匹配才返回空（提示重建索引）。
         List<double[]> scored = new ArrayList<>();
+        int dimSkipped = 0;
         for (CachedNote n : notes) {
-            scored.add(new double[]{n.id(), VectorOps.cosine(qvec, n.vector())});
+            float[] v = n.vector();
+            if (v == null) {
+                continue; // 未向量化（增量失败/切模型清空），不参与余弦
+            }
+            if (v.length != qvec.length) {
+                dimSkipped++;
+                continue;
+            }
+            scored.add(new double[]{n.id(), VectorOps.cosine(qvec, v)});
+        }
+        if (scored.isEmpty()) {
+            if (dimSkipped > 0) {
+                log.warn("[备忘RAG] 全部笔记向量维度不一致 查询维度={}，请重建索引（换默认 EMBEDDING 模型后旧向量已失效）",
+                        qvec.length);
+            }
+            return List.of();
+        }
+        if (dimSkipped > 0) {
+            log.warn("[备忘RAG] 跳过 {} 条维度不匹配笔记 查询维度={}，建议重建索引", dimSkipped, qvec.length);
         }
         scored.sort((a, b) -> Double.compare(b[1], a[1]));
         int k = topK > 0 ? topK : 4;
@@ -180,9 +228,38 @@ public class MemosRagService {
         return result;
     }
 
+    /**
+     * 关键词检索（BM25 倒排，零依赖）：专有名词/标签/编号精确词召回，
+     * 与 {@link #search} 的稠密向量经 RRF 融合组成混合检索（见 RagSearchService）。
+     */
+    public List<MemoHit> searchKeyword(String query, int topK) {
+        List<CachedNote> notes = getCachedNotes();
+        if (notes.isEmpty()) {
+            return List.of();
+        }
+        Bm25Index idx = noteBm25;
+        if (idx == null) {
+            return List.of();
+        }
+        List<Bm25Index.Score> scores = idx.search(query, topK > 0 ? topK : 4);
+        if (scores.isEmpty()) {
+            return List.of();
+        }
+        String baseUrl = StringUtils.hasText(sysSettingService.get(KEY_BASE_URL, ""))
+                ? sysSettingService.get(KEY_BASE_URL, "") : null;
+        List<MemoHit> result = new ArrayList<>(scores.size());
+        for (Bm25Index.Score s : scores) {
+            CachedNote n = notes.get(s.docIndex());
+            String url = baseUrl == null ? null : baseUrl + "/memos/" + n.uid();
+            result.add(new MemoHit(n.id(), n.uid(), n.content(), firstLine(n.content()), url, s.score()));
+        }
+        return result;
+    }
+
     /** 笔记数据变更（标记删除等不影响内容但需从检索剔除）时由 MemosService 调用清缓存。 */
     public void invalidateCache() {
         noteCache.clear();
+        noteBm25 = null;
     }
 
     // ===== 内部 =====
@@ -192,21 +269,26 @@ public class MemosRagService {
             if (!noteCache.isEmpty()) {
                 return new ArrayList<>(noteCache.values());
             }
+            // 全量加载（含未向量化笔记 vector=null）：BM25 关键词通道不依赖向量，
+            // 向量化失败/未赶上增量时关键词检索仍可用，与稠密通道互补
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                     "SELECT id, uid, content, embedding FROM memos_note "
-                            + "WHERE remote_deleted=0 AND embedding IS NOT NULL");
+                            + "WHERE remote_deleted=0");
             List<CachedNote> loaded = new ArrayList<>(rows.size());
             for (Map<String, Object> row : rows) {
-                float[] vector = VectorOps.parseVector((String) row.get("embedding"));
-                if (vector != null && vector.length > 0) {
-                    Number id = (Number) row.get("id");
-                    loaded.add(new CachedNote(id.longValue(), (String) row.get("uid"),
-                            (String) row.get("content"), vector));
+                Number id = (Number) row.get("id");
+                if (id == null) {
+                    continue;
                 }
+                float[] vector = VectorOps.parseVector((String) row.get("embedding"));
+                loaded.add(new CachedNote(id.longValue(), (String) row.get("uid"),
+                        (String) row.get("content"), vector == null || vector.length == 0 ? null : vector));
             }
             for (CachedNote n : loaded) {
                 noteCache.put(n.id(), n);
             }
+            // BM25 与向量缓存同源同序：docIndex 对齐 loaded 列表下标（LinkedHashMap 插入序一致）
+            noteBm25 = Bm25Index.build(loaded.stream().map(CachedNote::content).toList());
             return loaded;
         }
     }

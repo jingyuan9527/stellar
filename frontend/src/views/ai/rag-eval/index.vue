@@ -2,7 +2,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue'
 import {
   NCard, NButton, NDataTable, NModal, NForm, NFormItem, NInput, NTag, NSelect,
-  NSpace, NPopconfirm, useMessage,
+  NSpace, NPopconfirm, NSwitch, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
@@ -169,6 +169,7 @@ const caseColumns: DataTableColumns<RagEvalCase> = [
 // ===== 跑分 =====
 
 const running = ref(false)
+const fullMode = ref(false)
 const runSummary = ref<RagEvalRunVO | null>(null)
 const historyRuns = ref<string[]>([])
 const selectedRunId = ref<string | null>(null)
@@ -178,8 +179,8 @@ const historyLoading = ref(false)
 async function handleRun() {
   running.value = true
   try {
-    runSummary.value = await runRagEval()
-    message.success(`跑分完成：通过 ${runSummary.value.passCount}/${runSummary.value.total}，平均召回 ${(runSummary.value.recallAvg * 100).toFixed(1)}%`)
+    runSummary.value = await runRagEval(fullMode.value ? 'full' : 'retrieval')
+    message.success(`跑分完成（${runSummary.value.mode}）：通过 ${runSummary.value.passCount}/${runSummary.value.total}，平均召回 ${(runSummary.value.recallAvg * 100).toFixed(1)}%`)
     selectedRunId.value = runSummary.value.runId
     loadHistoryRuns()
   } catch {
@@ -213,6 +214,11 @@ async function loadRunResults(runId: string) {
 const runColumns: DataTableColumns<RagEvalResultRow> = [
   { title: '用例ID', key: 'caseId', width: 70 },
   { title: '问题', key: 'query', ellipsis: { tooltip: true }, width: 220 },
+  {
+    title: '模式', key: 'mode', width: 90,
+    render: (row) => h(NTag, { size: 'small', bordered: false, type: row.mode === 'full' ? 'warning' : 'default' },
+      { default: () => row.mode === 'full' ? '完整管线' : '纯检索' }),
+  },
   {
     title: '结果', key: 'pass', width: 80,
     render: (row) => h(NTag, { size: 'small', bordered: false, type: row.pass === 1 ? 'success' : 'error' },
@@ -286,15 +292,17 @@ onMounted(() => {
   <div class="rag-eval-page">
     <NCard title="评估集（golden set）" :bordered="false">
       <template #header-extra>
-        <NSpace :size="8">
+        <NSpace :size="8" align="center">
+          <NSwitch v-model:value="fullMode" size="small" />
+          <span style="font-size: 13px">完整管线</span>
           <NButton type="primary" :loading="running" @click="handleRun">运行评估</NButton>
           <NButton @click="openCreate">新增用例</NButton>
         </NSpace>
       </template>
       <NAlert type="info" :bordered="false" style="margin-bottom: 12px">
         每条用例 = 问题 + 期望命中的来源 key（<code>memos:{{ '{noteId}' }}</code> / <code>kb:{{ '{chunkId}' }}</code>）。
-        跑分走纯检索路径（不改写/不重排/不调 LLM），可先浏览「知识库」/「备忘同步」拿真实 chunk/note id。
-        调完分块/阈值/融合后重跑，对比通过率防回归（数据飞轮的核心护栏）。
+        默认纯检索路径（不改写/不重排/不调 LLM，秒级）；勾选「完整管线」走改写/混合检索/重排/loop，
+        与线上行为一致但每条用例会调 LLM（较慢）。调完分块/阈值/融合后重跑，对比通过率防回归（数据飞轮的核心护栏）。
       </NAlert>
       <NDataTable
         :columns="caseColumnsFinal"
@@ -325,6 +333,9 @@ onMounted(() => {
       <div v-if="runSummary" class="run-summary">
         <div class="summary-line">
           最新一次：<NTag size="small" type="info" :bordered="false">{{ runSummary.runId }}</NTag>
+          <NTag size="small" :type="runSummary.mode === 'full' ? 'warning' : 'default'" :bordered="false">
+            {{ runSummary.mode === 'full' ? '完整管线' : '纯检索' }}
+          </NTag>
           <NTag size="small" type="success" :bordered="false">通过 {{ runSummary.passCount }}/{{ runSummary.total }}</NTag>
           <NTag size="small" type="warning" :bordered="false">平均召回 {{ (runSummary.recallAvg * 100).toFixed(1) }}%</NTag>
           <NTag size="small" type="error" :bordered="false">失败 {{ runSummary.failCount }}</NTag>

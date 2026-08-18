@@ -22,9 +22,12 @@ export function deleteRagEvalCase(id: number) {
   return request<void>({ url: `/ai/rag/eval/case/${id}`, method: 'delete' })
 }
 
-/** 跑分：纯检索路径（不改写/不重排/不调 LLM），对全部用例算 recall@k */
-export function runRagEval() {
-  return request<RagEvalRunVO>({ url: '/ai/rag/eval/run', method: 'post', timeout: 300000 })
+/**
+ * 跑分：默认纯检索路径（不改写/不重排/不调 LLM，秒级）；
+ * mode=full 走完整管线（含改写/混合检索/重排/loop，与线上一致，每条用例调 LLM，较慢）。
+ */
+export function runRagEval(mode: 'retrieval' | 'full' = 'retrieval') {
+  return request<RagEvalRunVO>({ url: '/ai/rag/eval/run', method: 'post', params: { mode }, timeout: 600000 })
 }
 
 /** 某次跑分批次的落库结果（历史回看/回归对比） */

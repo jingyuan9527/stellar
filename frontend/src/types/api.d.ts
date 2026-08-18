@@ -449,6 +449,8 @@ export interface RagEvalDetail {
 /** RAG 跑分汇总（一次 run） */
 export interface RagEvalRunVO {
   runId: string
+  /** retrieval=纯检索路径 / full=完整管线（含改写/重排/loop） */
+  mode: string
   total: number
   passCount: number
   failCount: number
@@ -465,6 +467,8 @@ export interface RagEvalResultRow {
   topHits: string | null
   pass: number
   recall: number
+  /** retrieval=纯检索路径 / full=完整管线 */
+  mode: string | null
   createTime: string
 }
 

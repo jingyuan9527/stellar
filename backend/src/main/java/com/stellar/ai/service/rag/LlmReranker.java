@@ -3,6 +3,7 @@ package com.stellar.ai.service.rag;
 import com.stellar.ai.service.AiChatService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -14,7 +15,7 @@ import java.util.Set;
 /**
  * LLM 重排（默认实现）：把候选（截断文本 + 编号）交给 TEXT 模型选 topK，
  * 解析返回编号顺序精排。失败/解析失败时按原顺序截断返回（降级不中断）。
- * <p>候选上限 {@link #MAX_CANDIDATES} 控制单次重排的 token 开销。
+ * <p>候选上限 {@link #maxCandidates} 控制单次重排的 token 开销。
  */
 @Slf4j
 @Service
@@ -23,8 +24,9 @@ public class LlmReranker implements Reranker {
 
     private final AiChatService aiChatService;
 
-    /** 单次重排候选上限（超出截断，防 prompt 过长） */
-    private static final int MAX_CANDIDATES = 12;
+    /** 单次重排候选上限（超出截断，防 prompt 过长；默认 12，应与 stellar.rag.pool-size 联动） */
+    @Value("${stellar.rag.rerank-max-candidates:12}")
+    private int maxCandidates = 12;
     /** 单条候选注入的文本上限 */
     private static final int SNIPPET_LEN = 200;
 
@@ -38,8 +40,8 @@ public class LlmReranker implements Reranker {
         if (candidates == null || candidates.isEmpty() || topK <= 0) {
             return candidates == null ? List.of() : candidates;
         }
-        List<RagHit> capped = candidates.size() > MAX_CANDIDATES
-                ? candidates.subList(0, MAX_CANDIDATES) : new ArrayList<>(candidates);
+        List<RagHit> capped = candidates.size() > maxCandidates
+                ? candidates.subList(0, maxCandidates) : new ArrayList<>(candidates);
 
         StringBuilder sb = new StringBuilder(String.format(RERANK_PROMPT_PREFIX, topK, query));
         for (int i = 0; i < capped.size(); i++) {

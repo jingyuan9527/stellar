@@ -36,5 +36,8 @@ public class RagEvalResult {
     /** 期望来源召回率(命中数/期望数) */
     private Double recall;
 
+    /** 跑分模式: retrieval=纯检索路径 / full=完整管线(含改写/重排/loop) */
+    private String mode;
+
     private LocalDateTime createTime;
 }

@@ -7,6 +7,7 @@ import java.util.List;
  */
 public record RagEvalRunVO(
         String runId,
+        String mode,
         int total,
         int passCount,
         int failCount,

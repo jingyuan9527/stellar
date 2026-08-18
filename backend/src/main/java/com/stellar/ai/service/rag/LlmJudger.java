@@ -96,8 +96,9 @@ public class LlmJudger implements Judger {
         } catch (Exception ignored) {
             // 非严格 JSON，走宽松回退
         }
-        // 宽松回退：输出里出现 false → 判不够；否则足够
-        String cleaned = text.trim().toLowerCase();
+        // 宽松回退：输出里出现 false → 判不够；否则足够。
+        // 去空白后再匹配，兼容 "sufficient: false" / sufficient = false 等带空格变体
+        String cleaned = text.toLowerCase().replaceAll("\\s+", "");
         if (cleaned.contains("\"sufficient\":false") || cleaned.contains("sufficient=false")
                 || cleaned.contains("sufficient:false")) {
             return new Judgement(false, null);

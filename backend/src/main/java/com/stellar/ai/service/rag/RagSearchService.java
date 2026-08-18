@@ -1,5 +1,7 @@
 package com.stellar.ai.service.rag;
 
+import com.stellar.ai.entity.AiKnowledgeBase;
+import com.stellar.ai.service.AiEmbeddingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +37,7 @@ public class RagSearchService {
     private final Reranker reranker;
     private final Judger judger;
     private final QueryRouter router;
+    private final AiEmbeddingService embeddingService;
 
     /** 最终注入条数（system 片段数），package-private 供单测设置 */
     @Value("${stellar.rag.top-k:4}")
@@ -72,6 +75,14 @@ public class RagSearchService {
     @Value("${stellar.rag.router-enabled:true}")
     boolean routerEnabled;
 
+    /** 混合检索开关：BM25 关键词通道与稠密向量经 RRF 融合（P4，默认开，可用配置关闭） */
+    @Value("${stellar.rag.hybrid-enabled:true}")
+    boolean hybridEnabled;
+
+    /** 相关性闸门开关：短查询无触发词判闲聊，跳过整个管线（P1 成本优化） */
+    @Value("${stellar.rag.retrieval-gate-enabled:true}")
+    boolean retrievalGateEnabled;
+
     /** RRF 常数（1/(k+rank)：k 越大，排位之间的分数差越小） */
     private static final int RRF_K = 60;
 
@@ -84,10 +95,43 @@ public class RagSearchService {
      * @param modelId  改写/重排/判定用的 TEXT 模型 id（可空用 TEXT 默认）
      */
     public RetrievalResult search(String query, Long kbId, boolean useMemos, Long modelId) {
-        boolean kbOn = kbId != null;
+        return search(query, kbId, useMemos, modelId, null);
+    }
+
+    /**
+     * 完整管线但跳过相关性闸门（评估跑分用）：golden set 的用例都是显式检索意图，
+     * 短 query（如"价格？"）不该被闲聊闸门跳过，否则 full 跑分结果失真。
+     */
+    public RetrievalResult searchFull(String query, Long kbId, boolean useMemos, Long modelId) {
+        return search(query, kbId, useMemos, modelId, null, false);
+    }
+
+    /**
+     * 跑一遍管线（单轮或迭代 loop，按 Router 判定 + loop 开关）。
+     *
+     * @param query    原始用户问题
+     * @param kbId     会话关联知识库 id（可空，不关联则该源跳过）
+     * @param useMemos 是否启用备忘笔记源（仅登录用户 true）
+     * @param modelId  改写/重排/判定用的 TEXT 模型 id（可空用 TEXT 默认）
+     * @param history  会话历史（可空；非空时改写器用它补全指代，多轮追问更准）
+     */
+    public RetrievalResult search(String query, Long kbId, boolean useMemos, Long modelId,
+                                  List<Map<String, String>> history) {
+        return search(query, kbId, useMemos, modelId, history, true);
+    }
+
+    private RetrievalResult search(String query, Long kbId, boolean useMemos, Long modelId,
+                                   List<Map<String, String>> history, boolean applyGate) {
         boolean memosOn = useMemos && memosEnabled;
+        // 相关性闸门：闲聊类短查询（无触发词）直接跳过整个管线，省 embedding + LLM 调用
+        if (applyGate && retrievalGateEnabled && routerEnabled && !router.needsRetrieval(query)) {
+            log.info("[RAG管线] 相关性闸门：闲聊类查询跳过检索 query={}", truncateLog(query));
+            return new RetrievalResult(query, List.of(), Map.of("kb", 0, "memos", 0), 0);
+        }
+        // KB 管线级解析一次（存在性 + 绑定 embedding 模型）：后续 loop 各轮不再重复查询
+        AiKnowledgeBase kb = resolveKb(kbId);
         // 无任何可用源：跳过整个管线（含改写/重排/判定），避免白烧 LLM
-        if (!kbOn && !memosOn) {
+        if (kb == null && !memosOn) {
             return new RetrievalResult(query, List.of(), Map.of("kb", 0, "memos", 0), 1);
         }
         // loop 可用性：需开着 loop、路由器放行、且改写开启（无改写每轮查同一词没有意义）
@@ -101,18 +145,24 @@ public class RagSearchService {
         int kbCount = 0, memosCount = 0;
         for (int round = 1; round <= maxRounds; round++) {
             long roundStart = System.currentTimeMillis();
-            // 1. 改写（loop 时带上一轮缺口）
-            currentQuery = safeRewrite(query, gap, modelId);
+            // 1. 改写（loop 时带上一轮缺口；多轮对话带历史补全指代）
+            currentQuery = safeRewrite(query, gap, modelId, history);
             // 2. 检索 + RRF 融合 + 阈值
-            FusedResult fused = retrieveAndFuse(currentQuery, kbId, memosOn);
+            FusedResult fused = retrieveAndFuse(currentQuery, kb, memosOn);
             kbCount = fused.kbCount();
             memosCount = fused.memosCount();
             // 3. 跨轮累计去重（不同轮可能召回同一资料，只保留首个）
+            List<RagHit> previous = accumulated;
             accumulated = mergeAccumulated(accumulated, fused.hits());
-            // 4. 重排（对累计结果）
+            // 3.5 跨轮重融合 + 截断重排池：把上一轮累计(不含本轮)与本轮结果再 RRF 一次，
+            //     让后几轮新召回的命中凭融合分与旧轮竞争 poolSize 名额，而不是被 append 到队尾
+            //     永远挤不进 LlmReranker 的候选上限。（注意用 previous 而非累计：累计已含本轮，
+            //     与 fresh 重融合会双重计分，把新轮命中错误顶到最前）
+            List<RagHit> pool = truncateTo(refuseAccumulated(previous, fused.hits()), poolSize);
+            // 4. 重排（对重融合后的重排池）
             List<RagHit> reranked = rerankEnabled
-                    ? reranker.rerank(currentQuery, accumulated, Math.max(topK, accumulated.size()), modelId)
-                    : accumulated;
+                    ? reranker.rerank(currentQuery, pool, Math.max(topK, pool.size()), modelId)
+                    : pool;
             boolean lastRound = round >= maxRounds;
             // 5. 判定"资料够不够"（仅非末轮；末轮直接生成）
             if (!lastRound) {
@@ -146,24 +196,24 @@ public class RagSearchService {
      * 与线上检索路径共用 retrieveAndFuse，保证跑分与线上召回一致性。
      */
     public RetrievalResult searchTopK(String query, Long kbId, boolean useMemos, int k) {
-        boolean kbOn = kbId != null;
         boolean memosOn = useMemos && memosEnabled;
-        if (!kbOn && !memosOn) {
+        AiKnowledgeBase kb = resolveKb(kbId);
+        if (kb == null && !memosOn) {
             return new RetrievalResult(query, List.of(), Map.of("kb", 0, "memos", 0), 1);
         }
-        FusedResult fused = retrieveAndFuse(query, kbId, memosOn);
+        FusedResult fused = retrieveAndFuse(query, kb, memosOn);
         List<RagHit> top = truncateTo(fused.hits(), k > 0 ? k : topK);
         return new RetrievalResult(query, top, Map.of("kb", fused.kbCount(), "memos", fused.memosCount()), 1);
     }
 
     // ===== 内部 =====
 
-    private String safeRewrite(String query, String gap, Long modelId) {
+    private String safeRewrite(String query, String gap, Long modelId, List<Map<String, String>> history) {
         if (!rewriteEnabled) {
             return query;
         }
         try {
-            String rewritten = queryRewriter.rewrite(query, gap, modelId);
+            String rewritten = queryRewriter.rewrite(query, gap, modelId, history);
             return StringUtils.hasText(rewritten) ? rewritten : query;
         } catch (Exception e) {
             log.warn("[RAG管线] 查询改写异常，回退原查询: {}", e.getMessage());
@@ -182,12 +232,65 @@ public class RagSearchService {
         }
     }
 
-    /** 双源检索 + RRF 融合 + 全局阈值（管线的检索核心，loop 与 searchTopK 共用）。 */
-    private FusedResult retrieveAndFuse(String query, Long kbId, boolean memosOn) {
-        List<RagHit> kbHits = kbId != null ? kbRetriever.retrieve(kbId, query, poolSize) : List.of();
-        List<RagHit> memosHits = memosOn ? memosRetriever.retrieve(query, poolSize) : List.of();
-        List<RagHit> fused = thresholdFilter(rrfFuse(List.of(kbHits, memosHits)), scoreThreshold);
-        return new FusedResult(fused, kbHits.size(), memosHits.size());
+    /**
+     * 双源检索 + RRF 融合 + 全局阈值（管线的检索核心，loop 与 searchTopK 共用）。
+     * <p>query 向量共享：memos 恒用默认 EMBEDDING 模型；KB 未绑定专属模型（用默认）时与 memos
+     * 共用同一个向量（每轮只向量化一次）；KB 绑定专属模型则单独向量化。
+     * <p>hybrid 开启时每源两条通道（稠密向量 + BM25 关键词）共 4 张列表一起 RRF：
+     * 专有名词/编号/标签由关键词通道精确召回，语义相近表达由向量通道召回，互不干扰。
+     */
+    private FusedResult retrieveAndFuse(String query, AiKnowledgeBase kb, boolean memosOn) {
+        boolean kbNeedsDefaultVec = kb != null && kb.getEmbeddingModelId() == null;
+        // 默认模型 query 向量：memos 需要，或 KB 用默认模型时需要（两者共享一次调用）
+        float[] sharedVec = (memosOn || kbNeedsDefaultVec) ? safeEmbed(query, null) : null;
+        // KB 向量：用默认模型则复用 sharedVec；绑定专属模型则独立向量化
+        float[] kbVec = kb == null ? null
+                : (kbNeedsDefaultVec ? sharedVec : safeEmbed(query, kb.getEmbeddingModelId()));
+
+        List<RagHit> kbHits = kbRetriever.retrieve(kb, kbVec, poolSize);
+        List<RagHit> memosHits = memosOn ? memosRetriever.retrieve(sharedVec, poolSize) : List.of();
+        List<List<RagHit>> lists = new ArrayList<>();
+        lists.add(kbHits);
+        lists.add(memosHits);
+        int kbKwCount = 0, memosKwCount = 0;
+        if (hybridEnabled) {
+            List<RagHit> kbKw = kbRetriever.retrieveKeyword(kb, query, poolSize);
+            List<RagHit> memosKw = memosOn ? memosRetriever.retrieveKeyword(query, poolSize) : List.of();
+            kbKwCount = kbKw.size();
+            memosKwCount = memosKw.size();
+            lists.add(kbKw);
+            lists.add(memosKw);
+        }
+        List<RagHit> fused = thresholdFilter(rrfFuse(lists), scoreThreshold);
+        return new FusedResult(fused, kbHits.size() + kbKwCount, memosHits.size() + memosKwCount);
+    }
+
+    /** 管线级解析 KB（存在性 + 绑定 embedding 模型），失败返回 null（该源降级为不可用）。 */
+    private AiKnowledgeBase resolveKb(Long kbId) {
+        return kbRetriever.getKbContext(kbId);
+    }
+
+    /** 查询向量化（失败返回 null，各通道降级为空，不阻断管线）。 */
+    private float[] safeEmbed(String query, Long modelId) {
+        try {
+            return embeddingService.embed(query, modelId);
+        } catch (Exception e) {
+            log.warn("[RAG管线] 查询向量化失败 modelId={}: {}", modelId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 跨轮重融合：把上一轮累计（不含本轮）与本轮结果再做一次 RRF。
+     * 两轮都命中的资料融合分叠加（更相关），本轮新召回按本轮 rank 计分、
+     * 旧轮独有命中保持上轮 rank——使后几轮新召回能凭融合分挤进 poolSize 重排池
+     * （修复 append 队尾导致的 loop 失效）。首轮无历史直接返回本轮结果。
+     */
+    private List<RagHit> refuseAccumulated(List<RagHit> previous, List<RagHit> fresh) {
+        if (previous.isEmpty()) {
+            return fresh;
+        }
+        return rrfFuse(List.of(previous, fresh));
     }
 
     /** 跨轮累计去重：不同轮可能召回同一资料，保留先到者（source:sourceKey 唯一）。 */

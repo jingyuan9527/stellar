@@ -13,4 +13,14 @@ public interface QueryRouter {
      * 实现必须为纯启发式/低开销逻辑（不得调 LLM，否则路由器本身就成了成本大头）。
      */
     boolean needsLoop(String query);
+
+    /**
+     * 检索相关性闸门（P1 成本优化）：是否值得为该查询跑整个 RAG 管线。
+     * 闲聊类短查询（无检索触发词）返回 false，整条管线跳过（不向量化/不改写/不重排/不判定），
+     * 省掉每条登录消息默认烧的 LLM + embedding 调用。实现必须为纯启发式，不得调 LLM。
+     * 默认放行（不启用闸门时行为不变）。
+     */
+    default boolean needsRetrieval(String query) {
+        return true;
+    }
 }

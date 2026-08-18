@@ -546,11 +546,13 @@ onMounted(() => {
           <div class="bubble">
             <span v-if="streamingContent">{{ streamingContent }}</span>
             <span v-else class="typing">{{
-              streamingStatus === 'generating_image'
-                ? '正在生成图片…'
-                : streamingStatus === 'generating_audio'
-                  ? '正在合成语音…'
-                  : '正在思考…'
+              streamingStatus === 'retrieving'
+                ? '正在检索资料…'
+                : streamingStatus === 'generating_image'
+                  ? '正在生成图片…'
+                  : streamingStatus === 'generating_audio'
+                    ? '正在合成语音…'
+                    : '正在思考…'
             }}</span>
           </div>
         </div>

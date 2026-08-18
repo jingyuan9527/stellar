@@ -103,6 +103,13 @@ stellar:
     loop-max-rounds: 3
     router-enabled: true
     router-simple-length: 12
+    # 混合检索：BM25 关键词通道与稠密向量经 RRF 融合（专有名词/编号/标签精确召回）
+    hybrid-enabled: true
+    # 单次重排候选上限（应与 pool-size 联动，调大 pool-size 时同步调大）
+    rerank-max-candidates: 12
+    # 相关性闸门：短查询且无触发词判闲聊，跳过整个 RAG 管线（省 embedding + LLM 调用）
+    retrieval-gate-enabled: true
+    retrieval-trigger-words: 搜索,查找,查,笔记,备忘,知识库,资料,文档,记录,关于,是什么,怎么,如何,多少,价格,介绍,记得,总结,回顾,内容,找
   # 登录爆破防护（AuthService）
   security:
     login-max-fail: 5

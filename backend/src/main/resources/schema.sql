@@ -647,6 +647,10 @@ COMMENT ON COLUMN rag_eval_result.top_hits IS '检索 top-k 命中(JSON数组 [{
 COMMENT ON COLUMN rag_eval_result.pass IS '是否命中期望来源: 1是 0否';
 COMMENT ON COLUMN rag_eval_result.recall IS '期望来源召回率(命中数/期望数)';
 CREATE INDEX IF NOT EXISTS idx_rag_eval_result_run ON rag_eval_result (run_id, create_time DESC);
+-- 跑分模式：retrieval=纯检索 / full=完整管线（含改写/重排/loop），区分两种口径防回归对比错位
+ALTER TABLE rag_eval_result ADD COLUMN IF NOT EXISTS mode VARCHAR(16);
+COMMENT ON COLUMN rag_eval_result.mode IS '跑分模式: retrieval=纯检索路径 / full=完整管线(含改写/重排/loop)';
+
 
 -- AI 长期记忆表（定期整理会话为事实陈述，按账号，对话时注入 system prompt）
 CREATE TABLE IF NOT EXISTS ai_memory (

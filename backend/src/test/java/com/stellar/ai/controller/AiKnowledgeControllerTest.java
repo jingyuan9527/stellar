@@ -122,6 +122,21 @@ class AiKnowledgeControllerTest {
     }
 
     @Test
+    void updateDocument_正常() {
+        AiDocumentAddDTO dto = new AiDocumentAddDTO();
+        dto.setText("新内容");
+        dto.setSourceName("src");
+        when(knowledgeService.updateDocument(1L, "src", "新内容")).thenReturn(4);
+        assertEquals(4, controller.updateDocument(1L, dto).getData());
+    }
+
+    @Test
+    void listSources_正常() {
+        when(knowledgeService.listSources(1L)).thenReturn(List.of("a.md", "b.md"));
+        assertEquals(2, controller.listSources(1L).getData().size());
+    }
+
+    @Test
     void deleteChunk_正常() {
         controller.deleteChunk(1L);
         verify(knowledgeService).deleteChunk(1L);

@@ -1,5 +1,6 @@
 package com.stellar.ai.service;
 
+import com.stellar.ai.dto.AiKnowledgeBaseDTO;
 import com.stellar.ai.entity.AiKnowledgeBase;
 import com.stellar.ai.entity.AiKnowledgeChunk;
 import com.stellar.ai.mapper.AiKnowledgeBaseMapper;
@@ -9,9 +10,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,6 +25,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -105,6 +111,66 @@ class AiKnowledgeServiceTest {
     void search_知识库不存在_抛异常() {
         when(kbMapper.selectById(99L)).thenReturn(null);
         assertThrows(BusinessException.class, () -> service.search(99L, "q", 4));
+    }
+
+    @Test
+    void updateKb_切换embedding模型_清空分块向量() {
+        // 修复点（P1）：换向量化模型必须清空旧维度向量，否则检索静默返回垃圾 top-k
+        AiKnowledgeBase kb = kb(5L, 10L);
+        kb.setName("旧");
+        when(kbMapper.selectById(5L)).thenReturn(kb);
+
+        AiKnowledgeBaseDTO dto = new AiKnowledgeBaseDTO();
+        dto.setId(5L);
+        dto.setName("新");
+        dto.setEmbeddingModelId(20L);
+        service.updateKb(dto);
+
+        verify(jdbcTemplate).update(eq("UPDATE ai_knowledge_chunk SET embedding = NULL WHERE kb_id = ?"), eq(5L));
+        assertEquals(20L, kb.getEmbeddingModelId());
+    }
+
+    @Test
+    void updateKb_未切换模型_不清向量() {
+        AiKnowledgeBase kb = kb(5L, 10L);
+        kb.setName("旧");
+        when(kbMapper.selectById(5L)).thenReturn(kb);
+
+        AiKnowledgeBaseDTO dto = new AiKnowledgeBaseDTO();
+        dto.setId(5L);
+        dto.setName("新");
+        dto.setEmbeddingModelId(10L);
+        service.updateKb(dto);
+
+        verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
+    }
+
+    @Test
+    void searchDetailedKeyword_BM25关键词召回() {
+        when(kbMapper.selectById(1L)).thenReturn(kb(1L, 10L));
+        when(jdbcTemplate.queryForList(anyString(), (Object) any())).thenReturn(List.of(
+                row(100L, "部署图床方案：rclone 同步", "[1.0,0.0,0.0]"),
+                row(101L, "购物清单", "[1.0,0.0,0.0]")));
+
+        List<AiKnowledgeService.ScoredChunk> hits = service.searchDetailedKeyword(1L, "图床", 2);
+
+        assertEquals(1, hits.size());
+        assertEquals(100L, hits.get(0).chunkId());
+    }
+
+    @Test
+    void rebuild_并发中_拒绝后到者() {
+        ReflectionTestUtils.setField(service, "rebuildLock", new AtomicBoolean(true));
+        assertThrows(BusinessException.class, () -> service.rebuild(1L));
+    }
+
+    private Map<String, Object> row(Long id, String text, String embedding) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("id", id);
+        m.put("chunk_text", text);
+        m.put("source_name", "src");
+        m.put("embedding", embedding);
+        return m;
     }
 
     @Test

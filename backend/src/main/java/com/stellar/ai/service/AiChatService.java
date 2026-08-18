@@ -353,12 +353,51 @@ public class AiChatService {
      * 多轮流式聊天（带完成回调）。流式成功结束时回调 onComplete(完整文本)，供调用方落消息表。
      * <p>回调异常被吞掉，不影响流式主流程。
      */
+    /**
+     * 创建聊天 SSE emitter（供 {@link AiChatSessionService} 在 RAG 检索前先建好连接，
+     * 检索进度可经 {@link #sendStatus} 推给前端）。必须在主线程调用（内部解析登录态/客户端 IP）。
+     */
+    public SseEmitter createChatEmitter() {
+        return createChatEmitter(currentSubject());
+    }
+
+    private SseEmitter createChatEmitter(Subject subject) {
+        SseEmitter emitter = new SseEmitter(Duration.ofMinutes(5).toMillis());
+        registerEmitterLifecycle(emitter, subject.type(), subject.id());
+        return emitter;
+    }
+
+    /** 向 SSE 发 status 事件（检索进度等），发送失败忽略（连接已断/未建立等）。 */
+    public void sendStatus(SseEmitter emitter, String status) {
+        try {
+            if (emitter != null) {
+                emitter.send(SseEmitter.event().data(Map.of("status", status), MediaType.APPLICATION_JSON));
+            }
+        } catch (Exception e) {
+            log.warn("SSE 状态事件发送失败 status={}: {}", status, e.getMessage());
+        }
+    }
+
     public SseEmitter streamMultiChat(List<Map<String, String>> messages, Long modelId,
                                       Consumer<String> onComplete) {
+        Subject subject = currentSubject();
+        SseEmitter emitter = createChatEmitter(subject);
         AiResolvedConfig cfg = modelId != null
                 ? aiModelService.resolveConfig(modelId)
                 : aiModelService.resolveDefaultConfig("TEXT");
-        return doStreamChatMulti(messages, cfg, onComplete);
+        return doStreamChatMulti(emitter, messages, cfg, onComplete, subject);
+    }
+
+    /**
+     * 异步线程版（主体已在主线程解析传入，避免异步线程无 sa-token/request 上下文）。
+     * emitter 由调用方先创建（{@link #createChatEmitter}）。
+     */
+    public SseEmitter streamMultiChat(SseEmitter emitter, List<Map<String, String>> messages, Long modelId,
+                                      Consumer<String> onComplete, String subjectType, String subjectId) {
+        AiResolvedConfig cfg = modelId != null
+                ? aiModelService.resolveConfig(modelId)
+                : aiModelService.resolveDefaultConfig("TEXT");
+        return doStreamChatMulti(emitter, messages, cfg, onComplete, new Subject(subjectType, subjectId));
     }
 
     /**
@@ -372,14 +411,10 @@ public class AiChatService {
         return doChatCompletionMessages(messages, cfg);
     }
 
-    private SseEmitter doStreamChatMulti(List<Map<String, String>> messages, AiResolvedConfig cfg,
-                                         Consumer<String> onComplete) {
+    private SseEmitter doStreamChatMulti(SseEmitter emitter, List<Map<String, String>> messages,
+                                         AiResolvedConfig cfg, Consumer<String> onComplete, Subject subject) {
         String url = chatCompletionsUrl(cfg);
         String model = cfg.model();
-        Subject subject = currentSubject();
-
-        SseEmitter emitter = new SseEmitter(120000L);
-        registerEmitterLifecycle(emitter, subject.type(), subject.id());
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("model", model);
@@ -589,20 +624,34 @@ public class AiChatService {
     public SseEmitter streamMultiChatWithTools(List<Map<String, Object>> messages, Long modelId,
                                                List<Map<String, Object>> tools, String voice,
                                                Consumer<AiChatResult> onComplete) {
+        Subject subject = currentSubject();
+        SseEmitter emitter = createChatEmitter(subject);
         AiResolvedConfig cfg = modelId != null
                 ? aiModelService.resolveConfig(modelId)
                 : aiModelService.resolveDefaultConfig("TEXT");
-        return doStreamChatWithTools(messages, cfg, tools, voice, onComplete);
+        return doStreamChatWithTools(emitter, messages, cfg, tools, voice, onComplete, subject);
     }
 
-    private SseEmitter doStreamChatWithTools(List<Map<String, Object>> messages, AiResolvedConfig cfg,
-                                             List<Map<String, Object>> tools, String voice,
-                                             Consumer<AiChatResult> onComplete) {
+    /**
+     * 异步线程版（主体已在主线程解析传入，避免异步线程无 sa-token/request 上下文）。
+     * emitter 由调用方先创建（{@link #createChatEmitter}）。
+     */
+    public SseEmitter streamMultiChatWithTools(SseEmitter emitter, List<Map<String, Object>> messages, Long modelId,
+                                               List<Map<String, Object>> tools, String voice,
+                                               Consumer<AiChatResult> onComplete,
+                                               String subjectType, String subjectId) {
+        AiResolvedConfig cfg = modelId != null
+                ? aiModelService.resolveConfig(modelId)
+                : aiModelService.resolveDefaultConfig("TEXT");
+        return doStreamChatWithTools(emitter, messages, cfg, tools, voice, onComplete,
+                new Subject(subjectType, subjectId));
+    }
+
+    private SseEmitter doStreamChatWithTools(SseEmitter emitter, List<Map<String, Object>> messages,
+                                             AiResolvedConfig cfg, List<Map<String, Object>> tools,
+                                             String voice, Consumer<AiChatResult> onComplete, Subject subject) {
         String url = chatCompletionsUrl(cfg);
         String model = cfg.model();
-        Subject subject = currentSubject();
-        SseEmitter emitter = new SseEmitter(Duration.ofMinutes(5).toMillis());
-        registerEmitterLifecycle(emitter, subject.type(), subject.id());
 
         try {
             // 第一次非流式（带 tools）

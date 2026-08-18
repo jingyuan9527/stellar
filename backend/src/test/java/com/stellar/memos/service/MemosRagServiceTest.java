@@ -1,6 +1,7 @@
 package com.stellar.memos.service;
 
 import com.stellar.ai.service.AiEmbeddingService;
+import com.stellar.common.BusinessException;
 import com.stellar.memos.entity.MemosNote;
 import com.stellar.memos.mapper.MemosNoteMapper;
 import com.stellar.memos.vo.MemosJobResultVO;
@@ -8,12 +9,16 @@ import com.stellar.system.service.SysSettingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -60,7 +65,7 @@ class MemosRagServiceTest {
         when(jdbcTemplate.queryForList(anyString()))
                 .thenReturn(List.of(
                         row(1L, "u-a", "标题A\n正文A", "[1.0,0.0,0.0]"),
-                        row(2L, "u-b", "标题B", "[0.6,0.8,0.0,0.0]"),
+                        row(2L, "u-b", "标题B", "[0.6,0.8,0.0]"),
                         row(3L, "u-c", "无向量", null)));
 
         List<MemosRagService.MemoHit> hits = service.search("q", 2);
@@ -74,8 +79,35 @@ class MemosRagServiceTest {
     }
 
     @Test
+    void search_混合维度_跳过不匹配保留可用向量() {
+        // 修复点：部分笔记是旧模型维度（不匹配）时，跳过它们继续用匹配维度的笔记检索，不整体返回空
+        when(embeddingService.embed(eq("q"), eq(null))).thenReturn(new float[]{1f, 0f, 0f});
+        when(jdbcTemplate.queryForList(anyString()))
+                .thenReturn(List.of(
+                        row(1L, "u-a", "内容A", "[1.0,0.0,0.0]"),
+                        row(2L, "u-b", "旧维度内容B", "[1.0,0.0,0.0,0.0]")));
+
+        List<MemosRagService.MemoHit> hits = service.search("q", 4);
+
+        assertEquals(1, hits.size());
+        assertEquals("u-a", hits.get(0).uid());
+    }
+
+    @Test
     void search_查询向量化失败_返回空() {
         when(embeddingService.embed(any(), any())).thenThrow(new RuntimeException("boom"));
+        assertTrue(service.search("q", 4).isEmpty());
+    }
+
+    @Test
+    void search_全部向量维度不一致_返回空而非垃圾结果() {
+        // 修复点：默认 EMBEDDING 模型切换后旧向量维度全不匹配，应返回空提示重建，而非全 0 余弦的任意 top-k
+        when(embeddingService.embed(eq("q"), eq(null))).thenReturn(new float[]{1f, 0f, 0f});
+        when(jdbcTemplate.queryForList(anyString()))
+                .thenReturn(List.of(
+                        row(1L, "u-a", "内容A", "[1.0,0.0,0.0,0.0]"),
+                        row(2L, "u-b", "内容B", "[1.0,0.0,0.0,0.0]")));
+
         assertTrue(service.search("q", 4).isEmpty());
     }
 
@@ -106,6 +138,29 @@ class MemosRagServiceTest {
         MemosJobResultVO vo = service.rebuildAll();
         assertEquals(0, vo.getProcessed());
         verify(embeddingService, never()).embedBatch(any(), any());
+    }
+
+    @Test
+    void rebuildAll_并发中_拒绝后到者() {
+        // 并发锁生效：已有重建在跑时直接抛异常（防连点重复向量化烧 token）
+        ReflectionTestUtils.setField(service, "rebuildLock", new AtomicBoolean(true));
+        assertThrows(BusinessException.class, () -> service.rebuildAll());
+        verify(memosNoteMapper, never()).selectList(any());
+    }
+
+    @Test
+    void searchKeyword_BM25精确词召回() {
+        when(jdbcTemplate.queryForList(anyString()))
+                .thenReturn(List.of(
+                        row(1L, "u-a", "部署图床方案：rclone 同步", "[1.0,0.0,0.0]"),
+                        row(2L, "u-b", "购物清单", "[1.0,0.0,0.0]")));
+
+        List<MemosRagService.MemoHit> hits = service.searchKeyword("图床", 2);
+
+        // BM25 只命中含"图""床"的笔记 1，笔记 2 不召回
+        assertEquals(1, hits.size());
+        assertEquals("u-a", hits.get(0).uid());
+        assertEquals("https://memo.booksy.cf/memos/u-a", hits.get(0).url());
     }
 
     @Test
