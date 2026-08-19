@@ -61,7 +61,7 @@ function reload() {
   text-align: center;
   padding: 32px 40px;
   border-radius: 12px;
-  background: var(--n-color, rgba(127, 127, 127, 0.08));
+  background: var(--n-color, var(--c-fill-2));
   max-width: 480px;
 }
 .error-icon {

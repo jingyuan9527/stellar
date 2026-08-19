@@ -70,14 +70,14 @@ const allColumns: DataTableColumns<SysFile> = [
         return h('img', {
           src: fileUrl(row.id),
           alt: row.originalName || '',
-          style: 'width:40px;height:40px;object-fit:cover;border-radius:4px;background:rgba(127,127,127,0.08)',
+          style: 'width:40px;height:40px;object-fit:cover;border-radius:4px;background:var(--c-fill-2)',
         })
       }
       if (isAudio(row.ext)) {
-        return h(NIcon, { size: 28, color: 'var(--primary-color, #18a058)' },
+        return h(NIcon, { size: 28, color: 'var(--c-brand)' },
           { default: () => h(iconMap.volume) })
       }
-      return h('span', { style: 'color:#999' }, '-')
+      return h('span', { style: 'color:var(--c-text-3)' }, '-')
     },
   },
   { title: '文件名', key: 'originalName', ellipsis: { tooltip: true }, width: 200 },
@@ -92,7 +92,7 @@ const allColumns: DataTableColumns<SysFile> = [
   },
   {
     title: '上传者', key: 'uploaderName', width: 120,
-    render: (row) => row.uploaderName || h('span', { style: 'color:#999' }, '-'),
+    render: (row) => row.uploaderName || h('span', { style: 'color:var(--c-text-3)' }, '-'),
   },
   { title: '上传时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },
   {
@@ -305,11 +305,11 @@ onMounted(loadData)
 
 .total-text {
   font-size: 13px;
-  color: var(--n-text-color-3, #999);
+  color: var(--n-text-color-3, var(--c-text-3));
 }
 
 .total-text b {
-  color: var(--primary-color, #18a058);
+  color: var(--c-brand);
   font-size: 15px;
 }
 
@@ -324,7 +324,7 @@ onMounted(loadData)
   display: flex;
   justify-content: center;
   align-items: center;
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--c-fill-2);
   border-radius: 8px;
   padding: 12px;
   min-height: 160px;
@@ -337,6 +337,6 @@ onMounted(loadData)
 }
 
 .no-preview {
-  color: #999;
+  color: var(--c-text-3);
 }
 </style>

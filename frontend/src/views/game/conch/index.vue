@@ -148,7 +148,7 @@ onBeforeUnmount(() => {
   padding: 24px;
   border-radius: 12px;
   background: var(--n-color, transparent);
-  border: 1px solid rgba(127, 127, 127, 0.12);
+  border: 1px solid var(--c-border);
 }
 
 .conch-shell {
@@ -181,7 +181,7 @@ onBeforeUnmount(() => {
 .answer-text {
   font-size: 30px;
   font-weight: 700;
-  color: var(--primary-color, #18a058);
+  color: var(--c-brand);
   line-height: 1.4;
 }
 
@@ -214,7 +214,7 @@ onBeforeUnmount(() => {
   margin: 0;
   padding-left: 20px;
   line-height: 1.9;
-  color: var(--n-text-color-3, #999);
+  color: var(--n-text-color-3, var(--c-text-3));
 }
 
 @media (max-width: 768px) {

@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
       </div>
       <NEmpty v-else description="合成后将在此处播放音频">
         <template #icon>
-          <NIcon size="48" color="#999"><component :is="iconMap.volume" /></NIcon>
+          <NIcon size="48" color="var(--c-text-3)"><component :is="iconMap.volume" /></NIcon>
         </template>
       </NEmpty>
     </NCard>
@@ -444,7 +444,7 @@ onBeforeUnmount(() => {
 
 .recent-meta {
   font-size: 12px;
-  color: var(--n-text-color-3, #999);
+  color: var(--n-text-color-3, var(--c-text-3));
 }
 
 @media (max-width: 768px) {

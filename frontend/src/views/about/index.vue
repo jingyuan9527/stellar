@@ -35,13 +35,9 @@ const linkItems = computed<LinkItem[]>(() => {
     }))
 })
 
-// 项目卡片主题色板（按索引循环），用于卡片左侧色条 + hover 边框
-const projectColors: string[] = [
-  '#18a058', '#2080f0', '#f0a020', '#d03050', '#7c3aed', '#0ea5e9',
-]
-
+// 项目卡片主题色：brand/info 两色交替（跟随主题色），用于卡片左侧色条 + hover 边框
 function projectAccent(idx: number): string {
-  return projectColors[idx % projectColors.length]
+  return idx % 2 === 0 ? 'var(--c-brand)' : 'var(--c-info)'
 }
 
 async function load() {
@@ -70,6 +66,8 @@ onMounted(() => {
   <div class="about-page">
     <!-- Hero -->
     <NCard class="hero-card" :bordered="false">
+      <div class="hero-glow hero-glow-a" />
+      <div class="hero-glow hero-glow-b" />
       <div class="hero">
         <div class="hero-avatar">
           <NImage
@@ -197,10 +195,48 @@ onMounted(() => {
   margin: 0 auto;
 }
 
+.hero-card {
+  --n-color: transparent;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--c-border);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--c-brand) 10%, var(--c-fill)),
+    color-mix(in srgb, var(--c-info) 10%, var(--c-fill))
+  );
+}
+
 .hero {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 24px;
+}
+
+.hero-glow {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(48px);
+  opacity: 0.5;
+}
+
+.hero-glow-a {
+  width: 320px;
+  height: 320px;
+  top: -140px;
+  right: -100px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--c-brand) 30%, transparent), transparent 70%);
+}
+
+.hero-glow-b {
+  width: 260px;
+  height: 260px;
+  bottom: -120px;
+  left: -80px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--c-info) 30%, transparent), transparent 70%);
 }
 
 .hero-avatar {
@@ -216,7 +252,7 @@ onMounted(() => {
   justify-content: center;
   font-size: 48px;
   font-weight: 800;
-  background: rgba(127, 127, 127, 0.14);
+  background: var(--c-fill-2);
 }
 
 .hero-name {
@@ -269,13 +305,22 @@ onMounted(() => {
 .project-card {
   height: 100%;
   overflow: hidden;
-  border-left: 4px solid var(--project-accent, #18a058);
+  border-left: 4px solid var(--project-accent, var(--c-brand));
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .project-card:hover {
   transform: translateY(-3px);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-card {
+    transition: none;
+  }
+  .project-card:hover {
+    transform: none;
+  }
 }
 
 .project-card :deep(.n-card__content) {

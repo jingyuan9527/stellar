@@ -11,7 +11,15 @@ export default defineConfig({
   ],
   theme: {
     colors: {
-      primary: '#18a058',
+      primary: 'var(--c-brand)',
+      info: 'var(--c-info)',
+      'text-1': 'var(--c-text-1)',
+      'text-2': 'var(--c-text-2)',
+      'text-3': 'var(--c-text-3)',
+      bg: 'var(--c-bg)',
+      fill: 'var(--c-fill)',
+      'fill-2': 'var(--c-fill-2)',
+      border: 'var(--c-border)',
     },
   },
   shortcuts: {

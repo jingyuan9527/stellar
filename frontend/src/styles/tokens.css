@@ -1,0 +1,57 @@
+/* 设计 Token —— 语义化 CSS 变量，浅/深双套。
+   --c-brand 引用 --primary-color（由 App.vue watchEffect 动态写入 :root，主题色可在 ThemeDrawer 切换）。
+   深色由 [data-theme="dark"] 覆盖；--c-brand/--c-info 不随暗色变。 */
+
+:root {
+  /* 主题色默认值，App.vue 运行时覆盖；此处仅防 FOUC */
+  --primary-color: #18a058;
+
+  /* 品牌色（跟随主题色切换）+ 辅助色 */
+  --c-brand: var(--primary-color);
+  --c-info: #2080f0;
+
+  /* 文字三级（主/次/弱） */
+  --c-text-1: #1f2329;
+  --c-text-2: #5b6168;
+  --c-text-3: #8a9099;
+
+  /* 背景与填充（页面底/卡片底/次级填充） */
+  --c-bg: #f5f6f8;
+  --c-fill: #ffffff;
+  --c-fill-2: rgba(127, 127, 127, 0.1);
+  --c-border: rgba(0, 0, 0, 0.08);
+
+  /* 间距 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* 圆角 */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+
+  /* 阴影 */
+  --sh-card: 0 2px 12px rgba(0, 0, 0, 0.06);
+
+  /* 滚动条 */
+  --c-scrollbar: rgba(128, 128, 128, 0.35);
+}
+
+[data-theme='dark'] {
+  --c-text-1: #e8eaed;
+  --c-text-2: #a8aeb8;
+  --c-text-3: #6b7280;
+
+  --c-bg: #0f1115;
+  --c-fill: #1a1d23;
+  --c-fill-2: rgba(255, 255, 255, 0.06);
+  --c-border: rgba(255, 255, 255, 0.08);
+
+  --sh-card: 0 2px 12px rgba(0, 0, 0, 0.3);
+
+  --c-scrollbar: rgba(255, 255, 255, 0.15);
+}

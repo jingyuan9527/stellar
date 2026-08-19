@@ -286,11 +286,11 @@ onMounted(loadData)
 
 .total-text {
   font-size: 13px;
-  color: var(--n-text-color-3, #999);
+  color: var(--n-text-color-3, var(--c-text-3));
 }
 
 .total-text b {
-  color: var(--primary-color, #18a058);
+  color: var(--c-brand);
   font-size: 15px;
 }
 
@@ -308,7 +308,7 @@ onMounted(loadData)
   white-space: pre-wrap;
   word-break: break-all;
   font-size: 12px;
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--c-fill-2);
   padding: 8px;
   border-radius: 4px;
 }

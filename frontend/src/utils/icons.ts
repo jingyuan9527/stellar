@@ -49,6 +49,7 @@ import {
   SyncOutline,
   LinkOutline,
   PulseOutline,
+  ArrowForwardOutline,
 } from '@vicons/ionicons5'
 
 export const iconMap: Record<string, Component> = {
@@ -101,4 +102,5 @@ export const iconMap: Record<string, Component> = {
   sync: SyncOutline,
   link: LinkOutline,
   pulse: PulseOutline,
+  arrow: ArrowForwardOutline,
 }

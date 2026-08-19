@@ -633,7 +633,7 @@ onMounted(() => {
   white-space: nowrap;
 }
 .session-del {
-  color: var(--n-text-color-3, #999);
+  color: var(--n-text-color-3, var(--c-text-3));
   font-size: 16px;
   line-height: 1;
   padding: 2px 6px;

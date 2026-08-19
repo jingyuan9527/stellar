@@ -50,11 +50,11 @@ async function handleLogin(e: Event) {
     <div class="login-bg" />
     <NCard class="login-card" :bordered="false" size="large">
       <div class="login-header">
-        <NIcon size="40" color="#18a058">
+        <NIcon size="40" color="var(--c-brand)">
           <component :is="iconMap.grid" />
         </NIcon>
-        <h1 class="login-title">Stellar Admin</h1>
-        <p class="login-subtitle">清新优雅的后台管理框架</p>
+        <h1 class="login-title">Stellar</h1>
+        <p class="login-subtitle">个人知识沉淀池 · 工具与实验集</p>
       </div>
       <NForm ref="formRef" :model="form" :rules="rules" size="large" @submit="handleLogin">
         <NFormItem path="username">
@@ -113,7 +113,7 @@ async function handleLogin(e: Event) {
 .login-bg {
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, #18a058 0%, #2080f0 100%);
+  background: linear-gradient(135deg, var(--c-brand) 0%, var(--c-info) 100%);
 }
 
 .login-bg::before,
@@ -163,6 +163,6 @@ async function handleLogin(e: Event) {
 .login-subtitle {
   margin: 0;
   font-size: 13px;
-  color: #999;
+  color: var(--c-text-3);
 }
 </style>

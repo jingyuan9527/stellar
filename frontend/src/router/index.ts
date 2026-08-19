@@ -53,31 +53,31 @@ export const routes: RouteRecordRaw[] = [
                 path: '/ai/chat',
                 name: 'AiChat',
                 component: () => import('@/views/ai/chat/index.vue'),
-                meta: { title: '聊天', icon: 'chatbubble', order: 1, requiresAuth: false, group: '创作' },
+                meta: { title: '聊天', icon: 'chatbubble', order: 1, requiresAuth: false, group: '创作', description: '与 AI 多轮对话，支持流式输出' },
               },
               {
                 path: '/ai/copy',
                 name: 'AiCopy',
                 component: () => import('@/views/ai/copy/index.vue'),
-                meta: { title: '文案工具', icon: 'log', order: 2, group: '创作' },
+                meta: { title: '文案工具', icon: 'log', order: 2, group: '创作', description: 'AI 文案创作，内置多套模板' },
               },
               {
                 path: '/ai/image',
                 name: 'AiImage',
                 component: () => import('@/views/ai/image/index.vue'),
-                meta: { title: '图片生成', icon: 'image', order: 3, requiresAuth: false, group: '创作' },
+                meta: { title: '图片生成', icon: 'image', order: 3, requiresAuth: false, group: '创作', description: 'AI 文生图，多尺寸比例' },
               },
               {
                 path: '/ai/video',
                 name: 'AiVideo',
                 component: () => import('@/views/ai/video/index.vue'),
-                meta: { title: '视频生成', icon: 'play', order: 4, group: '创作' },
+                meta: { title: '视频生成', icon: 'play', order: 4, group: '创作', description: 'AI 文生视频，异步任务' },
               },
               {
                 path: '/ai/tts',
                 name: 'AiTts',
                 component: () => import('@/views/ai/tts/index.vue'),
-                meta: { title: '语音合成', icon: 'volume', order: 5, requiresAuth: false, group: '创作' },
+                meta: { title: '语音合成', icon: 'volume', order: 5, requiresAuth: false, group: '创作', description: 'Edge / AI 双引擎语音合成' },
               },
             ],
           },
@@ -143,13 +143,13 @@ export const routes: RouteRecordRaw[] = [
             path: 'cover',
             name: 'ToolsCover',
             component: () => import('@/views/tools/cover/index.vue'),
-            meta: { title: '封面工具', icon: 'image', order: 1 },
+            meta: { title: '封面工具', icon: 'image', order: 1, description: '在线封面设计与草稿' },
           },
           {
             path: 'json',
             name: 'ToolsJson',
             component: () => import('@/views/tools/json/index.vue'),
-            meta: { title: 'JSON 格式化', icon: 'json', order: 2 },
+            meta: { title: 'JSON 格式化', icon: 'json', order: 2, description: 'JSON 解析、格式化与压缩' },
           },
         ],
       },
@@ -163,13 +163,13 @@ export const routes: RouteRecordRaw[] = [
             path: 'math',
             name: 'GameMath',
             component: () => import('@/views/game/math/index.vue'),
-            meta: { title: '数学游戏', icon: 'calculator', order: 1, requiresAuth: false },
+            meta: { title: '数学游戏', icon: 'calculator', order: 1, requiresAuth: false, description: '十以内加减法记忆游戏' },
           },
           {
             path: 'conch',
             name: 'GameConch',
             component: () => import('@/views/game/conch/index.vue'),
-            meta: { title: '神奇海螺', icon: 'conch', order: 2, requiresAuth: false },
+            meta: { title: '神奇海螺', icon: 'conch', order: 2, requiresAuth: false, description: '海绵宝宝占卜道具' },
           },
           {
             path: 'conch-admin',
@@ -252,7 +252,7 @@ router.beforeEach(async (to, _from, next) => {
   const menuStore = useMenuStore()
 
   if (to.meta.title) {
-    document.title = `${to.meta.title} - Stellar Admin`
+    document.title = `${to.meta.title} - Stellar`
   }
 
   if (whiteList.includes(to.path)) {
@@ -264,8 +264,11 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
-  // 首页等天然公开路由：放行（不加多标签）
+  // 首页等天然公开路由：游客放行；登录用户也记入多标签（否则 tab 栏停在旧页）
   if (to.meta.requiresAuth === false) {
+    if (authStore.isLogin) {
+      tabStore.addTab(to)
+    }
     next()
     return
   }

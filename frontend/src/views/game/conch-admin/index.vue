@@ -446,7 +446,7 @@ onMounted(() => {
   margin-bottom: 16px;
   padding: 12px 16px;
   border-radius: 8px;
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--c-fill-2);
 }
 
 .switch-label {

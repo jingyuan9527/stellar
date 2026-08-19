@@ -18,6 +18,7 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => ({
 
 watchEffect(() => {
   document.documentElement.style.setProperty('--primary-color', themeStore.primaryColor)
+  document.documentElement.dataset.theme = themeStore.darkMode ? 'dark' : 'light'
 })
 </script>
 

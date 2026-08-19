@@ -202,7 +202,7 @@ async function handleSubmitPassword() {
 }
 
 .user-info:hover {
-  background: rgba(127, 127, 127, 0.12);
+  background: var(--c-fill-2);
 }
 
 .username {

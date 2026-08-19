@@ -73,14 +73,14 @@ const projectColumns: DataTableColumns<ProfileProject> = [
     render: (row) => row.siteUrl
       ? h(NButton, { text: true, tag: 'a', href: row.siteUrl, target: '_blank', type: 'primary' },
           { default: () => row.siteUrl })
-      : h('span', { style: 'color:#999' }, '-'),
+      : h('span', { style: 'color:var(--c-text-3)' }, '-'),
   },
   {
     title: '源码地址', key: 'sourceUrl', width: 220, ellipsis: { tooltip: true },
     render: (row) => row.sourceUrl
       ? h(NButton, { text: true, tag: 'a', href: row.sourceUrl, target: '_blank', type: 'primary' },
           { default: () => row.sourceUrl })
-      : h('span', { style: 'color:#999' }, '-'),
+      : h('span', { style: 'color:var(--c-text-3)' }, '-'),
   },
   { title: '简介', key: 'description', ellipsis: { tooltip: true }, render: (row) => row.description || '-' },
   {
@@ -290,7 +290,7 @@ onMounted(() => {
 }
 
 .about-preview {
-  border: 1px solid rgba(127, 127, 127, 0.2);
+  border: 1px solid var(--c-border);
   border-radius: 6px;
   padding: 12px 16px;
 }

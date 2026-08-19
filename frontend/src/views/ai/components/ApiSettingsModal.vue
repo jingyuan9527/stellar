@@ -128,7 +128,7 @@ function handleSave() {
 
 <style scoped>
 .hint {
-  color: var(--n-text-color-3, #999);
+  color: var(--n-text-color-3, var(--c-text-3));
   font-size: 12px;
   margin: 12px 0 0;
 }

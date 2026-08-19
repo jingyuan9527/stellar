@@ -28,7 +28,7 @@ a {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.35);
+  background: var(--c-scrollbar);
   border-radius: 3px;
 }
 

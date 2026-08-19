@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
+import type { EChartsCoreOption } from 'echarts/core'
 import { NCard, NGrid, NGridItem, NIcon, NStatistic, NEmpty, NTag } from 'naive-ui'
+import Chart from '@/components/Chart.vue'
 import { useAuthStore } from '@/store/auth'
+import { useThemeStore } from '@/store/theme'
+import { getChartColors } from '@/utils/chartColors'
 import { iconMap } from '@/utils/icons'
 import { getDashboardStats } from '@/api/dashboard'
 import type { DashboardStats, DashboardTaskStat } from '@/types/api'
 
 const authStore = useAuthStore()
+const themeStore = useThemeStore()
 const stats = ref<DashboardStats | null>(null)
 
 const greeting = computed(() => {
@@ -18,18 +23,24 @@ const greeting = computed(() => {
   return '晚上好'
 })
 
+/** KPI 卡配色：brand/info 两色交替（跟随主题色 + token 信息色） */
+const kpiPalette = computed(() => {
+  void themeStore.darkMode
+  return [themeStore.primaryColor, getChartColors().info]
+})
+
 const aiKpiCards = computed(() => [
-  { label: '总 Token 消耗', value: stats.value?.aiUsage?.totalTokens ?? 0, icon: 'sparkles', color: '#18a058' },
-  { label: '今日 Token', value: stats.value?.aiUsage?.todayTokens ?? 0, icon: 'info', color: '#2080f0' },
-  { label: '总调用次数', value: stats.value?.aiUsage?.totalCalls ?? 0, icon: 'grid', color: '#f0a020' },
-  { label: '今日调用', value: stats.value?.aiUsage?.todayCalls ?? 0, icon: 'list', color: '#d03050' },
+  { label: '总 Token 消耗', value: stats.value?.aiUsage?.totalTokens ?? 0, icon: 'sparkles', color: kpiPalette.value[0] },
+  { label: '今日 Token', value: stats.value?.aiUsage?.todayTokens ?? 0, icon: 'info', color: kpiPalette.value[1] },
+  { label: '总调用次数', value: stats.value?.aiUsage?.totalCalls ?? 0, icon: 'grid', color: kpiPalette.value[0] },
+  { label: '今日调用', value: stats.value?.aiUsage?.todayCalls ?? 0, icon: 'list', color: kpiPalette.value[1] },
 ])
 
 const todayKpiCards = computed(() => [
-  { label: '今日文案生成', value: stats.value?.textGen?.today ?? 0, icon: 'log', color: '#18a058' },
-  { label: '今日图片生成', value: stats.value?.imageTask?.today ?? 0, icon: 'image', color: '#2080f0' },
-  { label: '今日视频生成', value: stats.value?.videoTask?.today ?? 0, icon: 'film', color: '#f0a020' },
-  { label: '今日 TTS 合成', value: stats.value?.tts?.today ?? 0, icon: 'volume', color: '#d03050' },
+  { label: '今日文案生成', value: stats.value?.textGen?.today ?? 0, icon: 'log', color: kpiPalette.value[0] },
+  { label: '今日图片生成', value: stats.value?.imageTask?.today ?? 0, icon: 'image', color: kpiPalette.value[1] },
+  { label: '今日视频生成', value: stats.value?.videoTask?.today ?? 0, icon: 'film', color: kpiPalette.value[0] },
+  { label: '今日 TTS 合成', value: stats.value?.tts?.today ?? 0, icon: 'volume', color: kpiPalette.value[1] },
 ])
 
 function renderStatIcon(name: string, color: string) {
@@ -38,14 +49,29 @@ function renderStatIcon(name: string, color: string) {
   return h(NIcon, { size: 24, color }, { default: () => h(Icon) })
 }
 
-// ===== 近 7 日趋势 =====
-const maxTrendTokens = computed(() => {
-  if (!stats.value?.aiUsage?.dailyTrend?.length) return 1
-  return Math.max(1, ...stats.value.aiUsage.dailyTrend.map((d) => d.tokens))
-})
-const maxTrendCalls = computed(() => {
-  if (!stats.value?.aiUsage?.dailyTrend?.length) return 1
-  return Math.max(1, ...stats.value.aiUsage.dailyTrend.map((d) => d.calls))
+// ===== 近 7 日趋势（双轴柱状：Token / 调用） =====
+const trendOption = computed<EChartsCoreOption>(() => {
+  void themeStore.darkMode
+  const c = getChartColors()
+  const trend = stats.value?.aiUsage?.dailyTrend ?? []
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: 8, right: 8, top: 32, bottom: 4, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: trend.map((d) => d.date.slice(5)),
+      axisLabel: { color: c.text3 },
+      axisLine: { lineStyle: { color: c.border } },
+    },
+    yAxis: [
+      { type: 'value', axisLabel: { color: c.text3 }, splitLine: { lineStyle: { color: c.border } } },
+      { type: 'value', axisLabel: { color: c.text3 }, splitLine: { show: false } },
+    ],
+    series: [
+      { name: 'Token', type: 'bar', yAxisIndex: 0, data: trend.map((d) => d.tokens), itemStyle: { color: c.brand }, barMaxWidth: 16 },
+      { name: '调用', type: 'bar', yAxisIndex: 1, data: trend.map((d) => d.calls), itemStyle: { color: c.info }, barMaxWidth: 16 },
+    ],
+  }
 })
 
 // ===== 模型类型 / 供应商 =====
@@ -59,26 +85,73 @@ const modelTypeLabels: Record<string, string> = {
 function typeLabel(t: string): string {
   return modelTypeLabels[t] ?? t
 }
-const maxTypeTokens = computed(() => {
-  if (!stats.value?.aiUsage?.byType?.length) return 1
-  return Math.max(1, ...stats.value.aiUsage.byType.map((t) => t.tokens))
+
+const modelTypeOption = computed<EChartsCoreOption>(() => {
+  void themeStore.darkMode
+  const c = getChartColors()
+  const byType = stats.value?.aiUsage?.byType ?? []
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: 8, right: 8, top: 28, bottom: 4, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: byType.map((t) => typeLabel(t.modelType)),
+      axisLabel: { color: c.text3 },
+      axisLine: { lineStyle: { color: c.border } },
+    },
+    yAxis: { type: 'value', axisLabel: { color: c.text3 }, splitLine: { lineStyle: { color: c.border } } },
+    series: [
+      { name: 'Token', type: 'bar', data: byType.map((t) => t.tokens), itemStyle: { color: c.brand }, barMaxWidth: 28 },
+    ],
+  }
 })
-const maxProviderTokens = computed(() => {
-  if (!stats.value?.aiUsage?.byProvider?.length) return 1
-  return Math.max(1, ...stats.value.aiUsage.byProvider.map((p) => p.tokens))
+
+const providerOption = computed<EChartsCoreOption>(() => {
+  void themeStore.darkMode
+  const c = getChartColors()
+  const byProvider = stats.value?.aiUsage?.byProvider ?? []
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: 8, right: 8, top: 28, bottom: 4, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: byProvider.map((p) => p.providerName || '未知'),
+      axisLabel: { color: c.text3, interval: 0, rotate: byProvider.length > 4 ? 30 : 0 },
+      axisLine: { lineStyle: { color: c.border } },
+    },
+    yAxis: { type: 'value', axisLabel: { color: c.text3 }, splitLine: { lineStyle: { color: c.border } } },
+    series: [
+      { name: 'Token', type: 'bar', data: byProvider.map((p) => p.tokens), itemStyle: { color: c.info }, barMaxWidth: 28 },
+    ],
+  }
 })
 
 // ===== AI 生成质量（文案/图片/视频）=====
 const taskQualityCards = computed(() => [
-  { title: '文案生成', icon: 'log', color: '#18a058', stat: stats.value?.textGen, unit: 'ms' as const },
-  { title: '图片生成', icon: 'image', color: '#2080f0', stat: stats.value?.imageTask, unit: 's' as const },
-  { title: '视频生成', icon: 'film', color: '#f0a020', stat: stats.value?.videoTask, unit: 's' as const },
+  { title: '文案生成', icon: 'log', color: kpiPalette.value[0], stat: stats.value?.textGen, unit: 'ms' as const },
+  { title: '图片生成', icon: 'image', color: kpiPalette.value[1], stat: stats.value?.imageTask, unit: 's' as const },
+  { title: '视频生成', icon: 'film', color: kpiPalette.value[0], stat: stats.value?.videoTask, unit: 's' as const },
 ])
 
 // ===== 文件存储 =====
-const maxFileTypeCount = computed(() => {
-  if (!stats.value?.file?.byType?.length) return 1
-  return Math.max(1, ...stats.value.file.byType.map((t) => t.count))
+const fileTypeOption = computed<EChartsCoreOption>(() => {
+  void themeStore.darkMode
+  const c = getChartColors()
+  const byType = stats.value?.file?.byType ?? []
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: 8, right: 8, top: 28, bottom: 4, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: byType.map((t) => fileTypeLabels[t.type] ?? t.type),
+      axisLabel: { color: c.text3 },
+      axisLine: { lineStyle: { color: c.border } },
+    },
+    yAxis: { type: 'value', axisLabel: { color: c.text3 }, splitLine: { lineStyle: { color: c.border } } },
+    series: [
+      { name: '数量', type: 'bar', data: byType.map((t) => t.count), itemStyle: { color: c.brand }, barMaxWidth: 28 },
+    ],
+  }
 })
 const fileTypeLabels: Record<string, string> = { image: '图片', audio: '音频', other: '其他' }
 
@@ -172,23 +245,7 @@ onMounted(loadStats)
     <!-- 近 7 日趋势 -->
     <NCard title="近 7 日 AI 调用趋势" :bordered="false">
       <div v-if="stats?.aiUsage?.dailyTrend?.length" class="trend">
-        <div v-for="d in stats.aiUsage.dailyTrend" :key="d.date" class="trend-item">
-          <div class="trend-bar-wrap">
-            <div
-              class="trend-bar tokens-bar"
-              :style="{ height: (d.tokens / maxTrendTokens * 100) + '%' }"
-              :title="`Token: ${d.tokens}`"
-            ></div>
-            <div
-              class="trend-bar calls-bar"
-              :style="{ height: (d.calls / maxTrendCalls * 100) + '%' }"
-              :title="`调用: ${d.calls}`"
-            ></div>
-          </div>
-          <div class="trend-label">{{ d.date.slice(5) }}</div>
-          <div class="trend-tokens">{{ formatNumber(d.tokens) }}</div>
-          <div class="trend-calls">{{ d.calls }} 次</div>
-        </div>
+        <Chart :option="trendOption" height="240px" />
       </div>
       <NEmpty v-else description="暂无数据" />
     </NCard>
@@ -248,22 +305,9 @@ onMounted(loadStats)
                 <div class="file-kpi-value">{{ formatBytes(stats.file.totalSize) }}</div>
               </div>
             </div>
-            <div v-if="stats.file.byType?.length" class="group-list">
-              <div v-for="t in stats.file.byType" :key="t.type" class="group-row">
-                <div class="group-head">
-                  <NTag size="small" :bordered="false" :type="t.type === 'image' ? 'success' : t.type === 'audio' ? 'warning' : 'default'">
-                    {{ fileTypeLabels[t.type] ?? t.type }}
-                  </NTag>
-                  <span class="group-tokens">{{ formatNumber(t.count) }} 个</span>
-                  <span class="group-calls">{{ formatBytes(t.size) }}</span>
-                </div>
-                <div class="group-bar-wrap">
-                  <div class="group-bar file-bar" :style="{ width: (t.count / maxFileTypeCount * 100) + '%' }"></div>
-                </div>
-              </div>
-            </div>
+            <Chart v-if="stats.file.byType?.length" :option="fileTypeOption" height="200px" />
+            <NEmpty v-else description="暂无数据" />
           </div>
-          <NEmpty v-else description="暂无数据" />
         </NCard>
       </NGridItem>
       <NGridItem span="2 m:1">
@@ -293,37 +337,13 @@ onMounted(loadStats)
     <NGrid :x-gap="16" :y-gap="16" :cols="2" responsive="screen" item-responsive>
       <NGridItem span="2 m:1">
         <NCard title="按模型类型" :bordered="false">
-          <div v-if="stats?.aiUsage?.byType?.length" class="group-list">
-            <div v-for="t in stats.aiUsage.byType" :key="t.modelType" class="group-row">
-              <div class="group-head">
-                <NTag size="small" :bordered="false" :type="t.modelType === 'TEXT' ? 'success' : 'warning'">
-                  {{ typeLabel(t.modelType) }}
-                </NTag>
-                <span class="group-tokens">{{ formatNumber(t.tokens) }} tokens</span>
-                <span class="group-calls">{{ formatNumber(t.calls) }} 次</span>
-              </div>
-              <div class="group-bar-wrap">
-                <div class="group-bar" :style="{ width: (t.tokens / maxTypeTokens * 100) + '%' }"></div>
-              </div>
-            </div>
-          </div>
+          <Chart v-if="stats?.aiUsage?.byType?.length" :option="modelTypeOption" height="200px" />
           <NEmpty v-else description="暂无数据" />
         </NCard>
       </NGridItem>
       <NGridItem span="2 m:1">
         <NCard title="按供应商" :bordered="false">
-          <div v-if="stats?.aiUsage?.byProvider?.length" class="group-list">
-            <div v-for="p in stats.aiUsage.byProvider" :key="p.providerId" class="group-row">
-              <div class="group-head">
-                <span class="group-name">{{ p.providerName || '未知' }}</span>
-                <span class="group-tokens">{{ formatNumber(p.tokens) }} tokens</span>
-                <span class="group-calls">{{ formatNumber(p.calls) }} 次</span>
-              </div>
-              <div class="group-bar-wrap">
-                <div class="group-bar provider-bar" :style="{ width: (p.tokens / maxProviderTokens * 100) + '%' }"></div>
-              </div>
-            </div>
-          </div>
+          <Chart v-if="stats?.aiUsage?.byProvider?.length" :option="providerOption" height="200px" />
           <NEmpty v-else description="暂无数据" />
         </NCard>
       </NGridItem>
@@ -351,13 +371,13 @@ onMounted(loadStats)
 
 .welcome-text p {
   margin: 0;
-  color: #888;
+  color: var(--c-text-3);
 }
 
 .section-title {
   font-size: 14px;
   font-weight: 600;
-  color: #666;
+  color: var(--c-text-2);
   padding-left: 4px;
   margin-top: 4px;
 }
@@ -375,67 +395,8 @@ onMounted(loadStats)
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  background: rgba(127, 127, 127, 0.1);
+  background: var(--c-fill-2);
   flex-shrink: 0;
-}
-
-/* 趋势图 */
-.trend {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  height: 220px;
-  padding: 0 4px;
-}
-
-.trend-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  height: 100%;
-}
-
-.trend-bar-wrap {
-  flex: 1;
-  width: 100%;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 4px;
-}
-
-.trend-bar {
-  width: 40%;
-  max-width: 28px;
-  border-radius: 6px 6px 0 0;
-  min-height: 2px;
-  transition: height 0.3s;
-}
-
-.tokens-bar {
-  background: var(--primary-color, #18a058);
-}
-
-.calls-bar {
-  background: #2080f0;
-  opacity: 0.6;
-}
-
-.trend-label {
-  font-size: 12px;
-  opacity: 0.6;
-}
-
-.trend-tokens {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.trend-calls {
-  font-size: 11px;
-  opacity: 0.5;
 }
 
 /* AI 生成质量卡 */
@@ -467,13 +428,13 @@ onMounted(loadStats)
   flex-direction: column;
   gap: 4px;
   padding: 10px 12px;
-  background: rgba(127, 127, 127, 0.06);
+  background: var(--c-fill-2);
   border-radius: 8px;
 }
 
 .quality-label {
   font-size: 12px;
-  color: #888;
+  color: var(--c-text-3);
 }
 
 .quality-value {
@@ -499,13 +460,13 @@ onMounted(loadStats)
   flex-direction: column;
   gap: 4px;
   padding: 12px;
-  background: rgba(127, 127, 127, 0.06);
+  background: var(--c-fill-2);
   border-radius: 8px;
 }
 
 .file-kpi-label {
   font-size: 12px;
-  color: #888;
+  color: var(--c-text-3);
 }
 
 .file-kpi-value {
@@ -513,78 +474,7 @@ onMounted(loadStats)
   font-weight: 600;
 }
 
-/* 分组条形图 */
-.group-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.group-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.group-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-}
-
-.group-name {
-  font-weight: 500;
-  min-width: 80px;
-}
-
-.group-tokens {
-  opacity: 0.8;
-}
-
-.group-calls {
-  margin-left: auto;
-  opacity: 0.5;
-  font-size: 12px;
-}
-
-.group-bar-wrap {
-  width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(127, 127, 127, 0.12);
-  overflow: hidden;
-}
-
-.group-bar {
-  height: 100%;
-  background: var(--primary-color, #18a058);
-  border-radius: 3px;
-  transition: width 0.3s;
-  min-width: 2px;
-}
-
-.file-bar {
-  background: #18a058;
-}
-
-.provider-bar {
-  background: #2080f0;
-}
-
 @media (max-width: 768px) {
-  .trend {
-    height: 160px;
-    gap: 6px;
-  }
-  .trend-label,
-  .trend-tokens,
-  .trend-calls {
-    font-size: 10px;
-  }
-  .trend-bar {
-    max-width: 18px;
-  }
   .file-kpi {
     grid-template-columns: repeat(3, 1fr);
     gap: 8px;
@@ -604,6 +494,23 @@ onMounted(loadStats)
   }
   .quality-value {
     font-size: 16px;
+  }
+}
+
+/* 卡片 hover 轻盈提升（尊重减少动效偏好） */
+:deep(.n-card) {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+:deep(.n-card:hover) {
+  box-shadow: var(--sh-card);
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :deep(.n-card) {
+    transition: none;
+    transform: none;
   }
 }
 </style>

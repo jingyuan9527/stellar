@@ -116,11 +116,11 @@ function handleAction(key: string) {
 }
 
 .tab-item:hover {
-  background: rgba(127, 127, 127, 0.14);
+  background: var(--c-fill-2);
 }
 
 .tab-item.active {
-  background: var(--primary-color, #18a058);
+  background: var(--c-brand);
   color: #fff;
 }
 

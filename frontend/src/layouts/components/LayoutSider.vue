@@ -25,7 +25,7 @@ function renderLogoIcon() {
   >
     <div class="logo" :class="{ collapsed: themeStore.siderCollapsed }">
       <component :is="renderLogoIcon" />
-      <span v-show="!themeStore.siderCollapsed" class="logo-text">Stellar Admin</span>
+      <span v-show="!themeStore.siderCollapsed" class="logo-text">Stellar</span>
     </div>
     <LayoutMenu :collapsed="themeStore.siderCollapsed" />
   </NLayoutSider>

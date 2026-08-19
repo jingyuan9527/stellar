@@ -137,8 +137,9 @@ const solidItems = computed(() => gradients.filter((g) => g.titleColor))
 }
 
 .section-title {
-  font-size: 11px;
-  opacity: 0.5;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text-2);
   margin-bottom: 8px;
 }
 
@@ -161,7 +162,7 @@ const solidItems = computed(() => gradients.filter((g) => g.titleColor))
 }
 
 .swatch.active {
-  border-color: var(--n-color-primary, #18a058);
+  border-color: var(--n-color-primary, var(--c-brand));
 }
 
 .swatch-preview {

@@ -8,6 +8,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { NButton, NCard, NGrid, NGridItem, NIcon, NStatistic, NTag } from 'naive-ui'
 import { DownloadOutline } from '@vicons/ionicons5'
 import { exportMonitorReport, getMonitorOverview } from '@/api/monitor'
+import { getChartColors } from '@/utils/chartColors'
 import type { MonitorOverview } from '@/types/api'
 
 // 按需注册监控页用到的 echarts 组件，缩小该 chunk 体积（pie/bar + tooltip/grid 已覆盖本页全部图表）
@@ -131,8 +132,7 @@ async function downloadReport() {
 }
 
 // ===== ECharts =====
-const RING_TRACK = 'rgba(127, 127, 127, 0.15)'
-const COLORS = ['#18a058', '#2080f0', '#f0a020', '#d03050']
+/** 图表色每次轮询重读 CSS token，切主题后自动跟随 */
 
 function initCharts() {
   if (heapChartRef.value) heapChart = echarts.init(heapChartRef.value)
@@ -152,6 +152,7 @@ function resizeCharts() {
 }
 
 function ringOption(percent: number, color: string, label: string): EChartsCoreOption {
+  const c = getChartColors()
   return {
     series: [
       {
@@ -162,7 +163,7 @@ function ringOption(percent: number, color: string, label: string): EChartsCoreO
         silent: true,
         data: [
           { value: percent, itemStyle: { color } },
-          { value: Math.max(0, 100 - percent), itemStyle: { color: RING_TRACK } },
+          { value: Math.max(0, 100 - percent), itemStyle: { color: c.border } },
         ],
       },
     ],
@@ -177,7 +178,7 @@ function ringOption(percent: number, color: string, label: string): EChartsCoreO
         type: 'text',
         left: 'center',
         top: '72%',
-        style: { text: label, fontSize: 12, fill: '#999', align: 'center' },
+        style: { text: label, fontSize: 12, fill: c.text3, align: 'center' },
       },
     ],
   }
@@ -186,10 +187,11 @@ function ringOption(percent: number, color: string, label: string): EChartsCoreO
 function updateCharts() {
   const o = overview.value
   if (!o) return
-  heapChart?.setOption(ringOption(heapPercent.value, '#2080f0', '堆内存'), true)
+  const c = getChartColors()
+  heapChart?.setOption(ringOption(heapPercent.value, c.info, '堆内存'), true)
   const cpu = o.system.processCpuUsage
   const cpuPct = cpu < 0 ? 0 : Math.min(100, Math.round(cpu * 100))
-  cpuChart?.setOption(ringOption(cpuPct, '#18a058', '进程 CPU'), true)
+  cpuChart?.setOption(ringOption(cpuPct, c.brand, '进程 CPU'), true)
   diskChart?.setOption(ringOption(diskUsedPercent.value, '#f0a020', '磁盘使用率'), true)
 
   httpChart?.setOption(
@@ -203,7 +205,7 @@ function updateCharts() {
           type: 'bar',
           barWidth: 36,
           data: [
-            { value: o.http.status2xx, itemStyle: { color: '#18a058' } },
+            { value: o.http.status2xx, itemStyle: { color: c.brand } },
             { value: o.http.status4xx, itemStyle: { color: '#f0a020' } },
             { value: o.http.status5xx, itemStyle: { color: '#d03050' } },
           ],
@@ -224,11 +226,11 @@ function updateCharts() {
           type: 'bar',
           barWidth: 36,
           data: [
-            { value: o.hikariPool.idleConnections, itemStyle: { color: '#18a058' } },
-            { value: o.hikariPool.activeConnections, itemStyle: { color: '#2080f0' } },
+            { value: o.hikariPool.idleConnections, itemStyle: { color: c.brand } },
+            { value: o.hikariPool.activeConnections, itemStyle: { color: c.info } },
             {
               value: o.hikariPool.pendingConnections,
-              itemStyle: { color: o.hikariPool.pendingConnections > 0 ? '#d03050' : '#18a058' },
+              itemStyle: { color: o.hikariPool.pendingConnections > 0 ? '#d03050' : c.brand },
             },
           ],
         },
@@ -577,7 +579,7 @@ onBeforeUnmount(() => {
 .section-title {
   font-size: 14px;
   font-weight: 600;
-  color: #666;
+  color: var(--c-text-2);
   padding-left: 4px;
   margin-top: 4px;
 }
@@ -600,14 +602,14 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: rgba(127, 127, 127, 0.06);
+  background: var(--c-fill-2);
   border-radius: 8px;
   font-size: 13px;
 }
 
 .jvm-arg-name {
   font-weight: 500;
-  color: #888;
+  color: var(--c-text-3);
   min-width: 170px;
 }
 
@@ -639,7 +641,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background: rgba(127, 127, 127, 0.06);
+  background: var(--c-fill-2);
   border-radius: 8px;
   font-size: 13px;
 }
@@ -678,7 +680,7 @@ onBeforeUnmount(() => {
 
 .sub-label {
   font-size: 12px;
-  color: #888;
+  color: var(--c-text-3);
 }
 
 .sub-value {
@@ -697,13 +699,13 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 4px;
   padding: 10px 12px;
-  background: rgba(127, 127, 127, 0.06);
+  background: var(--c-fill-2);
   border-radius: 8px;
 }
 
 .kv-label {
   font-size: 12px;
-  color: #888;
+  color: var(--c-text-3);
 }
 
 .kv-value {
@@ -740,12 +742,12 @@ onBeforeUnmount(() => {
 }
 
 .gc-row:nth-child(even) {
-  background: rgba(127, 127, 127, 0.06);
+  background: var(--c-fill-2);
 }
 
 .gc-head {
   font-size: 12px;
-  color: #888;
+  color: var(--c-text-3);
 }
 
 .gc-name {
@@ -753,7 +755,7 @@ onBeforeUnmount(() => {
 }
 
 .muted {
-  color: #999;
+  color: var(--c-text-3);
   font-size: 13px;
 }
 
@@ -772,7 +774,7 @@ onBeforeUnmount(() => {
 
 .fd-max {
   font-size: 14px;
-  color: #999;
+  color: var(--c-text-3);
   font-weight: 400;
 }
 

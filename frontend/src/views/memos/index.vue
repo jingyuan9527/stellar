@@ -429,7 +429,7 @@ const columns: DataTableColumns<MemosNote> = [
   {
     title: '内容', key: 'content', minWidth: 360,
     render: (row) => {
-      if (!row.content) return h('span', { style: 'color:#999' }, '-')
+      if (!row.content) return h('span', { style: 'color:var(--c-text-3)' }, '-')
       const hasImage = hasContentImage(row.content)
       const hasLink = hasContentLink(row.content)
       const icon = (ic: string, color: string) =>
@@ -438,14 +438,14 @@ const columns: DataTableColumns<MemosNote> = [
       return h('span', { class: 'content-cell', title: row.content }, [
         h('span', { class: 'content-text' }, highlightContent(row.content, query.keyword)),
         hasImage ? icon('image', '#f0a020') : null,
-        hasLink ? icon('link', '#2080f0') : null,
+        hasLink ? icon('link', 'var(--c-info)') : null,
       ])
     },
   },
   {
     title: '标签', key: 'tags', width: 180,
     render: (row) => {
-      if (!row.tags.length) return h('span', { style: 'color:#999' }, '-')
+      if (!row.tags.length) return h('span', { style: 'color:var(--c-text-3)' }, '-')
       const show = row.tags.slice(0, 3)
       const rest = row.tags.length - show.length
       return h(NSpace, { size: 2, wrap: true }, {
@@ -668,7 +668,7 @@ onMounted(() => {
                   <NIcon v-if="hasContentImage(row.content)" size="14" class="card-icon" style="color:#f0a020">
                     <component :is="iconMap.image" />
                   </NIcon>
-                  <NIcon v-if="hasContentLink(row.content)" size="14" class="card-icon" style="color:#2080f0">
+                  <NIcon v-if="hasContentLink(row.content)" size="14" class="card-icon" style="color:var(--c-info)">
                     <component :is="iconMap.link" />
                   </NIcon>
                 </template>
@@ -795,7 +795,7 @@ onMounted(() => {
             <NDescriptionsItem label="标签">
               <NSpace :size="4">
                 <NTag v-for="t in current.tags" :key="t" size="small" type="info">#{{ t }}</NTag>
-                <span v-if="!current.tags.length" style="color:#999">-</span>
+                <span v-if="!current.tags.length" style="color:var(--c-text-3)">-</span>
               </NSpace>
             </NDescriptionsItem>
             <NDescriptionsItem label="标签同步">
@@ -814,7 +814,7 @@ onMounted(() => {
           </NDescriptions>
 <NCard title="原文" size="small" style="margin-top: 12px">
             <div v-if="current.content" class="markdown-body" v-html="renderMarkdown(current.content)"></div>
-            <span v-else style="color:#999">-</span>
+            <span v-else style="color:var(--c-text-3)">-</span>
           </NCard>
         </template>
       </NDrawerContent>
@@ -980,7 +980,7 @@ onMounted(() => {
 }
 
 .card-content-empty {
-  color: #999;
+  color: var(--c-text-3);
 }
 
 .card-meta {
@@ -1000,7 +1000,7 @@ onMounted(() => {
 
 .card-empty {
   text-align: center;
-  color: #999;
+  color: var(--c-text-3);
   padding: 24px 0;
 }
 
@@ -1116,10 +1116,10 @@ onMounted(() => {
   border-left: 3px solid rgba(128, 128, 128, 0.4);
   margin: 0.5em 0;
   padding-left: 10px;
-  color: #888;
+  color: var(--c-text-3);
 }
 .markdown-body :deep(a) {
-  color: #2080f0;
+  color: var(--c-info);
 }
 .markdown-body :deep(img) {
   max-width: 100%;

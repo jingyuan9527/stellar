@@ -6,6 +6,7 @@ import { setupDiscreteApi } from './utils/discrete'
 import { setupCrossTabSync } from './views/tools/cover/lib/sync'
 import { setupGlobalErrorCapture } from './utils/clientError'
 import 'virtual:uno.css'
+import './styles/tokens.css'
 import './styles/global.css'
 
 const app = createApp(App)
