@@ -4,7 +4,7 @@ import MarkdownIt from 'markdown-it'
 import {
   NCard, NForm, NFormItem, NInput, NButton, NSpace, NDataTable, NTag,
   NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem, NIcon, NSelect,
-  NAlert, NDropdown, NModal, useMessage,
+  NAlert, NDropdown, NModal, NPagination, NCheckbox, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, SelectOption, DropdownOption } from 'naive-ui'
 import {
@@ -116,7 +116,26 @@ const latestSync = ref<MemosSyncLog | null>(null)
 const syncLogs = ref<MemosSyncLog[]>([])
 const syncLogTotal = ref(0)
 const syncLogLoading = ref(false)
-const syncLogExpanded = ref(false)
+// 明细须开抽屉看，避免展开表格把笔记列表顶出视口
+const syncLogDrawerShow = ref(false)
+const syncLogQuery = reactive({ pageNum: 1, pageSize: 10 })
+const syncLogPagination = reactive({
+  page: 1,
+  pageSize: 10,
+  itemCount: 0,
+  onChange: (page: number) => {
+    syncLogPagination.page = page
+    syncLogQuery.pageNum = page
+    loadSyncLogs()
+  },
+  onUpdatePageSize: (size: number) => {
+    syncLogPagination.pageSize = size
+    syncLogQuery.pageSize = size
+    syncLogPagination.page = 1
+    syncLogQuery.pageNum = 1
+    loadSyncLogs()
+  },
+})
 
 const syncStatusMeta: Record<string, { type: 'success' | 'warning' | 'error' | 'default'; label: string }> = {
   success: { type: 'success', label: '成功' },
@@ -156,16 +175,25 @@ async function loadLatestSync() {
 async function loadSyncLogs() {
   syncLogLoading.value = true
   try {
-    const r = await getMemosSyncLogPage({ pageNum: 1, pageSize: 20 })
+    const r = await getMemosSyncLogPage(syncLogQuery)
     syncLogs.value = r.records
     syncLogTotal.value = r.total
+    syncLogPagination.itemCount = r.total
   } finally {
     syncLogLoading.value = false
   }
 }
 
+function openSyncLogDrawer() {
+  syncLogDrawerShow.value = true
+  loadSyncLogs()
+}
+
 async function loadSyncStatus() {
-  await Promise.all([loadLatestSync(), loadSyncLogs()])
+  await Promise.all([
+    loadLatestSync(),
+    loadSyncLogs(),
+  ])
 }
 
 const syncLogColumns: DataTableColumns<MemosSyncLog> = [
@@ -373,24 +401,33 @@ function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** 命中关键词包 <mark> 高亮；无命中关键词时返回原文本 */
-function highlightContent(text: string, keyword: string) {
+/** 命中关键词切成 {text, hit} 段；无关键词时不命中任何段 */
+function splitHighlight(text: string, keyword: string) {
   const words = keyword.trim().split(/[\s,，、;；]+/).filter(Boolean)
-  if (!words.length) return text
+  if (!words.length) return [{ text, hit: false }]
   const pattern = new RegExp(`(${words.map(escapeRegExp).join('|')})`, 'gi')
-  return text.split(pattern).map((part) =>
-    words.some((w) => part.toLowerCase() === w.toLowerCase())
-      ? h('mark', { class: 'search-hit' }, part)
-      : part,
+  return text.split(pattern).map((part) => ({
+    text: part,
+    hit: words.some((w) => part.toLowerCase() === w.toLowerCase()),
+  }))
+}
+
+/** 命中关键词包 <mark> 高亮（表格内容列用）；无命中关键词时返回原文本 */
+function highlightContent(text: string, keyword: string) {
+  if (!text) return ''
+  return splitHighlight(text, keyword).map((p) =>
+    p.hit ? h('mark', { class: 'search-hit' }, p.text) : p.text,
   )
 }
 
-const allColumns: DataTableColumns<MemosNote> = [
+/**
+ * 桌面表格列（内容优先）：ID/UID/创建/更新时间 入详情抽屉，内容列为唯一弹性列占满剩余宽度。
+ * 移动端改卡片列表，不走本列。
+ */
+const columns: DataTableColumns<MemosNote> = [
   { type: 'selection', fixed: 'left' },
-  { title: 'ID', key: 'id', width: 70 },
-  { title: 'UID', key: 'uid', ellipsis: { tooltip: true }, width: 110 },
   {
-    title: '内容', key: 'content', width: 340,
+    title: '内容', key: 'content', minWidth: 360,
     render: (row) => {
       if (!row.content) return h('span', { style: 'color:#999' }, '-')
       const hasImage = hasContentImage(row.content)
@@ -406,10 +443,10 @@ const allColumns: DataTableColumns<MemosNote> = [
     },
   },
   {
-    title: '标签', key: 'tags', width: 200,
+    title: '标签', key: 'tags', width: 180,
     render: (row) => {
       if (!row.tags.length) return h('span', { style: 'color:#999' }, '-')
-      const show = row.tags.slice(0, 2)
+      const show = row.tags.slice(0, 3)
       const rest = row.tags.length - show.length
       return h(NSpace, { size: 2, wrap: true }, {
         default: () => [
@@ -426,13 +463,11 @@ const allColumns: DataTableColumns<MemosNote> = [
       : h(NTag, { size: 'small', type: 'warning' }, { default: () => '待写回' }),
   },
   {
-    title: '远端状态', key: 'remoteDeleted', width: 100,
+    title: '远端状态', key: 'remoteDeleted', width: 90,
     render: (row) => row.remoteDeleted === 1
       ? h(NTag, { size: 'small', type: 'error' }, { default: () => '已删除' })
       : h(NTag, { size: 'small', type: 'success' }, { default: () => '存活' }),
   },
-  { title: '创建时间', key: 'createTime', width: 170, render: (row) => formatTime(row.createTime) },
-  { title: '更新时间', key: 'remoteUpdateTime', width: 170, render: (row) => formatTime(row.remoteUpdateTime) },
   {
     title: '操作', key: 'actions', width: 80, fixed: 'right',
     render: (row) => h(NButton, { size: 'small', text: true, onClick: () => viewDetail(row) },
@@ -440,15 +475,17 @@ const allColumns: DataTableColumns<MemosNote> = [
   },
 ]
 
-/** 已删除行置灰 + 删除线（视觉区分备份与存活笔记） */
+/** 已删除行置灰 + 删除线（视觉区分备份与存活笔记，桌面表格行用） */
 const rowProps = (row: MemosNote) => (row.remoteDeleted === 1 ? { class: 'row-deleted' } : {})
 
-const mobileHiddenKeys = new Set(['id', 'uid', 'tagsSynced', 'createTime'])
-const columns = computed<DataTableColumns<MemosNote>>(() =>
-  isMobile.value
-    ? allColumns.filter((c) => !mobileHiddenKeys.has((c as { key?: string }).key ?? ''))
-    : allColumns,
-)
+/** 移动端卡片勾选（AI 打标签用） */
+function toggleCheck(id: number, checked: boolean) {
+  if (checked) {
+    if (!checkedKeys.value.includes(id)) checkedKeys.value.push(id)
+  } else {
+    checkedKeys.value = checkedKeys.value.filter((k) => k !== id)
+  }
+}
 
 const pagination = reactive({
   page: 1,
@@ -573,9 +610,7 @@ onMounted(() => {
         <template #header-extra>
           <NSpace :size="8" align="center">
             <span v-if="syncLogTotal" class="sync-log-count">近 3 天记录 {{ syncLogTotal }} 条</span>
-            <NButton size="tiny" quaternary @click="syncLogExpanded = !syncLogExpanded">
-              {{ syncLogExpanded ? '收起记录' : '展开记录' }}
-            </NButton>
+            <NButton size="tiny" quaternary @click="openSyncLogDrawer">查看记录</NButton>
           </NSpace>
         </template>
         <template v-if="latestSync">
@@ -600,26 +635,80 @@ onMounted(() => {
           </div>
         </template>
         <span v-else class="sync-empty">暂无同步记录，点「立即同步」或等每 4 小时定时同步后查看</span>
-
-        <NDataTable v-if="syncLogExpanded && syncLogs.length" :columns="syncLogColumns" :data="syncLogs"
-          :loading="syncLogLoading" size="small" :scroll-x="760" striped class="sync-log-table" />
       </NCard>
 
       <NCard title="笔记备份" size="small" class="table-card">
         <template #header-extra>
-          <NSpace :size="8">
-            <NInput v-model:value="query.keyword" placeholder="搜索内容/UID/标签，空格或逗号分隔多词" clearable
-              style="width: 240px" @keyup.enter="handleSearch" />
-            <NSelect v-model:value="query.remoteDeleted" :options="deletedOptions" style="width: 120px" />
+          <NSpace :size="8" wrap class="note-filter">
+            <NInput v-model:value="query.keyword" class="note-search" placeholder="搜索内容/UID/标签，空格或逗号分隔多词" clearable
+              @keyup.enter="handleSearch" />
+            <NSelect v-model:value="query.remoteDeleted" :options="deletedOptions" class="note-status-filter" />
             <NButton type="primary" size="small" @click="handleSearch">查询</NButton>
           </NSpace>
         </template>
-        <NDataTable :columns="columns" :data="tableData" :loading="loading" :pagination="pagination"
+        <NDataTable v-if="!isMobile" :columns="columns" :data="tableData" :loading="loading" :pagination="pagination"
           :row-key="(row: MemosNote) => row.id" v-model:checked-row-keys="checkedKeys"
           :row-props="rowProps" flex-height
-          :scroll-x="isMobile ? 900 : 1180" remote striped size="small" />
+          :scroll-x="840" remote striped size="small" />
+
+        <!-- 移动端：卡片列表（内容整卡换行展示，杜绝横向滚动挤走正文） -->
+        <div v-else class="note-cards">
+          <div v-for="row in tableData" :key="row.id" class="note-card" :class="{ 'card-deleted': row.remoteDeleted === 1 }">
+            <div class="card-head">
+              <NCheckbox :checked="checkedKeys.includes(row.id)"
+                @update:checked="(v: boolean) => toggleCheck(row.id, v)" class="card-check" />
+              <div class="card-content" @click="viewDetail(row)">
+                <template v-if="row.content">
+                  <span class="card-content-text" :title="row.content">
+                    <template v-for="(p, i) in splitHighlight(row.content, query.keyword)" :key="i">
+                      <mark v-if="p.hit" class="search-hit">{{ p.text }}</mark>
+                      <template v-else>{{ p.text }}</template>
+                    </template>
+                  </span>
+                  <NIcon v-if="hasContentImage(row.content)" size="14" class="card-icon" style="color:#f0a020">
+                    <component :is="iconMap.image" />
+                  </NIcon>
+                  <NIcon v-if="hasContentLink(row.content)" size="14" class="card-icon" style="color:#2080f0">
+                    <component :is="iconMap.link" />
+                  </NIcon>
+                </template>
+                <span v-else class="card-content-empty">-</span>
+              </div>
+            </div>
+            <div class="card-meta">
+              <NTag v-for="t in row.tags.slice(0, 3)" :key="t" size="tiny" type="info" :bordered="false">#{{ t }}</NTag>
+              <NTag v-if="row.tags.length > 3" size="tiny" type="default" :bordered="false">
+                +{{ row.tags.length - 3 }}
+              </NTag>
+              <NTag size="tiny" :type="row.tagsSynced === 1 ? 'success' : 'warning'" :bordered="false">
+                {{ row.tagsSynced === 1 ? '已同步' : '待写回' }}
+              </NTag>
+              <NTag size="tiny" :type="row.remoteDeleted === 1 ? 'error' : 'success'" :bordered="false">
+                {{ row.remoteDeleted === 1 ? '已删' : '存活' }}
+              </NTag>
+              <span class="card-time">{{ formatTime(row.remoteUpdateTime || row.createTime) }}</span>
+            </div>
+          </div>
+          <div v-if="!loading && !tableData.length" class="card-empty">暂无笔记</div>
+          <NPagination v-if="total > 0" class="card-pagination" :page="pagination.page"
+            :page-size="pagination.pageSize" :item-count="pagination.itemCount"
+            :page-sizes="[10, 20, 50]" show-size-picker
+            @update:page="(p: number) => { pagination.page = p; query.pageNum = p; loadData() }"
+            @update:page-size="(s: number) => { pagination.pageSize = s; query.pageSize = s; pagination.page = 1; query.pageNum = 1; loadData() }" />
+        </div>
       </NCard>
   </div>
+
+    <!-- 同步状态记录抽屉：明细独立展示，不挤占笔记列表 -->
+    <NDrawer v-model:show="syncLogDrawerShow" :width="drawerWidth">
+      <NDrawerContent title="同步状态记录（最近 3 天）" :native-scrollbar="false" closable>
+        <NAlert type="info" :bordered="false" class="sync-log-hint">
+          定时任务每 4 小时整点触发；手动「立即同步」同样记录。共 <b>{{ syncLogTotal }}</b> 条（3 天前自动清理）。
+        </NAlert>
+        <NDataTable :columns="syncLogColumns" :data="syncLogs" :loading="syncLogLoading" :pagination="syncLogPagination"
+          size="small" :scroll-x="760" striped />
+      </NDrawerContent>
+    </NDrawer>
 
     <!-- 设置抽屉：同步配置 + Webhook 配置（低频，收进弹层） -->
     <NDrawer v-model:show="settingShow" :width="drawerWidth">
@@ -781,8 +870,8 @@ onMounted(() => {
   opacity: 0.6;
 }
 
-.sync-log-table {
-  margin-top: 8px;
+.sync-log-hint {
+  margin-bottom: 12px;
 }
 
 .muted {
@@ -809,6 +898,126 @@ onMounted(() => {
 .table-card :deep(.n-data-table) {
   flex: 1;
   min-height: 200px;
+}
+
+/* ===== 笔记列表（桌面表格 / 移动端卡片） ===== */
+
+.note-filter {
+  justify-content: flex-end;
+}
+
+.note-search {
+  width: 240px;
+}
+
+.note-status-filter {
+  width: 120px;
+}
+
+.note-cards {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px;
+}
+
+.note-card {
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(128, 128, 128, 0.06);
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.note-card:hover {
+  border-color: rgba(32, 128, 240, 0.5);
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.note-card.card-deleted {
+  opacity: 0.55;
+}
+
+.note-card.card-deleted .card-content-text {
+  text-decoration: line-through;
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.card-check {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.card-content {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  cursor: pointer;
+  word-break: break-word;
+}
+
+.card-content-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.card-icon {
+  flex-shrink: 0;
+  margin-left: 4px;
+  vertical-align: -2px;
+}
+
+.card-content-empty {
+  color: #999;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding-left: 28px;
+}
+
+.card-time {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-left: auto;
+}
+
+.card-empty {
+  text-align: center;
+  color: #999;
+  padding: 24px 0;
+}
+
+.card-pagination {
+  justify-content: center;
+  margin-top: 4px;
+}
+
+@media (max-width: 768px) {
+  .note-search {
+    width: 100%;
+  }
+
+  .note-status-filter {
+    flex: 1;
+    min-width: 110px;
+  }
 }
 
 .bar-row {
