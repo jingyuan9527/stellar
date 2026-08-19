@@ -10,6 +10,7 @@ import com.stellar.memos.vo.MemosConfigVO;
 import com.stellar.memos.vo.MemosJobResultVO;
 import com.stellar.memos.vo.MemosNoteVO;
 import com.stellar.memos.vo.MemosStatsVO;
+import com.stellar.memos.vo.MemosSyncLogVO;
 import com.stellar.memos.vo.MemosSyncResultVO;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -64,13 +65,43 @@ class MemosControllerTest {
     void pull_透传同步结果() {
         MemosSyncResultVO vo = new MemosSyncResultVO();
         vo.setFetched(3);
-        when(memosService.syncPull()).thenReturn(vo);
+        when(memosService.syncPullManual()).thenReturn(vo);
 
         var resp = newController().pull();
 
         assertEquals(200, resp.getCode());
         assertEquals(3, resp.getData().getFetched());
     }
+
+    @Test
+    void syncLogPage_透传分页() {
+        Page<MemosSyncLogVO> p = new Page<>(1, 10, 1);
+        p.setRecords(List.of(new MemosSyncLogVO()));
+        when(memosService.pageSyncLog(any(MemosQueryDTO.class))).thenReturn(p);
+        MemosQueryDTO q = new MemosQueryDTO();
+        q.setPageNum(1);
+        q.setPageSize(10);
+
+        var resp = newController().syncLogPage(q);
+
+        assertEquals(200, resp.getCode());
+        assertEquals(1, resp.getData().getRecords().size());
+        verify(memosService).pageSyncLog(argThat(dto ->
+                dto.getPageNum() == 1 && dto.getPageSize() == 10));
+    }
+
+    @Test
+    void latestSyncLog_透传最近记录() {
+        MemosSyncLogVO vo = new MemosSyncLogVO();
+        vo.setStatus("success");
+        when(memosService.latestSyncLog()).thenReturn(vo);
+
+        var resp = newController().latestSyncLog();
+
+        assertEquals(200, resp.getCode());
+        assertEquals("success", resp.getData().getStatus());
+    }
+
 
     @Test
     void tag_勾选ids与modelId透传任务结果() {

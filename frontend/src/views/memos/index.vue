@@ -10,10 +10,10 @@ import type { DataTableColumns, SelectOption, DropdownOption } from 'naive-ui'
 import {
   getMemosConfig, saveMemosConfig, pullMemos, tagMemos, pushMemosTags,
   getMemosPage, getMemosStats, getMemosWebhookConfig, saveMemosWebhookSecret,
-  rebuildMemosRag, getMemosRagStatus,
+  rebuildMemosRag, getMemosRagStatus, getMemosSyncLogPage, getLatestMemosSyncLog,
 } from '@/api/memos'
 import { getAiModelsByType } from '@/api/ai'
-import type { MemosConfig, MemosNote, MemosStats, AiModel } from '@/types/api'
+import type { MemosConfig, MemosNote, MemosStats, MemosSyncLog, AiModel } from '@/types/api'
 import { iconMap } from '@/utils/icons'
 import { formatTime } from '@/utils/format'
 import { useIsMobile } from '@/composables/useBreakpoint'
@@ -110,6 +110,88 @@ async function copyWebhookUrl() {
   }
 }
 
+// ===== 同步状态（定时/手动「立即同步」记录，保留最近 3 天） =====
+
+const latestSync = ref<MemosSyncLog | null>(null)
+const syncLogs = ref<MemosSyncLog[]>([])
+const syncLogTotal = ref(0)
+const syncLogLoading = ref(false)
+const syncLogExpanded = ref(false)
+
+const syncStatusMeta: Record<string, { type: 'success' | 'warning' | 'error' | 'default'; label: string }> = {
+  success: { type: 'success', label: '成功' },
+  partial: { type: 'warning', label: '部分失败' },
+  failed: { type: 'error', label: '失败' },
+  skipped: { type: 'default', label: '未配置跳过' },
+}
+const syncTriggerLabel: Record<string, string> = { scheduled: '定时', manual: '手动' }
+
+/** 相对时间（x分钟/小时前），超过 24h 回退完整时间 */
+function relativeTime(input?: string | null) {
+  if (!input) return ''
+  const d = new Date(String(input).replace(' ', 'T'))
+  if (Number.isNaN(d.getTime())) return ''
+  const diff = Date.now() - d.getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `${h} 小时前`
+  return formatTime(input)
+}
+
+function formatDuration(ms: number | null) {
+  if (ms == null) return '-'
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
+}
+
+async function loadLatestSync() {
+  try {
+    latestSync.value = await getLatestMemosSyncLog()
+  } catch {
+    // 错误已由拦截器提示
+  }
+}
+
+async function loadSyncLogs() {
+  syncLogLoading.value = true
+  try {
+    const r = await getMemosSyncLogPage({ pageNum: 1, pageSize: 20 })
+    syncLogs.value = r.records
+    syncLogTotal.value = r.total
+  } finally {
+    syncLogLoading.value = false
+  }
+}
+
+async function loadSyncStatus() {
+  await Promise.all([loadLatestSync(), loadSyncLogs()])
+}
+
+const syncLogColumns: DataTableColumns<MemosSyncLog> = [
+  { title: '时间', key: 'createTime', width: 160, render: (row) => formatTime(row.createTime) },
+  {
+    title: '触发', key: 'triggerType', width: 70,
+    render: (row) => syncTriggerLabel[row.triggerType] ?? row.triggerType,
+  },
+  {
+    title: '状态', key: 'status', width: 100,
+    render: (row) => {
+      const meta = syncStatusMeta[row.status] ?? { type: 'default' as const, label: row.status }
+      return h(NTag, { size: 'small', type: meta.type }, { default: () => meta.label })
+    },
+  },
+  { title: '新增', key: 'created', width: 55 },
+  { title: '更新', key: 'updated', width: 55 },
+  { title: '标记删除', key: 'markedDeleted', width: 70 },
+  { title: '失败', key: 'errors', width: 55 },
+  { title: '耗时', key: 'durationMs', width: 80, render: (row) => formatDuration(row.durationMs) },
+  {
+    title: '详情', key: 'errorMessage', minWidth: 140, ellipsis: { tooltip: true },
+    render: (row) => row.errorMessage || '-',
+  },
+]
+
 // ===== 动作按钮 =====
 
 const pulling = ref(false)
@@ -136,7 +218,7 @@ async function handlePull() {
   try {
     const r = await pullMemos()
     message.success(`同步完成：新增 ${r.created}，更新 ${r.updated}，标记删除 ${r.markedDeleted}，失败 ${r.errors}`)
-    await Promise.all([loadData(), loadStats()])
+    await Promise.all([loadData(), loadStats(), loadLatestSync(), loadSyncLogs()])
   } finally {
     pulling.value = false
   }
@@ -428,6 +510,7 @@ onMounted(() => {
   loadTextModels()
   loadWebhookConfig()
   loadRagStatus()
+  loadSyncStatus()
 })
 </script>
 
@@ -484,6 +567,42 @@ onMounted(() => {
             </template>
           </NSpace>
         </div>
+      </NCard>
+
+      <NCard title="同步状态" size="small" class="sync-card">
+        <template #header-extra>
+          <NSpace :size="8" align="center">
+            <span v-if="syncLogTotal" class="sync-log-count">近 3 天记录 {{ syncLogTotal }} 条</span>
+            <NButton size="tiny" quaternary @click="syncLogExpanded = !syncLogExpanded">
+              {{ syncLogExpanded ? '收起记录' : '展开记录' }}
+            </NButton>
+          </NSpace>
+        </template>
+        <template v-if="latestSync">
+          <div class="sync-summary">
+            <NTag size="small" :bordered="false" :type="latestSync.triggerType === 'scheduled' ? 'info' : 'default'">
+              {{ syncTriggerLabel[latestSync.triggerType] }}
+            </NTag>
+            <NTag size="small" :bordered="false" :type="syncStatusMeta[latestSync.status]?.type ?? 'default'">
+              {{ syncStatusMeta[latestSync.status]?.label ?? latestSync.status }}
+            </NTag>
+            <span class="sync-summary-time">
+              {{ relativeTime(latestSync.createTime) }}
+              <span class="muted">({{ formatTime(latestSync.createTime) }})</span>
+              · 耗时 {{ formatDuration(latestSync.durationMs) }}
+            </span>
+            <span class="sync-summary-counts">
+              拉取 {{ latestSync.fetched }} · 新增 {{ latestSync.created }} · 更新 {{ latestSync.updated }}
+              · 标记删除 {{ latestSync.markedDeleted }}
+              <span :class="latestSync.errors > 0 ? 'sync-errors' : ''">· 失败 {{ latestSync.errors }}</span>
+            </span>
+            <span v-if="latestSync.errorMessage" class="sync-error-msg">原因：{{ latestSync.errorMessage }}</span>
+          </div>
+        </template>
+        <span v-else class="sync-empty">暂无同步记录，点「立即同步」或等每 4 小时定时同步后查看</span>
+
+        <NDataTable v-if="syncLogExpanded && syncLogs.length" :columns="syncLogColumns" :data="syncLogs"
+          :loading="syncLogLoading" size="small" :scroll-x="760" striped class="sync-log-table" />
       </NCard>
 
       <NCard title="笔记备份" size="small" class="table-card">
@@ -624,6 +743,51 @@ onMounted(() => {
 
 .action-bar {
   flex: none;
+}
+
+.sync-card {
+  flex: none;
+}
+
+.sync-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.sync-summary-time,
+.sync-summary-counts {
+  opacity: 0.75;
+}
+
+.sync-errors {
+  color: #d03050;
+  font-weight: 600;
+}
+
+.sync-error-msg {
+  color: #d03050;
+}
+
+.sync-empty {
+  font-size: 13px;
+  opacity: 0.6;
+}
+
+.sync-log-count {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.sync-log-table {
+  margin-top: 8px;
+}
+
+.muted {
+  opacity: 0.6;
+  font-size: 12px;
 }
 
 .table-card {

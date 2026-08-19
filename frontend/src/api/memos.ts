@@ -6,6 +6,7 @@ import type {
   MemosNote,
   MemosQuery,
   MemosStats,
+  MemosSyncLog,
   MemosSyncResult,
 } from '@/types/api'
 
@@ -65,6 +66,20 @@ export function getMemosStats() {
 /** Webhook 配置：是否已配置签名密钥 */
 export function getMemosWebhookConfig() {
   return request<{ secretConfigured: boolean }>({ url: '/memos/webhook/config', method: 'get' })
+}
+
+/** 同步状态记录分页（最近 3 天，含定时/手动「立即同步」） */
+export function getMemosSyncLogPage(params: { pageNum: number; pageSize: number }) {
+  return request<{ records: MemosSyncLog[]; total: number }>({
+    url: '/memos/sync-log/page',
+    method: 'get',
+    params,
+  })
+}
+
+/** 最近一次同步状态（无记录返回 null） */
+export function getLatestMemosSyncLog() {
+  return request<MemosSyncLog | null>({ url: '/memos/sync-log/latest', method: 'get' })
 }
 
 /** 保存 Webhook 签名密钥（whsec_ 开头，Memos 创建 webhook 时生成） */

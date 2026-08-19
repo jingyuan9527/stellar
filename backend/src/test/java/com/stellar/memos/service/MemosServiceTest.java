@@ -12,11 +12,14 @@ import com.stellar.memos.client.MemosApiClient;
 import com.stellar.memos.dto.MemosConfigDTO;
 import com.stellar.memos.dto.MemosQueryDTO;
 import com.stellar.memos.entity.MemosNote;
+import com.stellar.memos.entity.MemosSyncLog;
 import com.stellar.memos.mapper.MemosNoteMapper;
+import com.stellar.memos.mapper.MemosSyncLogMapper;
 import com.stellar.memos.vo.MemosConfigVO;
 import com.stellar.memos.vo.MemosJobResultVO;
 import com.stellar.memos.vo.MemosNoteVO;
 import com.stellar.memos.vo.MemosStatsVO;
+import com.stellar.memos.vo.MemosSyncLogVO;
 import com.stellar.memos.vo.MemosSyncResultVO;
 import com.stellar.memos.vo.MemosWebhookConfigVO;
 import com.stellar.system.service.SysSettingService;
@@ -70,13 +73,16 @@ class MemosServiceTest {
     private ValueOperations<String, Object> valueOperations;
     @Mock
     private MemosRagService memosRagService;
+    @Mock
+    private MemosSyncLogMapper memosSyncLogMapper;
 
     private MemosService service;
 
     @BeforeEach
     void setUp() {
         service = new MemosService(memosNoteMapper, memosApiClient, sysSettingService,
-                aiChatService, externalCallLogger, new ObjectMapper(), redisTemplate, memosRagService);
+                aiChatService, externalCallLogger, new ObjectMapper(), redisTemplate, memosRagService,
+                memosSyncLogMapper);
     }
 
     private void mockConfig(String baseUrl, String token) {
@@ -293,6 +299,127 @@ class MemosServiceTest {
         when(memosApiClient.listAllMemos(anyString(), anyString()))
                 .thenThrow(new BusinessException("HTTP 401"));
         assertThrows(BusinessException.class, service::syncPull);
+    }
+
+    // ===== 记录式同步（手动/定时：锁 + 状态落库 + 清理） =====
+
+    @Test
+    void syncPullManual_成功_落success记录_释放锁并清理旧记录() {
+        mockConfig("https://memo.booksy.cf", "tok");
+        mockRedisOk();
+        when(memosApiClient.listAllMemos(anyString(), anyString())).thenReturn(List.of());
+        when(memosNoteMapper.selectList(any())).thenReturn(List.of());
+
+        MemosSyncResultVO result = service.syncPullManual();
+
+        assertEquals(0, result.getErrors());
+        ArgumentCaptor<MemosSyncLog> captor = ArgumentCaptor.forClass(MemosSyncLog.class);
+        verify(memosSyncLogMapper).insert(captor.capture());
+        MemosSyncLog log = captor.getValue();
+        assertEquals(MemosService.SYNC_TRIGGER_MANUAL, log.getTriggerType());
+        assertEquals(MemosService.SYNC_STATUS_SUCCESS, log.getStatus());
+        assertNotNull(log.getDurationMs());
+        // 完成后释放锁 + 顺带清理 3 天前旧记录
+        verify(redisTemplate).delete(MemosService.SYNC_LOCK_KEY);
+        verify(memosSyncLogMapper).delete(any(LambdaQueryWrapper.class));
+    }
+
+    @Test
+    void syncPullManual_未配置_记skipped_抛提示() {
+        // baseUrl 为空 → isPullConfigured 短路返回 false，不再读 token（只 stub 一条避免多余 stubbing）
+        when(sysSettingService.get(MemosService.KEY_BASE_URL, "")).thenReturn("");
+        mockRedisOk();
+
+        BusinessException e = assertThrows(BusinessException.class, service::syncPullManual);
+        assertTrue(e.getMessage().contains("配置"));
+
+        ArgumentCaptor<MemosSyncLog> captor = ArgumentCaptor.forClass(MemosSyncLog.class);
+        verify(memosSyncLogMapper).insert(captor.capture());
+        assertEquals(MemosService.SYNC_STATUS_SKIPPED, captor.getValue().getStatus());
+    }
+
+    @Test
+    void scheduledSyncPull_未配置_记skipped_不抛() {
+        when(sysSettingService.get(MemosService.KEY_BASE_URL, "")).thenReturn("");
+        mockRedisOk();
+
+        assertNull(service.scheduledSyncPull());
+
+        ArgumentCaptor<MemosSyncLog> captor = ArgumentCaptor.forClass(MemosSyncLog.class);
+        verify(memosSyncLogMapper).insert(captor.capture());
+        assertEquals(MemosService.SYNC_TRIGGER_SCHEDULED, captor.getValue().getTriggerType());
+        assertEquals(MemosService.SYNC_STATUS_SKIPPED, captor.getValue().getStatus());
+        verify(redisTemplate).delete(MemosService.SYNC_LOCK_KEY);
+    }
+
+    @Test
+    void syncPullManual_锁被占用_抛异常_不落库不拉取() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent(anyString(), any(), any(Duration.class))).thenReturn(false);
+
+        BusinessException e = assertThrows(BusinessException.class, service::syncPullManual);
+        assertTrue(e.getMessage().contains("正在进行"));
+
+        verify(memosSyncLogMapper, never()).insert(any(MemosSyncLog.class));
+        verify(memosApiClient, never()).listAllMemos(anyString(), anyString());
+    }
+
+    @Test
+    void scheduledSyncPull_锁被占用_跳过_不抛不落库() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent(anyString(), any(), any(Duration.class))).thenReturn(false);
+
+        assertNull(service.scheduledSyncPull());
+        verify(memosSyncLogMapper, never()).insert(any(MemosSyncLog.class));
+    }
+
+    @Test
+    void syncPullManual_errors大于0_记partial() {
+        mockConfig("https://memo.booksy.cf", "tok");
+        mockRedisOk();
+        when(memosApiClient.listAllMemos(anyString(), anyString()))
+                .thenReturn(List.of(memo("u1", "hello", "")));
+        when(memosNoteMapper.selectList(any())).thenReturn(List.of());
+        // 远端返回 1 条但写库失败 → errors=1 → partial
+        when(memosNoteMapper.insert(any(MemosNote.class))).thenThrow(new RuntimeException("db fail"));
+
+        MemosSyncResultVO result = service.syncPullManual();
+
+        assertEquals(1, result.getErrors());
+        ArgumentCaptor<MemosSyncLog> captor = ArgumentCaptor.forClass(MemosSyncLog.class);
+        verify(memosSyncLogMapper).insert(captor.capture());
+        assertEquals(MemosService.SYNC_STATUS_PARTIAL, captor.getValue().getStatus());
+        assertEquals(1, captor.getValue().getErrors());
+    }
+
+    @Test
+    void scheduledSyncPull_拉取失败_记failed_不抛() {
+        mockConfig("https://memo.booksy.cf", "tok");
+        mockRedisOk();
+        when(memosApiClient.listAllMemos(anyString(), anyString()))
+                .thenThrow(new BusinessException("HTTP 401"));
+
+        assertNull(service.scheduledSyncPull());
+
+        ArgumentCaptor<MemosSyncLog> captor = ArgumentCaptor.forClass(MemosSyncLog.class);
+        verify(memosSyncLogMapper).insert(captor.capture());
+        assertEquals(MemosService.SYNC_STATUS_FAILED, captor.getValue().getStatus());
+        assertTrue(captor.getValue().getErrorMessage().contains("401"));
+    }
+
+    @Test
+    void syncPullManual_拉取失败_记failed_上抛() {
+        mockConfig("https://memo.booksy.cf", "tok");
+        mockRedisOk();
+        when(memosApiClient.listAllMemos(anyString(), anyString()))
+                .thenThrow(new BusinessException("HTTP 401"));
+
+        BusinessException e = assertThrows(BusinessException.class, service::syncPullManual);
+        assertTrue(e.getMessage().contains("401"));
+
+        ArgumentCaptor<MemosSyncLog> captor = ArgumentCaptor.forClass(MemosSyncLog.class);
+        verify(memosSyncLogMapper).insert(captor.capture());
+        assertEquals(MemosService.SYNC_STATUS_FAILED, captor.getValue().getStatus());
     }
 
     // ===== AI 打标签（勾选 + 自动写回） =====
@@ -573,6 +700,65 @@ class MemosServiceTest {
         assertEquals(3L, vo.getDeleted());
         assertEquals(2L, vo.getUntagged());
         assertEquals(1L, vo.getPendingPush());
+    }
+
+    @Test
+    void pageSyncLog_窗口过滤与倒序_映射VO() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), MemosSyncLog.class);
+        MemosSyncLog row = new MemosSyncLog();
+        row.setId(1L);
+        row.setTriggerType(MemosService.SYNC_TRIGGER_SCHEDULED);
+        row.setStatus(MemosService.SYNC_STATUS_SUCCESS);
+        row.setFetched(5);
+        row.setCreated(2);
+        row.setUpdated(3);
+        row.setErrors(0);
+        row.setDurationMs(120L);
+        row.setCreateTime(LocalDateTime.now());
+        Page<MemosSyncLog> p = new Page<>(1, 10, 1);
+        p.setRecords(List.of(row));
+        when(memosSyncLogMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(p);
+
+        MemosQueryDTO q = new MemosQueryDTO();
+        q.setPageNum(1);
+        q.setPageSize(10);
+        Page<MemosSyncLogVO> vo = service.pageSyncLog(q);
+
+        assertEquals(1, vo.getRecords().size());
+        MemosSyncLogVO v = vo.getRecords().get(0);
+        assertEquals(MemosService.SYNC_STATUS_SUCCESS, v.getStatus());
+        assertEquals(2, v.getCreated());
+        assertEquals(120L, v.getDurationMs());
+        ArgumentCaptor<LambdaQueryWrapper<MemosSyncLog>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(memosSyncLogMapper).selectPage(any(Page.class), captor.capture());
+        assertTrue(captor.getValue().getSqlSegment().contains("ORDER BY"), "缺倒序: " + captor.getValue().getSqlSegment());
+    }
+
+    @Test
+    void latestSyncLog_有记录_返回第一条() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), MemosSyncLog.class);
+        MemosSyncLog row = new MemosSyncLog();
+        row.setId(1L);
+        row.setStatus(MemosService.SYNC_STATUS_PARTIAL);
+        row.setErrors(2);
+        Page<MemosSyncLog> p = new Page<>(1, 1, 1);
+        p.setRecords(List.of(row));
+        when(memosSyncLogMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(p);
+
+        MemosSyncLogVO vo = service.latestSyncLog();
+
+        assertNotNull(vo);
+        assertEquals(MemosService.SYNC_STATUS_PARTIAL, vo.getStatus());
+        assertEquals(2, vo.getErrors());
+    }
+
+    @Test
+    void latestSyncLog_无记录_返回null() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), MemosSyncLog.class);
+        when(memosSyncLogMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class)))
+                .thenReturn(new Page<>(1, 1, 0));
+
+        assertNull(service.latestSyncLog());
     }
 
     // ===== Webhook =====

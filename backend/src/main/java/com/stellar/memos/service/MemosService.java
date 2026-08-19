@@ -13,11 +13,14 @@ import com.stellar.memos.client.MemosApiClient;
 import com.stellar.memos.dto.MemosConfigDTO;
 import com.stellar.memos.dto.MemosQueryDTO;
 import com.stellar.memos.entity.MemosNote;
+import com.stellar.memos.entity.MemosSyncLog;
 import com.stellar.memos.mapper.MemosNoteMapper;
+import com.stellar.memos.mapper.MemosSyncLogMapper;
 import com.stellar.memos.vo.MemosConfigVO;
 import com.stellar.memos.vo.MemosJobResultVO;
 import com.stellar.memos.vo.MemosNoteVO;
 import com.stellar.memos.vo.MemosStatsVO;
+import com.stellar.memos.vo.MemosSyncLogVO;
 import com.stellar.memos.vo.MemosSyncResultVO;
 import com.stellar.memos.vo.MemosWebhookConfigVO;
 import com.stellar.system.service.SysSettingService;
@@ -66,6 +69,22 @@ public class MemosService {
     private static final String WEBHOOK_DEDUP_KEY_PREFIX = "stellar:memos:webhook:";
     private static final Duration WEBHOOK_DEDUP_TTL = Duration.ofMinutes(5);
 
+    /** 定时/手动同步互斥锁 key（Redis SETNX，防定时与手动同时拉取） */
+    static final String SYNC_LOCK_KEY = "stellar:memos:sync:lock";
+    /** 互斥锁兜底 TTL：正常同步完成后主动释放；异常未释放时此处兜底防死锁 */
+    private static final Duration SYNC_LOCK_TTL = Duration.ofMinutes(30);
+
+    /** 同步状态记录保留天数：查询窗口与清理阈值，3 天前的记录由同步任务顺带删除 */
+    private static final int SYNC_LOG_KEEP_DAYS = 3;
+
+    /** 同步触发方式 / 状态 */
+    static final String SYNC_TRIGGER_SCHEDULED = "scheduled";
+    static final String SYNC_TRIGGER_MANUAL = "manual";
+    static final String SYNC_STATUS_SUCCESS = "success";
+    static final String SYNC_STATUS_PARTIAL = "partial";
+    static final String SYNC_STATUS_FAILED = "failed";
+    static final String SYNC_STATUS_SKIPPED = "skipped";
+
     /** 签名时间戳容差（秒）：超出视为失效，防重放 */
     private static final long SIGNATURE_TOLERANCE_SECONDS = 300;
 
@@ -92,6 +111,7 @@ public class MemosService {
     private final ObjectMapper objectMapper;
     private final RedisTemplate<String, Object> redisTemplate;
     private final MemosRagService memosRagService;
+    private final MemosSyncLogMapper memosSyncLogMapper;
 
     // ===== 配置 =====
 
@@ -328,6 +348,131 @@ public class MemosService {
         return result;
     }
 
+    // ===== 记录式同步（手动/定时共用）：状态落库 + Redis 互斥 + 3 天清理 =====
+
+    /** 是否已配置 Memos 域名与 Token（用于未配置时记 skipped 而非 failed）。 */
+    public boolean isPullConfigured() {
+        return StringUtils.hasText(sysSettingService.get(KEY_BASE_URL, ""))
+                && StringUtils.hasText(sysSettingService.get(KEY_TOKEN, ""));
+    }
+
+    /** 手动「立即同步」入口：调用方为 {@link com.stellar.memos.controller.MemosController#pull()}，
+     *  锁被占用/同步失败均抛 {@link BusinessException} 由前端提示。 */
+    public MemosSyncResultVO syncPullManual() {
+        return doRecordedPull(SYNC_TRIGGER_MANUAL, false);
+    }
+
+    /** 定时同步入口：未配置/失败均落状态记录后内部吞掉异常，不阻断调度线程。 */
+    public MemosSyncResultVO scheduledSyncPull() {
+        try {
+            return doRecordedPull(SYNC_TRIGGER_SCHEDULED, true);
+        } catch (Exception e) {
+            log.error("[备忘同步] 定时同步异常: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 记录式同步核心：Redis SETNX 互斥（防定时与手动重叠）→ 校验配置 → 调 {@link #syncPull} →
+     * 状态落 {@code memos_sync_log}（success/partial/failed/skipped）→ 顺带清理 3 天前旧记录。
+     * <p>{@code scheduled=true} 时异常吞掉返回 null（仅日志+落 failed 记录）；
+     * 手动则原样上抛，保证前端拿到明确提示。
+     */
+    private MemosSyncResultVO doRecordedPull(String triggerType, boolean scheduled) {
+        if (!acquireSyncLock()) {
+            if (scheduled) {
+                log.warn("[备忘同步] 上一轮同步仍在进行，跳过本次定时同步");
+                return null;
+            }
+            throw new BusinessException("同步正在进行中，请稍后再试");
+        }
+        long start = System.currentTimeMillis();
+        MemosSyncLog record = new MemosSyncLog();
+        record.setTriggerType(triggerType);
+        try {
+            // 未配置：记 skipped；定时静默返回，手动抛提示（避免再被下面的 catch 记成 failed）
+            if (!isPullConfigured()) {
+                record.setStatus(SYNC_STATUS_SKIPPED);
+                persistSyncRecord(record, start);
+                log.warn("[备忘同步] {}同步跳过：未配置 Memos 域名/Token", triggerType);
+                if (scheduled) {
+                    return null;
+                }
+                throw new BusinessException("请先在「备忘同步」页配置 Memos 域名与 Token");
+            }
+            try {
+                MemosSyncResultVO result = syncPull();
+                record.setStatus(result.getErrors() > 0 ? SYNC_STATUS_PARTIAL : SYNC_STATUS_SUCCESS);
+                record.setFetched(result.getFetched());
+                record.setCreated(result.getCreated());
+                record.setUpdated(result.getUpdated());
+                record.setMarkedDeleted(result.getMarkedDeleted());
+                record.setErrors(result.getErrors());
+                persistSyncRecord(record, start);
+                return result;
+            } catch (Exception e) {
+                record.setStatus(SYNC_STATUS_FAILED);
+                record.setErrorMessage(e.getMessage());
+                persistSyncRecord(record, start);
+                if (scheduled) {
+                    log.error("[备忘同步] 定时同步失败: {}", e.getMessage(), e);
+                    return null;
+                }
+                if (e instanceof BusinessException be) {
+                    throw be;
+                }
+                throw new BusinessException("同步失败: " + e.getMessage());
+            }
+        } finally {
+            releaseSyncLock();
+        }
+    }
+
+    /** 落一条同步状态记录，并顺带清理 3 天前的旧记录（异步失败不阻断主流程）。 */
+    private void persistSyncRecord(MemosSyncLog record, long start) {
+        try {
+            record.setDurationMs(System.currentTimeMillis() - start);
+            record.setCreateTime(LocalDateTime.now());
+            memosSyncLogMapper.insert(record);
+            trimOldSyncLogs();
+        } catch (Exception e) {
+            log.error("[备忘同步] 同步状态落库失败 triggerType={}: {}", record.getTriggerType(), e.getMessage(), e);
+        }
+    }
+
+    /** 清理 3 天前的同步状态记录（随每次同步执行，异常仅告警）。 */
+    private void trimOldSyncLogs() {
+        try {
+            LocalDateTime cutoff = LocalDateTime.now().minusDays(SYNC_LOG_KEEP_DAYS);
+            int removed = memosSyncLogMapper.delete(new LambdaQueryWrapper<MemosSyncLog>()
+                    .lt(MemosSyncLog::getCreateTime, cutoff));
+            if (removed > 0) {
+                log.info("[备忘同步] 清理 {} 天前旧同步状态记录 {} 条", SYNC_LOG_KEEP_DAYS, removed);
+            }
+        } catch (Exception e) {
+            log.warn("[备忘同步] 清理旧同步状态记录失败: {}", e.getMessage());
+        }
+    }
+
+    /** 抢占同步互斥锁；Redis 异常时放行（不因锁故障阻塞同步）。 */
+    private boolean acquireSyncLock() {
+        try {
+            Boolean first = redisTemplate.opsForValue().setIfAbsent(SYNC_LOCK_KEY, "1", SYNC_LOCK_TTL);
+            return Boolean.TRUE.equals(first);
+        } catch (Exception e) {
+            log.warn("[备忘同步] 同步互斥锁 Redis 异常，放行执行: {}", e.getMessage());
+            return true;
+        }
+    }
+
+    private void releaseSyncLock() {
+        try {
+            redisTemplate.delete(SYNC_LOCK_KEY);
+        } catch (Exception e) {
+            log.warn("[备忘同步] 释放同步互斥锁失败: {}", e.getMessage());
+        }
+    }
+
     /** 新建一条本地笔记（pull 与 webhook 共用同源落库逻辑）。 */
     private void insertMemo(MemosApiClient.MemosRemoteMemo rm, LocalDateTime now) {
         MemosNote note = new MemosNote();
@@ -552,6 +697,46 @@ public class MemosService {
                 .eq(MemosNote::getRemoteDeleted, 1)));
         vo.setUntagged(countActiveWithNoTags());
         vo.setPendingPush(countActivePendingPush());
+        return vo;
+    }
+
+    /** 同步状态记录分页（仅按时间倒序，查询窗口限最近 3 天）。 */
+    public Page<MemosSyncLogVO> pageSyncLog(MemosQueryDTO query) {
+        Page<MemosSyncLog> page = memosSyncLogMapper.selectPage(
+                new Page<>(query.getPageNum(), query.getPageSize()),
+                new LambdaQueryWrapper<MemosSyncLog>()
+                        .ge(MemosSyncLog::getCreateTime, LocalDateTime.now().minusDays(SYNC_LOG_KEEP_DAYS))
+                        .orderByDesc(MemosSyncLog::getCreateTime)
+                        .orderByDesc(MemosSyncLog::getId));
+        Page<MemosSyncLogVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        voPage.setRecords(page.getRecords().stream().map(this::toSyncLogVO).collect(Collectors.toList()));
+        return voPage;
+    }
+
+    /** 最近一次同步状态（空记录返回 null）。 */
+    public MemosSyncLogVO latestSyncLog() {
+        Page<MemosSyncLog> page = memosSyncLogMapper.selectPage(
+                new Page<>(1, 1),
+                new LambdaQueryWrapper<MemosSyncLog>()
+                        .ge(MemosSyncLog::getCreateTime, LocalDateTime.now().minusDays(SYNC_LOG_KEEP_DAYS))
+                        .orderByDesc(MemosSyncLog::getCreateTime)
+                        .orderByDesc(MemosSyncLog::getId));
+        return page.getRecords().isEmpty() ? null : toSyncLogVO(page.getRecords().get(0));
+    }
+
+    private MemosSyncLogVO toSyncLogVO(MemosSyncLog l) {
+        MemosSyncLogVO vo = new MemosSyncLogVO();
+        vo.setId(l.getId());
+        vo.setTriggerType(l.getTriggerType());
+        vo.setStatus(l.getStatus());
+        vo.setFetched(l.getFetched());
+        vo.setCreated(l.getCreated());
+        vo.setUpdated(l.getUpdated());
+        vo.setMarkedDeleted(l.getMarkedDeleted());
+        vo.setErrors(l.getErrors());
+        vo.setDurationMs(l.getDurationMs());
+        vo.setErrorMessage(l.getErrorMessage());
+        vo.setCreateTime(l.getCreateTime());
         return vo;
     }
 

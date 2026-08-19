@@ -15,6 +15,7 @@ import com.stellar.memos.vo.MemosConfigVO;
 import com.stellar.memos.vo.MemosJobResultVO;
 import com.stellar.memos.vo.MemosNoteVO;
 import com.stellar.memos.vo.MemosStatsVO;
+import com.stellar.memos.vo.MemosSyncLogVO;
 import com.stellar.memos.vo.MemosSyncResultVO;
 import com.stellar.memos.vo.MemosWebhookConfigVO;
 import jakarta.validation.Valid;
@@ -63,7 +64,19 @@ public class MemosController {
     @PostMapping("/pull")
     @Log(title = "备忘同步", type = OperationType.OTHER)
     public Result<MemosSyncResultVO> pull() {
-        return Result.success(memosService.syncPull());
+        return Result.success(memosService.syncPullManual());
+    }
+
+    @GetMapping("/sync-log/page")
+    @Log(title = "备忘同步", type = OperationType.QUERY)
+    public Result<Page<MemosSyncLogVO>> syncLogPage(@ModelAttribute @Valid MemosQueryDTO query) {
+        return Result.success(memosService.pageSyncLog(query));
+    }
+
+    @GetMapping("/sync-log/latest")
+    @Log(title = "备忘同步", type = OperationType.QUERY)
+    public Result<MemosSyncLogVO> latestSyncLog() {
+        return Result.success(memosService.latestSyncLog());
     }
 
     @PostMapping("/tag")

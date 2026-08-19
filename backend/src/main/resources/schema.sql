@@ -500,6 +500,34 @@ CREATE INDEX IF NOT EXISTS idx_memos_note_remote_deleted ON memos_note (remote_d
 ALTER TABLE memos_note ADD COLUMN IF NOT EXISTS embedding TEXT;
 COMMENT ON COLUMN memos_note.embedding IS '笔记向量(JSON数组文本 [v1,v2,...]),备忘RAG内存余弦检索用,空=未向量化';
 
+-- 备忘同步状态：每次定时/手动「立即同步」落一条，用户可在备忘页查看；3 天前的记录由同步任务顺带清理
+CREATE TABLE IF NOT EXISTS memos_sync_log (
+    id              BIGSERIAL PRIMARY KEY,
+    trigger_type    VARCHAR(16) NOT NULL DEFAULT 'scheduled',
+    status          VARCHAR(16) NOT NULL,
+    fetched         INT NOT NULL DEFAULT 0,
+    created         INT NOT NULL DEFAULT 0,
+    updated         INT NOT NULL DEFAULT 0,
+    marked_deleted  INT NOT NULL DEFAULT 0,
+    errors          INT NOT NULL DEFAULT 0,
+    duration_ms     BIGINT,
+    error_message   TEXT,
+    create_time     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE  memos_sync_log IS '备忘同步状态记录(定时/手动,保留3天)';
+COMMENT ON COLUMN memos_sync_log.id IS '主键';
+COMMENT ON COLUMN memos_sync_log.trigger_type IS '触发方式: scheduled定时 / manual手动';
+COMMENT ON COLUMN memos_sync_log.status IS '状态: success成功 / partial部分失败 / failed失败 / skipped未配置跳过';
+COMMENT ON COLUMN memos_sync_log.fetched IS '远端拉取条数';
+COMMENT ON COLUMN memos_sync_log.created IS '本地新增条数';
+COMMENT ON COLUMN memos_sync_log.updated IS '本地更新条数';
+COMMENT ON COLUMN memos_sync_log.marked_deleted IS '标记远端已删条数';
+COMMENT ON COLUMN memos_sync_log.errors IS '拉取/写库失败条数';
+COMMENT ON COLUMN memos_sync_log.duration_ms IS '同步耗时(毫秒)';
+COMMENT ON COLUMN memos_sync_log.error_message IS '失败原因(status=failed 时)';
+COMMENT ON COLUMN memos_sync_log.create_time IS '同步开始时间(记录生成时间)';
+CREATE INDEX IF NOT EXISTS idx_memos_sync_log_create_time ON memos_sync_log (create_time);
+
 -- sys_ai_usage 扩展：关联供应商与模型类型，便于按类型/供应商统计
 ALTER TABLE sys_ai_usage ADD COLUMN IF NOT EXISTS provider_id BIGINT;
 ALTER TABLE sys_ai_usage ADD COLUMN IF NOT EXISTS model_type VARCHAR(32);

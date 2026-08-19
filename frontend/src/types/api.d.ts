@@ -555,6 +555,20 @@ export interface MemosSyncResult {
   errors: number
 }
 
+export interface MemosSyncLog {
+  id: number
+  triggerType: 'scheduled' | 'manual'
+  status: 'success' | 'partial' | 'failed' | 'skipped'
+  fetched: number
+  created: number
+  updated: number
+  markedDeleted: number
+  errors: number
+  durationMs: number | null
+  errorMessage: string | null
+  createTime: string | null
+}
+
 export interface MemosJobResult {
   processed: number
   success: number
