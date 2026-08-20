@@ -1,7 +1,6 @@
 package com.stellar.system.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.stellar.ai.entity.AiTask;
 import com.stellar.ai.mapper.AiTaskMapper;
 import com.stellar.ai.service.SysAiUsageService;
 import com.stellar.common.FileConstants;
@@ -64,33 +63,19 @@ public class DashboardService {
     }
 
     private DashboardStatsVO.TaskStat buildTaskStatByType(String taskType, String successStatus) {
-        List<AiTask> tasks = aiTaskMapper.selectList(
-                new LambdaQueryWrapper<AiTask>()
-                        .select(AiTask::getStatus, AiTask::getDurationMs, AiTask::getCreateTime)
-                        .eq(AiTask::getTaskType, taskType));
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
         LocalDateTime weekStart = LocalDate.now().minusDays(6).atStartOfDay();
         LocalDateTime prevWeekStart = LocalDate.now().minusDays(13).atStartOfDay();
-        long total = 0, today = 0, success = 0;
-        long durationSum = 0, durationCount = 0;
-        long weekTotal = 0, prevWeekTotal = 0;
-        for (AiTask t : tasks) {
-            if (t.getStatus() == null || t.getStatus().equals("generating")) continue;
-            total++;
-            if (t.getCreateTime() != null) {
-                if (!t.getCreateTime().isBefore(todayStart)) today++;
-                if (!t.getCreateTime().isBefore(weekStart)) weekTotal++;
-                else if (!t.getCreateTime().isBefore(prevWeekStart)) prevWeekTotal++;
-            }
-            if (successStatus.equals(t.getStatus())) {
-                success++;
-                if (t.getDurationMs() != null && t.getDurationMs() > 0) {
-                    durationSum += t.getDurationMs();
-                    durationCount++;
-                }
-            }
-        }
-        return buildTaskStat(total, today, success, durationSum, durationCount, weekTotal, prevWeekTotal);
+        // 聚合下推 SQL，避免全表拉进 JVM（ai_task 随调用量无限增长）
+        Map<String, Object> totals = aiTaskMapper.selectTaskStatTotals(taskType, successStatus);
+        Map<String, Object> recent = aiTaskMapper.selectTaskStatRecent(taskType, todayStart, weekStart, prevWeekStart);
+        return buildTaskStat(toLong(totals.get("total")),
+                toLong(recent.get("today")),
+                toLong(totals.get("success")),
+                toLong(totals.get("duration_sum")),
+                toLong(totals.get("duration_count")),
+                toLong(recent.get("week_total")),
+                toLong(recent.get("prev_week_total")));
     }
 
     private DashboardStatsVO.TaskStat buildTaskStat(long total, long today, long success,
@@ -153,23 +138,17 @@ public class DashboardService {
     }
 
     private DashboardStatsVO.TtsStat buildTtsStat() {
-        List<AiTask> records = aiTaskMapper.selectList(
-                new LambdaQueryWrapper<AiTask>()
-                        .select(AiTask::getFileSize, AiTask::getCreateTime)
-                        .eq(AiTask::getTaskType, "tts"));
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
-        long total = records.size();
-        long today = 0;
-        long totalSize = 0;
-        for (AiTask r : records) {
-            long size = r.getFileSize() == null ? 0 : r.getFileSize();
-            totalSize += size;
-            if (r.getCreateTime() != null && !r.getCreateTime().isBefore(todayStart)) today++;
-        }
-        DashboardStatsVO.TtsStat stat = new DashboardStatsVO.TtsStat();
-        stat.setTotal(total);
-        stat.setToday(today);
-        stat.setTotalSize(totalSize);
-        return stat;
+        Map<String, Object> stat = aiTaskMapper.selectTtsStat(todayStart);
+        DashboardStatsVO.TtsStat result = new DashboardStatsVO.TtsStat();
+        result.setTotal(toLong(stat.get("total")));
+        result.setToday(toLong(stat.get("today")));
+        result.setTotalSize(toLong(stat.get("total_size")));
+        return result;
+    }
+
+    /** 聚合结果数值统一转 long（COUNT/SUM 恒非空，null 兜底 0）。 */
+    private long toLong(Object v) {
+        return v == null ? 0L : ((Number) v).longValue();
     }
 }

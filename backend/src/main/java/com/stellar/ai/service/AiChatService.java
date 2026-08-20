@@ -35,7 +35,11 @@ import java.util.function.Consumer;
 import com.stellar.infra.ExternalCallLogger;
 import com.stellar.infra.SafeUrlValidator;
 import jakarta.annotation.Resource;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * AI 聊天服务：流式（SseEmitter）+ 非流式，按 modelId 解析供应商配置发起请求。
@@ -60,6 +64,10 @@ public class AiChatService {
 
     @Resource(name = "aiToolExecutor")
     private Executor aiToolExecutor;
+
+    /** 聊天 SSE 超时（毫秒）：必须与上游 HTTP 请求超时（5min）对齐，否则慢模型未返回时 emitter 先被 Spring complete，
+     * 后续 send() 抛 "already completed" 被 isClientDisconnect 误判为客户端断开而静默 return，导致漏计费、漏落历史。 */
+    private static final long CHAT_SSE_TIMEOUT = Duration.ofMinutes(5).toMillis();
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -124,7 +132,7 @@ public class AiChatService {
         String model = cfg.model();
         Subject subject = currentSubject();
 
-        SseEmitter emitter = new SseEmitter(120000L);
+        SseEmitter emitter = new SseEmitter(CHAT_SSE_TIMEOUT);
         registerEmitterLifecycle(emitter, subject.type(), subject.id());
 
         try {
@@ -170,17 +178,16 @@ public class AiChatService {
                             sendError(emitter, errMsg);
                             return;
                         }
+                        SseSender sender = new SseSender(emitter);
                         try (InputStream is = response.body()) {
-                            StreamResult sr = parseStream(is, emitter);
+                            StreamResult sr = parseStream(is, sender);
                             recordTokenUsage(cfg, finalModel, prompt, sr.content(),
                                     sr.hasUsage(), sr.usage(), finalSubjectType, finalSubjectId);
                             recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
                                     prompt, sr.content(), "success", null, requestTime, requestTimeMillis);
                             externalCallLogger.success("LLM流式", url, callParams + ", resultLen=" + sr.content().length(),
                                     System.currentTimeMillis() - requestTimeMillis, operator);
-                            emitter.send(SseEmitter.event()
-                                    .data(Map.of("done", true), MediaType.APPLICATION_JSON));
-                            emitter.complete();
+                            sender.sendAndComplete(Map.of("done", true));
                             log.info("AI 流式响应完成 tokens={}/{}/{} source={}",
                                     sr.usage()[0], sr.usage()[1], sr.usage()[2],
                                     sr.hasUsage() ? "usage" : "estimate");
@@ -196,6 +203,8 @@ public class AiChatService {
                             externalCallLogger.failure("LLM流式", url, callParams, e.getMessage(),
                                     System.currentTimeMillis() - requestTimeMillis, operator);
                             sendError(emitter, e.getMessage());
+                        } finally {
+                            sender.shutdown();
                         }
                     })
                     .exceptionally(e -> {
@@ -362,7 +371,7 @@ public class AiChatService {
     }
 
     private SseEmitter createChatEmitter(Subject subject) {
-        SseEmitter emitter = new SseEmitter(Duration.ofMinutes(5).toMillis());
+        SseEmitter emitter = new SseEmitter(CHAT_SSE_TIMEOUT);
         registerEmitterLifecycle(emitter, subject.type(), subject.id());
         return emitter;
     }
@@ -447,8 +456,9 @@ public class AiChatService {
                             sendError(emitter, errMsg);
                             return;
                         }
+                        SseSender sender = new SseSender(emitter);
                         try (InputStream is = response.body()) {
-                            StreamResult sr = parseStream(is, emitter);
+                            StreamResult sr = parseStream(is, sender);
                             recordTokenUsageForMessages(cfg, model, messages, sr.content(),
                                     sr.hasUsage(), sr.usage(), subject.type(), subject.id());
                             if (onComplete != null) {
@@ -460,8 +470,7 @@ public class AiChatService {
                             }
                             externalCallLogger.success("LLM多轮流式", url, callParams + ", resultLen=" + sr.content().length(),
                                     System.currentTimeMillis() - requestTimeMillis, operator);
-                            emitter.send(SseEmitter.event().data(Map.of("done", true), MediaType.APPLICATION_JSON));
-                            emitter.complete();
+                            sender.sendAndComplete(Map.of("done", true));
                             log.info("AI 多轮流式完成 tokens={}/{}/{}", sr.usage()[0], sr.usage()[1], sr.usage()[2]);
                         } catch (Exception e) {
                             if (isClientDisconnect(e)) {
@@ -472,6 +481,8 @@ public class AiChatService {
                             externalCallLogger.failure("LLM多轮流式", url, callParams, e.getMessage(),
                                     System.currentTimeMillis() - requestTimeMillis, operator);
                             sendError(emitter, e.getMessage());
+                        } finally {
+                            sender.shutdown();
                         }
                     })
                     .exceptionally(e -> {
@@ -801,14 +812,14 @@ public class AiChatService {
                             safeOnComplete(onComplete, new AiChatResult(null, toolResult.attachmentType(), toolResult.attachmentFileId()));
                             return;
                         }
+                        SseSender sender = new SseSender(emitter);
                         try (InputStream is = response.body()) {
-                            StreamResult sr = parseStream(is, emitter);
+                            StreamResult sr = parseStream(is, sender);
                             recordTokenUsageForMessages(cfg, model, messages, sr.content(),
                                     sr.hasUsage(), sr.usage(), subjectType, subjectId);
                             externalCallLogger.success("LLM工具后流式", url, callParams + ", resultLen=" + sr.content().length(),
                                     System.currentTimeMillis() - start, operator);
-                            emitter.send(SseEmitter.event().data(Map.of("done", true), MediaType.APPLICATION_JSON));
-                            emitter.complete();
+                            sender.sendAndComplete(Map.of("done", true));
                             safeOnComplete(onComplete, new AiChatResult(sr.content(),
                                     toolResult.attachmentType(), toolResult.attachmentFileId()));
                             log.info("AI 聊天第二次流式完成 tokens={}/{}/{}", sr.usage()[0], sr.usage()[1], sr.usage()[2]);
@@ -821,6 +832,8 @@ public class AiChatService {
                             externalCallLogger.failure("LLM工具后流式", url, callParams, e.getMessage(),
                                     System.currentTimeMillis() - start, operator);
                             sendError(emitter, e.getMessage());
+                        } finally {
+                            sender.shutdown();
                         }
                     })
                     .exceptionally(e -> {
@@ -855,10 +868,10 @@ public class AiChatService {
     }
 
     /**
-     * 解析 SSE 流式响应：逐行读取 data 分片，累加文本内容并实时转发 content 事件，提取末帧 usage。
+     * 解析 SSE 流式响应：逐行读取 data 分片，累加文本内容并经 {@link SseSender} 转发 content 事件，提取末帧 usage。
      * <p>抽取自原先 3 处完全一致的解析循环（doStreamChat/doStreamChatMulti/doSecondStream）。
      */
-    private StreamResult parseStream(InputStream is, SseEmitter emitter) throws IOException {
+    private StreamResult parseStream(InputStream is, SseSender sender) throws IOException {
         StringBuilder buf = new StringBuilder();
         int[] usage = {0, 0, 0};
         boolean[] hasUsage = {false};
@@ -879,12 +892,7 @@ public class AiChatService {
                             .path("delta").path("content").asText("");
                     if (!delta.isEmpty()) {
                         buf.append(delta);
-                        try {
-                            emitter.send(SseEmitter.event()
-                                    .data(Map.of("content", delta), MediaType.APPLICATION_JSON));
-                        } catch (IOException e) {
-                            throw new ClientDisconnectedException(e);
-                        }
+                        sender.send(Map.of("content", delta));
                     }
                     JsonNode usageNode = json.path("usage");
                     if (!usageNode.isMissingNode() && usageNode.has("total_tokens")) {
@@ -1052,8 +1060,76 @@ public class AiChatService {
     }
 
     private static final class ClientDisconnectedException extends IOException {
-        private ClientDisconnectedException(IOException cause) {
+        private ClientDisconnectedException(Throwable cause) {
             super(cause.getMessage(), cause);
+        }
+    }
+
+    /**
+     * SSE 发送通道：独立写线程 + 有界队列，解耦慢客户端 socket 写阻塞与 HttpClient 响应读取线程
+     * （慢客户端会占满 HttpClient worker 拖慢所有 AI 请求）。
+     * <p>内容分片与终态 done 都经同一单线程队列串行写出，保证先后顺序；
+     * 队列满时提交方按 CallerRunsPolicy 内联执行（背压：限速读取上游，防内存无界增长）；
+     * 分片发送失败置 disconnected 标记，生产者下次 send 抛 {@link ClientDisconnectedException} 提前终止读取。
+     */
+    private static final class SseSender {
+        private final SseEmitter emitter;
+        private final ThreadPoolExecutor executor;
+        private volatile boolean disconnected;
+
+        SseSender(SseEmitter emitter) {
+            this.emitter = emitter;
+            this.executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                    new ArrayBlockingQueue<>(512),
+                    r -> {
+                        Thread t = new Thread(r, "sse-sender");
+                        t.setDaemon(true);
+                        return t;
+                    },
+                    new ThreadPoolExecutor.CallerRunsPolicy());
+        }
+
+        /** 发送事件（内容分片），客户端已断开则抛 {@link ClientDisconnectedException}。 */
+        void send(Map<String, Object> data) throws ClientDisconnectedException {
+            if (disconnected) {
+                throw new ClientDisconnectedException(new IOException("SSE 客户端已断开"));
+            }
+            try {
+                executor.execute(() -> doSend(data));
+            } catch (RejectedExecutionException e) {
+                // 执行器已关闭（终态后仍被调用）→ 连接已结束，按客户端断开处理
+                throw new ClientDisconnectedException(e);
+            }
+        }
+
+        /** 发送终态事件并 complete emitter，保证排在所有已入队分片之后。 */
+        void sendAndComplete(Map<String, Object> data) {
+            try {
+                executor.execute(() -> {
+                    doSend(data);
+                    try {
+                        emitter.complete();
+                    } catch (Exception e) {
+                        log.warn("SSE complete 失败: {}", e.getMessage());
+                    }
+                });
+            } catch (RejectedExecutionException e) {
+                log.warn("SSE 终态发送被拒绝（连接可能已关闭）: {}", e.getMessage());
+            }
+        }
+
+        private void doSend(Map<String, Object> data) {
+            try {
+                emitter.send(SseEmitter.event().data(data, MediaType.APPLICATION_JSON));
+            } catch (Exception e) {
+                disconnected = true;   // 客户端断开/连接已完成 → 通知生产者提前终止读取
+                log.debug("SSE 分片发送失败（视为客户端断开）: {}", e.getMessage());
+            }
+        }
+
+        /** 关闭写线程：已入队任务（含终态）执行完，不再接受新任务。 */
+        void shutdown() {
+            executor.shutdown();
         }
     }
 }
