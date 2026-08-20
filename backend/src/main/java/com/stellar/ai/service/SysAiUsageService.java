@@ -69,6 +69,19 @@ public class SysAiUsageService {
             vo.setTodayCalls(toLong(totals.get("today_calls")));
         }
 
+        // 近 7 日 vs 前 7 日（环比基准确切：当前 [today-6 00:00, now] 与前 [today-13 00:00, today-6 00:00]）
+        LocalDateTime prevPeriodStart = LocalDate.now().minusDays(13).atStartOfDay();
+        Map<String, Object> period = usageMapper.selectTotalsBetween(weekStart, LocalDateTime.now());
+        if (period != null) {
+            vo.setPeriodTokens(toLong(period.get("tokens")));
+            vo.setPeriodCalls(toLong(period.get("calls")));
+        }
+        Map<String, Object> prevPeriod = usageMapper.selectTotalsBetween(prevPeriodStart, weekStart);
+        if (prevPeriod != null) {
+            vo.setPrevPeriodTokens(toLong(prevPeriod.get("tokens")));
+            vo.setPrevPeriodCalls(toLong(prevPeriod.get("calls")));
+        }
+
         // 按类型分组
         List<AiUsageStatsVO.TypeStat> typeStats = new ArrayList<>();
         for (Map<String, Object> row : usageMapper.selectByType()) {

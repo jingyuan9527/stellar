@@ -34,12 +34,45 @@ const kpiPalette = computed(() => {
   return [themeStore.primaryColor, getChartColors().info]
 })
 
-const aiKpiCards = computed(() => [
-  { label: '总 Token 消耗', value: stats.value?.aiUsage?.totalTokens ?? 0, icon: 'sparkles', color: kpiPalette.value[0] },
-  { label: '今日 Token', value: stats.value?.aiUsage?.todayTokens ?? 0, icon: 'info', color: kpiPalette.value[1] },
-  { label: '总调用次数', value: stats.value?.aiUsage?.totalCalls ?? 0, icon: 'grid', color: kpiPalette.value[0] },
-  { label: '今日调用', value: stats.value?.aiUsage?.todayCalls ?? 0, icon: 'list', color: kpiPalette.value[1] },
-])
+/** 环比涨跌幅：prev 为 0 返回 null（无基准不渲染），返回上升/下降 + 绝对百分比 */
+interface KpiDelta {
+  up: boolean
+  pct: number
+}
+
+interface AiKpiCard {
+  label: string
+  value: number
+  icon: string
+  color: string
+  delta?: KpiDelta | null
+}
+
+function deltaPct(curr: number, prev: number): KpiDelta | null {
+  if (!prev) return null
+  const pct = Math.round(((curr - prev) / prev) * 100)
+  return { up: pct >= 0, pct: Math.abs(pct) }
+}
+
+const aiKpiCards = computed<AiKpiCard[]>(() => {
+  const u = stats.value?.aiUsage
+  const cur = {
+    tokens: u?.periodTokens ?? 0,
+    calls: u?.periodCalls ?? 0,
+  }
+  const prev = {
+    tokens: u?.prevPeriodTokens ?? 0,
+    calls: u?.prevPeriodCalls ?? 0,
+  }
+  return [
+    { label: '总 Token 消耗', value: u?.totalTokens ?? 0, icon: 'sparkles', color: kpiPalette.value[0] },
+    { label: '近7日 Token', value: cur.tokens, icon: 'pulse', color: kpiPalette.value[0], delta: deltaPct(cur.tokens, prev.tokens) },
+    { label: '今日 Token', value: u?.todayTokens ?? 0, icon: 'info', color: kpiPalette.value[1] },
+    { label: '总调用次数', value: u?.totalCalls ?? 0, icon: 'grid', color: kpiPalette.value[0] },
+    { label: '近7日调用', value: cur.calls, icon: 'bulb', color: kpiPalette.value[1], delta: deltaPct(cur.calls, prev.calls) },
+    { label: '今日调用', value: u?.todayCalls ?? 0, icon: 'list', color: kpiPalette.value[1] },
+  ]
+})
 
 const todayKpiCards = computed(() => [
   { label: '今日文案生成', value: stats.value?.textGen?.today ?? 0, icon: 'log', color: kpiPalette.value[0], sub: todayShare.value },
@@ -262,6 +295,15 @@ onMounted(loadStats)
               <component :is="renderStatIcon(item.icon, item.color)" />
             </div>
             <NStatistic :label="item.label" :value="formatNumber(item.value)" />
+            <span
+              v-if="item.delta"
+              class="kpi-delta"
+              :class="item.delta.up ? 'up' : 'down'"
+              :title="`较前 7 日${item.delta.up ? '上升' : '下降'} ${item.delta.pct}%`"
+            >
+              <NIcon size="14"><component :is="item.delta.up ? iconMap.arrowUp : iconMap.arrowDown" /></NIcon>
+              {{ item.delta.pct }}%
+            </span>
           </div>
         </NCard>
       </NGridItem>
@@ -441,6 +483,28 @@ onMounted(loadStats)
   margin-top: 8px;
   font-size: 12px;
   color: var(--c-text-3);
+}
+
+.kpi-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.kpi-delta.up {
+  color: var(--c-success);
+  background: var(--c-success-bg);
+}
+
+.kpi-delta.down {
+  color: var(--c-error);
+  background: var(--c-error-bg);
 }
 
 .trend-caption {

@@ -78,10 +78,35 @@ class DashboardServiceTest {
         assertEquals(1, vo.getTextGen().getSuccessCount());
         assertEquals(50.0, vo.getTextGen().getSuccessRate());
         assertEquals(100, vo.getTextGen().getAvgDuration());
+        // 近 7 日 2 条（今天 + 前天），无前 7 日
+        assertEquals(2, vo.getTextGen().getWeekTotal());
+        assertEquals(0, vo.getTextGen().getPrevWeekTotal());
         assertEquals(1, vo.getImageTask().getSuccessCount());
+        assertEquals(1, vo.getImageTask().getWeekTotal());
         assertEquals(1, vo.getVideoTask().getSuccessCount());
         assertNotNull(vo.getFile());
         assertNotNull(vo.getTts());
+    }
+
+    @Test
+    void buildTaskStat_本周与上周边界() {
+        DashboardService service = new DashboardService(aiUsageService, aiTaskMapper, fileMapper);
+        when(aiUsageService.stats()).thenReturn(new AiUsageStatsVO());
+        when(aiTaskMapper.selectList(any(Wrapper.class)))
+                .thenReturn(List.of(
+                        task("text", "success", 0, LocalDateTime.now()),                       // 本周
+                        task("text", "success", 0, LocalDateTime.now().minusDays(2)),           // 本周
+                        task("text", "success", 0, LocalDateTime.now().minusDays(7)),           // 上周
+                        task("text", "success", 0, LocalDateTime.now().minusDays(8))))          // 上周
+                .thenReturn(List.of())
+                .thenReturn(List.of())
+                .thenReturn(List.of());
+        when(fileMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+
+        DashboardStatsVO vo = service.stats();
+
+        assertEquals(2, vo.getTextGen().getWeekTotal());
+        assertEquals(2, vo.getTextGen().getPrevWeekTotal());
     }
 
     @Test

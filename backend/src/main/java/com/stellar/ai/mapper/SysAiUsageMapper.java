@@ -17,6 +17,10 @@ public interface SysAiUsageMapper extends BaseMapper<SysAiUsage> {
             "FROM sys_ai_usage")
     Map<String, Object> selectTotals(@Param("todayStart") LocalDateTime todayStart);
 
+    @Select("SELECT COALESCE(SUM(total_tokens), 0) AS tokens, COUNT(*) AS calls " +
+            "FROM sys_ai_usage WHERE create_time >= #{start} AND create_time < #{end}")
+    Map<String, Object> selectTotalsBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
     @Select("SELECT model_type, COALESCE(SUM(total_tokens), 0) AS tokens, COUNT(*) AS calls " +
             "FROM sys_ai_usage WHERE model_type IS NOT NULL GROUP BY model_type")
     List<Map<String, Object>> selectByType();

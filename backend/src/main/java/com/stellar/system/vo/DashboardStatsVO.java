@@ -45,6 +45,10 @@ public class DashboardStatsVO {
         private double successRate;
         /** 平均耗时（文案 ms / 图片视频 s），仅统计终态任务 */
         private long avgDuration;
+        /** 本周任务数（含今日，近 7 日） */
+        private long weekTotal;
+        /** 上周任务数（前 7 日） */
+        private long prevWeekTotal;
     }
 
     @Data

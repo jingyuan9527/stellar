@@ -69,12 +69,19 @@ public class DashboardService {
                         .select(AiTask::getStatus, AiTask::getDurationMs, AiTask::getCreateTime)
                         .eq(AiTask::getTaskType, taskType));
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
+        LocalDateTime weekStart = LocalDate.now().minusDays(6).atStartOfDay();
+        LocalDateTime prevWeekStart = LocalDate.now().minusDays(13).atStartOfDay();
         long total = 0, today = 0, success = 0;
         long durationSum = 0, durationCount = 0;
+        long weekTotal = 0, prevWeekTotal = 0;
         for (AiTask t : tasks) {
             if (t.getStatus() == null || t.getStatus().equals("generating")) continue;
             total++;
-            if (t.getCreateTime() != null && !t.getCreateTime().isBefore(todayStart)) today++;
+            if (t.getCreateTime() != null) {
+                if (!t.getCreateTime().isBefore(todayStart)) today++;
+                if (!t.getCreateTime().isBefore(weekStart)) weekTotal++;
+                else if (!t.getCreateTime().isBefore(prevWeekStart)) prevWeekTotal++;
+            }
             if (successStatus.equals(t.getStatus())) {
                 success++;
                 if (t.getDurationMs() != null && t.getDurationMs() > 0) {
@@ -83,17 +90,20 @@ public class DashboardService {
                 }
             }
         }
-        return buildTaskStat(total, today, success, durationSum, durationCount);
+        return buildTaskStat(total, today, success, durationSum, durationCount, weekTotal, prevWeekTotal);
     }
 
     private DashboardStatsVO.TaskStat buildTaskStat(long total, long today, long success,
-                                                    long durationSum, long durationCount) {
+                                                    long durationSum, long durationCount,
+                                                    long weekTotal, long prevWeekTotal) {
         DashboardStatsVO.TaskStat s = new DashboardStatsVO.TaskStat();
         s.setTotal(total);
         s.setToday(today);
         s.setSuccessCount(success);
         s.setSuccessRate(total > 0 ? Math.round(((double) success / total) * 1000) / 10.0 : 0);
         s.setAvgDuration(durationCount > 0 ? durationSum / durationCount : 0);
+        s.setWeekTotal(weekTotal);
+        s.setPrevWeekTotal(prevWeekTotal);
         return s;
     }
 

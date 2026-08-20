@@ -18,6 +18,18 @@ public class AiUsageStatsVO {
 
     private long todayCalls;
 
+    /** 近 7 日 token 总量 */
+    private long periodTokens;
+
+    /** 近 7 日调用次数 */
+    private long periodCalls;
+
+    /** 前 7 日 token 总量 */
+    private long prevPeriodTokens;
+
+    /** 前 7 日调用次数 */
+    private long prevPeriodCalls;
+
     /** 近 7 日趋势 */
     private List<DailyPoint> dailyTrend;
 

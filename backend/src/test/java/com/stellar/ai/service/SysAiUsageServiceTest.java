@@ -86,18 +86,30 @@ class SysAiUsageServiceTest {
         return m;
     }
 
+    private Map<String, Object> periodMap(long tokens, long calls) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("tokens", tokens);
+        m.put("calls", calls);
+        return m;
+    }
+
     @Test
     void stats_totals为null_全量兜底0且趋势7天补零() {
         when(usageMapper.selectTotals(any())).thenReturn(null);
         when(usageMapper.selectByType()).thenReturn(List.of());
         when(usageMapper.selectByProvider()).thenReturn(List.of());
         when(usageMapper.selectDailyTrend(any())).thenReturn(List.of());
+        when(usageMapper.selectTotalsBetween(any(), any())).thenReturn(null);
 
         AiUsageStatsVO vo = service.stats();
         assertEquals(0, vo.getTotalTokens());
         assertEquals(0, vo.getTotalCalls());
         assertEquals(0, vo.getTodayTokens());
         assertEquals(0, vo.getTodayCalls());
+        assertEquals(0, vo.getPeriodTokens());
+        assertEquals(0, vo.getPeriodCalls());
+        assertEquals(0, vo.getPrevPeriodTokens());
+        assertEquals(0, vo.getPrevPeriodCalls());
         assertEquals(0, vo.getByType().size());
         assertEquals(0, vo.getByProvider().size());
         assertEquals(7, vo.getDailyTrend().size());
@@ -132,11 +144,19 @@ class SysAiUsageServiceTest {
         d1.put("calls", 1L);
         when(usageMapper.selectDailyTrend(any())).thenReturn(List.of(d1));
 
+        // 近 7 日 vs 前 7 日（两次 selectTotalsBetween 按调用顺序返回）
+        when(usageMapper.selectTotalsBetween(any(), any()))
+                .thenReturn(periodMap(100L, 10L), periodMap(50L, 5L));
+
         AiUsageStatsVO vo = service.stats();
         assertEquals(100, vo.getTotalTokens());
         assertEquals(5, vo.getTotalCalls());
         assertEquals(20, vo.getTodayTokens());
         assertEquals(2, vo.getTodayCalls());
+        assertEquals(100, vo.getPeriodTokens());
+        assertEquals(10, vo.getPeriodCalls());
+        assertEquals(50, vo.getPrevPeriodTokens());
+        assertEquals(5, vo.getPrevPeriodCalls());
         assertEquals(1, vo.getByType().size());
         assertEquals("TEXT", vo.getByType().get(0).getModelType());
         assertEquals(50, vo.getByType().get(0).getTokens());

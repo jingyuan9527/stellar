@@ -256,6 +256,14 @@ export interface AiUsageStats {
   todayTokens: number
   totalCalls: number
   todayCalls: number
+  /** 近 7 日 token 总量 */
+  periodTokens: number
+  /** 近 7 日调用次数 */
+  periodCalls: number
+  /** 前 7 日 token 总量 */
+  prevPeriodTokens: number
+  /** 前 7 日调用次数 */
+  prevPeriodCalls: number
   dailyTrend: AiUsageDailyPoint[]
   byType: AiUsageTypeStat[]
   byProvider: AiUsageProviderStat[]
@@ -270,6 +278,10 @@ export interface DashboardTaskStat {
   successRate: number
   /** 平均耗时（文案 ms / 图片视频 s） */
   avgDuration: number
+  /** 本周任务数（含今日，近 7 日） */
+  weekTotal?: number
+  /** 上周任务数（前 7 日） */
+  prevWeekTotal?: number
 }
 
 export interface DashboardFileTypeStat {

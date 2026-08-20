@@ -11,6 +11,12 @@
 
 > 随实现推进，对应行为规范同步补写进本文档，避免文档超前于代码（铁律8）。
 
+- **阶段 19（已实现）** 仪表盘「真·环比箭头」：KPI 卡带环比 pill（参考 tokens.css `--c-success`/`--c-error` 语义色 + `icons.ts` `iconMap.arrowUp/arrowDown`）：
+  - **后端区间聚合**：`SysAiUsageMapper` 新增 `@Select` 方法 `selectTotalsBetween(start, end)`（`SELECT COALESCE(SUM(total_tokens),0) AS tokens, COUNT(*) AS calls FROM sys_ai_usage WHERE create_time >= #{start} AND create_time < #{end}`）；`SysAiUsageService.stats()` 调两次——当前 7 日 `[today-6 00:00, now]` 与前 7 日 `[today-13 00:00, today-6 00:00]`——写入 `AiUsageStatsVO` 新增 `periodTokens/periodCalls/prevPeriodTokens/prevPeriodCalls`（long，null 兜底 0）。
+  - **任务周窗**：`DashboardService.buildTaskStatByType` 遍历 ai_task 时按同一 7 日窗口累加 `weekTotal`（本周）/`prevWeekTotal`（上周），`DashboardStatsVO.TaskStat` 加两个 long 字段，`buildTaskStat` 签名透传。
+  - **前端**：`types/api.d.ts` 的 `AiUsageStats` 加 4 个 period 字段、`DashboardTaskStat` 加 `weekTotal?/prevWeekTotal?`；`views/dashboard/index.vue` 加 `deltaPct(curr, prev)`（prev=0 返回 null 不渲染）与 `.kpi-delta` 箭头 pill（↑ 绿 --c-success / ↓ 红 --c-error，图标 `iconMap.arrowUp/arrowDown`，`--c-success-bg/--c-error-bg` 柔化底，暗色 token 自动生效），AI 概览 KPI 卡扩为 6 张（新增「近7日 Token」「近7日调用」两张带环比）。
+  - **测试**：`SysAiUsageServiceTest` 补 `selectTotalsBetween` stub（null 兜底 0 + 顺序双区间返回）并断言 4 个 period 字段；`DashboardServiceTest` 新增「本周与上周边界」用例（−2d 本周/−7d·−8d 上周）断言 `weekTotal/prevWeekTotal`。全量通过。
+
 - **阶段 18（已实现）** 空态品牌化 + 导航/信息架构体检收口：
   - **G 空态品牌化**：新增 `components/BrandEmpty.vue`（内联品牌微光 SVG 插画——品牌绿/信息蓝 `color-mix` 同源辉光 + `--c-fill-2` 线框，与首页 Hero/404 同一语言，全程走 `--c-*` token 暗色自动生效；`size` 三档 small/medium/large + 可选 action 按钮 + `title`/`description` 文案）。迁移落点：dashboard 5 处 `<NEmpty description="暂无数据">`→`<BrandEmpty size="small">`（去 NEmpty import）、chat 会话空态（title「还没有对话」+ 新建对话 action 触发 `newSession`）与消息中心空态、memos `.card-empty`、conch（「先向海螺提个问题吧」）、cover 两弹窗（草稿/清空）。tts 最近合成极紧凑位保留 `NEmpty size="small"`（BrandEmpty 略重）。文案色统一 `--c-text-3`。
   - **H① 游客/登录命名统一**：首页工具卡按一级 title 平铺分组（游客见「AI创作/实用工具/游戏」），侧栏二级组名从「创作工具/管理」改「AI工具/AI管理」，消除游客「AI创作」vs 登录「创作工具」叫法分裂。
