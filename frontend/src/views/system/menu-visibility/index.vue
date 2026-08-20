@@ -225,7 +225,7 @@ onMounted(loadData)
   justify-content: space-between;
   gap: 12px;
   padding: 10px 4px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.12);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .group-item:last-child {

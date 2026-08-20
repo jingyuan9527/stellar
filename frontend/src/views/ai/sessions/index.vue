@@ -228,7 +228,7 @@ onMounted(loadData)
   background: var(--c-brand-bg);
 }
 .msg-row.assistant .bubble {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--c-fill-2);
 }
 .msg-text {
   display: block;
@@ -236,7 +236,7 @@ onMounted(loadData)
 .msg-refs {
   margin-top: 8px;
   padding-top: 6px;
-  border-top: 1px dashed rgba(128, 128, 128, 0.25);
+  border-top: 1px dashed var(--c-border);
   font-size: 12px;
 }
 .refs-label {

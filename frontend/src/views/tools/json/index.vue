@@ -268,19 +268,19 @@ const prettyText = computed(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid rgba(128, 128, 128, 0.14);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
   overflow: hidden;
-  background-color: rgba(128, 128, 128, 0.03);
+  background-color: var(--c-fill-2);
 }
 
 .pane-title {
   flex-shrink: 0;
   padding: 6px 12px;
   font-size: 12px;
-  color: rgba(128, 128, 128, 0.75);
-  background-color: rgba(128, 128, 128, 0.05);
-  border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+  color: var(--c-text-3);
+  background-color: var(--c-fill-2);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .editor {
@@ -328,7 +328,7 @@ const prettyText = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(128, 128, 128, 0.5);
+  color: var(--c-text-3);
   font-size: 13px;
   padding: 24px;
   text-align: center;

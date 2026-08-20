@@ -1097,13 +1097,13 @@ onMounted(() => {
   margin: 0.4em 0;
 }
 .markdown-body :deep(code) {
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--c-fill-2);
   padding: 1px 5px;
   border-radius: var(--r-xs);
   font-size: 12px;
 }
 .markdown-body :deep(pre) {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--c-fill-2);
   padding: 10px;
   border-radius: var(--r-sm);
   overflow-x: auto;
@@ -1113,7 +1113,7 @@ onMounted(() => {
   padding: 0;
 }
 .markdown-body :deep(blockquote) {
-  border-left: 3px solid rgba(128, 128, 128, 0.4);
+  border-left: 3px solid var(--c-border);
   margin: 0.5em 0;
   padding-left: 10px;
   color: var(--c-text-3);
@@ -1131,7 +1131,7 @@ onMounted(() => {
 }
 .markdown-body :deep(th),
 .markdown-body :deep(td) {
-  border: 1px solid rgba(128, 128, 128, 0.3);
+  border: 1px solid var(--c-border);
   padding: 4px 8px;
 }
 </style>
