@@ -37,6 +37,33 @@ a {
   margin: 0;
 }
 
+/* 卡片标题/元信息：全局工具类，各卡页面仅调用 */
+.card-title {
+  font-size: var(--card-title-size);
+  font-weight: var(--card-title-weight);
+  color: var(--c-text-1);
+  margin: 0;
+}
+.card-meta {
+  font-size: var(--card-meta-size);
+  color: var(--c-text-2);
+  line-height: 1.6;
+}
+
+/* 弹窗/抽屉样式统一：圆角对齐 --r-lg，标题对齐 .section-title 语言 */
+.n-modal .n-card {
+  border-radius: var(--r-lg);
+}
+.n-modal .n-card-header__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--c-text-1);
+}
+.n-drawer .n-card,
+.n-drawer {
+  border-radius: var(--r-lg);
+}
+
 /* 错误提示条（收敛自各页自造 .alert/.bubble.error）：随语义色自适应深浅主题 */
 .alert-error {
   background: var(--c-error-bg);

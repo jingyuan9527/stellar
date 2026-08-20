@@ -367,7 +367,7 @@ onMounted(() => {
       />
     </NCard>
 
-    <NModal v-model:show="modalShow" :width="isMobile ? '92%' : 560" preset="card" title="评估用例">
+    <NModal v-model:show="modalShow" :width="isMobile ? '92%' : 'var(--modal-md)'" preset="card" title="评估用例">
       <NForm label-placement="left" :label-width="90" :show-feedback="false">
         <NFormItem label="问题">
           <NInput v-model:value="form.query" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }"

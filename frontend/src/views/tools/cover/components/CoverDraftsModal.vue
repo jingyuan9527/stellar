@@ -53,7 +53,7 @@ function handleRename(id: string, oldName: string) {
     v-model:show="show"
     preset="card"
     title="封面草稿"
-    :style="{ width: '600px', maxWidth: '90vw' }"
+    :style="{ width: 'var(--modal-md)', maxWidth: '90vw' }"
   >
     <template #footer>
       <NButton @click="show = false">关闭</NButton>

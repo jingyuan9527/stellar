@@ -129,7 +129,7 @@ async function handleSubmitPassword() {
       <NButton v-else type="primary" size="small" @click="router.push('/login')">登录</NButton>
     </div>
 
-    <NModal v-model:show="showPasswordModal" preset="card" title="修改密码" style="width: 420px; max-width: 90vw">
+    <NModal v-model:show="showPasswordModal" preset="card" title="修改密码" style="width: var(--modal-sm); max-width: 90vw">
       <NForm label-placement="top">
         <NFormItem label="旧密码">
           <NInput

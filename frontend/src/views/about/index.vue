@@ -306,7 +306,7 @@ onMounted(() => {
 
 .project-card:hover {
   transform: translateY(-3px);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--sh-card);
 }
 
 @media (prefers-reduced-motion: reduce) {

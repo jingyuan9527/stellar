@@ -760,7 +760,7 @@ onMounted(() => {
     </NDrawer>
 
     <!-- AI 打标签弹窗：勾选笔记后点工具条按钮弹出 -->
-    <NModal v-model:show="tagShow" preset="card" title="AI 打标签" :style="{ width: '480px', maxWidth: '90vw' }">
+    <NModal v-model:show="tagShow" preset="card" title="AI 打标签" :style="{ width: 'var(--modal-sm)', maxWidth: '90vw' }">
       <NSpace vertical :size="16">
         <NAlert type="info" :bordered="false">
           已勾选 <b>{{ checkedKeys.length }}</b> 条笔记。AI 生成标签并与现有标签合并，成功后自动写回远端；供应商/模型留空则用默认 TEXT 模型。
@@ -925,17 +925,17 @@ onMounted(() => {
 }
 
 .note-card {
-  border: 1px solid rgba(128, 128, 128, 0.25);
+  border: 1px solid var(--c-border);
   border-radius: var(--r-md);
   padding: 10px 12px;
-  background: rgba(128, 128, 128, 0.06);
+  background: var(--c-fill-2);
   transition: border-color 0.2s, background-color 0.2s;
   animation: list-in 0.3s ease both;
 }
 
 .note-card:hover {
   border-color: var(--c-info);
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--c-fill-2);
 }
 
 .note-card.card-deleted {

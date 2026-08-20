@@ -193,7 +193,7 @@ onMounted(loadData)
       v-model:show="editShow"
       preset="card"
       :title="editing?.id ? '编辑人设' : '新增人设'"
-      :style="{ width: '680px', maxWidth: '90vw' }"
+      :style="{ width: 'var(--modal-lg)', maxWidth: '90vw' }"
     >
       <NSpace v-if="editing" vertical :size="16">
         <NFormItem label="名称">

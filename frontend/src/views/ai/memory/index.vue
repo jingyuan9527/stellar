@@ -259,7 +259,7 @@ onMounted(() => {
       v-model:show="editShow"
       preset="card"
       title="编辑记忆"
-      :style="{ width: '560px', maxWidth: '90vw' }"
+      :style="{ width: 'var(--modal-md)', maxWidth: '90vw' }"
     >
       <NFormItem label="内容">
         <NInput
@@ -281,7 +281,7 @@ onMounted(() => {
       v-model:show="addShow"
       preset="card"
       title="新增长期记忆"
-      :style="{ width: '520px', maxWidth: '90vw' }"
+      :style="{ width: 'var(--modal-md)', maxWidth: '90vw' }"
     >
       <NSpace vertical :size="16">
         <NFormItem label="用户">
@@ -313,7 +313,7 @@ onMounted(() => {
       v-model:show="summarizeShow"
       preset="card"
       title="选择会话整理为记忆"
-      :style="{ width: '720px', maxWidth: '90vw' }"
+      :style="{ width: 'var(--modal-lg)', maxWidth: '90vw' }"
     >
       <p class="hint">选择会话点击「整理」，将调用 LLM 提取对话中的持久事实，存为该用户的长期记忆。</p>
       <NDataTable

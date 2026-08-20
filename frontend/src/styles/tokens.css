@@ -43,6 +43,18 @@
   --sp-5: 24px;
   --sp-6: 32px;
 
+  /* 卡片内层级语义（标题/元信息尺度统一，随深浅主题自适应） */
+  --card-pad: 18px;
+  --card-title-size: 15px;
+  --card-title-weight: 600;
+  --card-meta-size: 13px;
+  --card-radius: var(--r-md);
+
+  /* 弹窗宽度档位：sm 改密/打标签/清除缓存，md 知识库/记忆/评估，lg 人设/模板/AI配置 */
+  --modal-sm: 420px;
+  --modal-md: 560px;
+  --modal-lg: 720px;
+
   /* 圆角阶梯：xs 角标/胶囊内嵌，sm 控件，md 小卡/条目，lg 卡片，xl 大容器 */
   --r-xs: 4px;
   --r-sm: 6px;

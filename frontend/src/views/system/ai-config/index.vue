@@ -497,7 +497,7 @@ onMounted(loadProviders)
       v-model:show="providerEditShow"
       preset="card"
       :title="providerEditing?.id ? '编辑供应商' : '新增供应商'"
-      :style="{ width: '500px', maxWidth: '90vw' }"
+      :style="{ width: 'var(--modal-md)', maxWidth: '90vw' }"
       :mask-closable="false"
     >
       <NSpace v-if="providerEditing" vertical :size="16">
@@ -528,7 +528,7 @@ onMounted(loadProviders)
       v-model:show="modelEditShow"
       preset="card"
       :title="modelEditing?.id ? '编辑模型' : '新增模型'"
-      :style="{ width: '500px', maxWidth: '90vw' }"
+      :style="{ width: 'var(--modal-md)', maxWidth: '90vw' }"
       :mask-closable="false"
     >
       <NSpace v-if="modelEditing" vertical :size="16">
@@ -554,7 +554,7 @@ onMounted(loadProviders)
       v-model:show="fetchShow"
       preset="card"
       :title="`拉取模型 · ${fetchProvider?.name ?? ''}`"
-      :style="{ width: isMobile ? '100%' : '720px', maxWidth: '95vw' }"
+      :style="{ width: isMobile ? '100%' : 'var(--modal-lg)', maxWidth: '95vw' }"
       :mask-closable="false"
     >
       <NSpace vertical :size="12">

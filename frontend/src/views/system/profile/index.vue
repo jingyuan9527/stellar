@@ -246,7 +246,7 @@ onMounted(() => {
       />
     </NCard>
 
-    <NModal v-model:show="showProjectModal" preset="card" :title="isEditProject ? '编辑项目' : '新增项目'" style="width: 520px; max-width: 90vw">
+    <NModal v-model:show="showProjectModal" preset="card" :title="isEditProject ? '编辑项目' : '新增项目'" style="width: var(--modal-md); max-width: 90vw">
       <NSpace vertical :size="16">
         <NFormItem label="项目名" required>
           <NInput v-model:value="projectForm.name" placeholder="如：数学游戏" :maxlength="100" />
