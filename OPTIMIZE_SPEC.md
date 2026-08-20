@@ -14,13 +14,13 @@
   - ✅ **P3** 操作人解析改为：请求线程只取 `operatorUserId`（不查库），用户名在 `SysLogService.saveLog` 异步线程内用 **Caffeine 5min 短缓存**解析填充，`ExternalCallLogger`/`LogAspect` 同步查库已消除。
   - ✅ **P4+P5** RAG 缓存（`AiKnowledgeService`/`MemosRagService`）改 **Caffeine** 原子单飞加载（`get(k,loader)` 不持锁、不同 kb 并发）+ `maximumSize`/`expireAfterWrite(30min)` 驱逐，消除粗锁与 OOM 风险。
   - ✅ **P6** 新增 `CacheInvalidation{Event,Message,Publisher,Listener}`：数据变更实例失效本地缓存后通过 **Redis pub/sub** 广播，各实例 `@EventListener` 订阅失效，多实例索引一致（SSE 通道同源）。
-- **已完成（安全与连接池轮，S5/P7/P8 完成；S2/S3 部分）**：
-  - ⚠️ **S2（半完成 + 有坑）** `RedisConfig.cacheManager()` 已关 Jackson default typing（不再写 `@class`），旧存量条目由新增 `RedisCacheBootstrap` 启动时清理。**但**业务 `redisTemplate` bean（`new GenericJackson2JsonRedisSerializer()` 无参构造，typing 默认仍开）与 `CacheInvalidationListener`/`AiNotifyListener`（`new GenericJackson2JsonRedisSerializer()` + `instanceof` 判型）**仍走默认 typing**——一旦把 `redisTemplate` 也关掉，两个 pub/sub 的 `instanceof` 判定会静默失败（try/catch 吞告警），RAG 多实例失效广播与 AI 通知**静默失效**。→ 见 S2 收尾做法。
-  - ⚠️ **S3（软拦截，未硬阻断）** 后端已就绪：`sys_user` 加 `must_change_password` 列（含幂等 `ALTER TABLE ADD COLUMN IF NOT EXISTS`）、`DataInitializer` 播种 admin 带标记、登录在 `LoginResult.userInfo` 返回标记、`UserService` 改密成功清 0（单测已覆盖）。**但** `AuthService.login` 仍无条件 `StpUtil.login(...)` 放行——仅把标记回传给前端由路由守卫拦截，属"软强制"：非配合客户端（或绕过前端）仍可凭默认口令 `123456` 拿到有效 token。**需确认前端已接 `mustChangePassword` 拦截**（后端侧若要真正"强制"，应在 `mustChangePassword==1` 时拒绝 `StpUtil.login` 或仅发受限 token）。
+- **已完成（安全与连接池轮，S2/S3/S5/P7/P8 全部完成）**：
+  - ✅ **S2（已收尾）** `RedisConfig.cacheManager()` 已关 Jackson default typing（不再写 `@class`），旧存量条目由 `RedisCacheBootstrap` 启动时清理。**收尾**：业务 `redisTemplate` bean 同改为 builder + `JavaTimeModule` 关闭 typing；`CacheInvalidationListener`/`AiNotifyListener` 改用**类级** `Jackson2JsonRedisSerializer(消息类.class)` 直读直出（不再 `instanceof` 判型），发布端复用 redisTemplate 纯 JSON payload 即可兼容——彻底消除「后续补关 typing 导致 pub/sub 静默失效」的隐形炸弹。
+  - ✅ **S3（已硬阻断）** `AuthService.login` 密码校验通过后在 `mustChangePassword==1` 时向 Sa-Token 会话写 `mustChangePassword` 标记（`SecurityConstants.SESSION_KEY_MUST_CHANGE_PASSWORD`）；`AuthInterceptor` 对带标记会话仅放行 `/user/change-password`、`/user/info`、`/auth/logout`，其余受保护接口一律 403 `BusinessException`；`UserService.changePassword` 改密成功同步清会话标记 + DB 清 0。非配合客户端无法凭默认口令 `123456` 访问业务接口。
   - ✅ **S5** `MyBatisPlusConfig` 挂 `BlockAttackInnerInterceptor`，无 WHERE 的 update/delete 直接拦截。
   - ✅ **P7** HikariCP `maximum-pool-size` 8→15、`minimum-idle` 2→5，缓解异步 AI worker 并发持连接打满。
   - ✅ **P8** `SseEmitterManager` `EMITTER_TIMEOUT` 24h→1h（30s 心跳保活下不影响长期存活）。
-- **待办（下一轮）**：**S2 收尾（改 pub/sub 类型化序列化）** / **S3 硬阻断确认** / S1 CORS 白名单 / S4 本地密码改环境变量 / P10 散落 class / P9 AiChatService 测试。
+- **待办（下一轮）**：S1 CORS 白名单 / S4 本地密码改环境变量 / P10 散落 class / P9 AiChatService 测试。
 
 ---
 
@@ -104,34 +104,29 @@
 
 ---
 
-## 🟡 S2 — 关闭 Redis Jackson defaultTyping（需收尾）
+## 🟡 S2 — 关闭 Redis Jackson defaultTyping（已完成 ✅）
 
 - **问题**：`RedisConfig.cacheManager()` 用 `GenericJackson2JsonRedisSerializer` 且 `activateDefaultTyping(...)` 开启，存在反序列化 gadget 风险。
-- **位置**：`config/RedisConfig.java`（cacheManager 已关）、`RedisConfig.redisTemplate`（仍无参构造=typing 开）、`infra/CacheInvalidationListener.java`、`ai/service/AiNotifyListener.java`（均 `new GenericJackson2JsonRedisSerializer()` + `instanceof` 判型）
+- **位置**：`config/RedisConfig.java`（cacheManager 已关）、`RedisConfig.redisTemplate`（已关）、`infra/CacheInvalidationListener.java`、`ai/service/AiNotifyListener.java`（均已改类型化序列化）
 - **做法**（两步，缺一不可）：
-  1. **`redisTemplate` bean 关 typing**：`new GenericJackson2JsonRedisSerializer()` 改为 builder 形式并显式不开启 typing（与 cacheManager 一致）：
+  1. **`redisTemplate` bean 关 typing**：改为 builder 形式并显式不开启 typing（与 cacheManager 一致）：
      ```java
      GenericJackson2JsonRedisSerializer ser = GenericJackson2JsonRedisSerializer.builder()
          .objectMapper(new ObjectMapper().registerModule(new JavaTimeModule())).build();
      ```
-  2. **pub/sub 改类型化序列化（关键，否则会破坏 P6 与 AI 通知）**：`CacheInvalidationPublisher`/`CacheInvalidationListener` 与 `AiNotifyPublisher`/`AiNotifyListener` 改用 **类级** 序列化器 `Jackson2JsonRedisSerializer(具体消息类.class)`（按类名写 header、不依赖多态 `@class`，无 gadget 风险且类型保真），例如：
+  2. **pub/sub 改类型化序列化（关键，否则会破坏 P6 与 AI 通知）**：`CacheInvalidationListener` 与 `AiNotifyListener` 改用**类级** 序列化器 `Jackson2JsonRedisSerializer(具体消息类.class)`（按类名定型、不依赖多态 `@class`，无 gadget 风险且类型保真）直读直出，去掉 `instanceof` 判型；发布端复用 `redisTemplate`（关 typing 后 payload 即纯 JSON，与类型化读端兼容）：
      ```java
-     // 发布端
-     RedisTemplate<String, Object> tpl = new RedisTemplate<>();
-     tpl.setValueSerializer(new Jackson2JsonRedisSerializer<>(CacheInvalidationMessage.class));
-     tpl.afterPropertiesSet();
-     // 或复用现有 redisTemplate 但对该 channel 用独立类型化序列化器
      // 订阅端
-     private final Jackson2JsonRedisSerializer<CacheInvalidationMessage> ser =
-         new Jackson2JsonRedisSerializer<>(CacheInvalidationMessage.class);
-     CacheInvalidationMessage msg = ser.deserialize(message.getBody());
+     private final Jackson2JsonRedisSerializer<AiNotifyMessage> ser =
+         new Jackson2JsonRedisSerializer<>(AiNotifyMessage.class);
+     AiNotifyMessage msg = ser.deserialize(message.getBody());
      ```
-  3. 改完务必跑 `CacheInvalidationPublisher`/`AiNotifyListener` 相关单测，确认多实例失效广播与 AI 通知在 typing 关闭后仍能正常 round-trip。
-- **为什么必须做**：当前 `cacheManager` 已关 typing，但 `redisTemplate` + 两个 Listener 仍开。这种不一致本身就是隐患，且任何人后续"补关 redisTemplate 的 typing"都会因 `instanceof` 失败而**静默破坏** P6 与 AI 通知——趁早一次性收尾。
+  3. 已跑 `AiNotifyListenerTest`/`AiNotifyPublisherTest`/`CacheInvalidationListenerTest` 单测，确认多实例失效广播与 AI 通知在 typing 关闭后仍能正常 round-trip。
+- **为什么必须做**：原先 cacheManager 已关 typing，但 `redisTemplate` + 两个 Listener 仍开。这种不一致本身就是隐患，且任何人后续"补关 redisTemplate 的 typing"都会因 `instanceof` 失败而**静默破坏** P6 与 AI 通知——现已在同一轮一次性收尾。
 
 ---
 
-## 🟡 S3 — 默认管理员密码强制改密（软拦截，需确认硬阻断）
+## 🟡 S3 — 默认管理员密码强制改密（已完成 ✅ 硬阻断）
 
 - **问题**：`DataInitializer` 默认管理员密码硬编码 `123456`，且仅软拦截。
 - **位置**：`config/DataInitializer.java`、`system/entity/SysUser.java`、`system/service/UserService.java`、`system/service/AuthService.java`（login）、`resources/schema.sql` + `resources/db/init.sql`
@@ -139,8 +134,9 @@
   - `sys_user` 加 `must_change_password` 列（schema 建表 + 幂等 `ALTER TABLE ADD COLUMN IF NOT EXISTS` 兼容老库）；`DataInitializer` 播种 admin 带标记 `1`；登录在 `LoginResult.userInfo` 返回该标记；`UserService` 改密成功清 0（单测 `AuthServiceTest`/`UserServiceTest` 已覆盖，**13/13 绿**）。
 - **缺口（软拦截）**：`AuthService.login` 仍 `StpUtil.login(user.getId())` 无条件放行——仅把标记回传前端由路由守卫拦截。非配合客户端可凭 `123456` 拿到有效 token。
 - **做法（二选一，建议 A）**：
-  1. **A（真·强制）**：`AuthService.login` 在密码校验通过后、调用 `StpUtil.login` 前，若 `user.getMustChangePassword() == 1`，抛 `BusinessException("请先修改默认密码")` 或仅 `StpUtil.login` 不写会话、改发只能调改密接口的受限 token。配合前端拦截页。
+  1. **A（真·强制）**：`AuthService.login` 密码校验通过后、调用 `StpUtil.login` 后，若 `user.getMustChangePassword() == 1` 向 Sa-Token 会话写 `mustChangePassword` 标记；`AuthInterceptor` 对带标记会话仅放行 `/user/change-password`、`/user/info`、`/auth/logout`，其余受保护接口一律 403；`UserService.changePassword` 改密成功同步清会话标记。配合前端拦截页。
   2. **B（维持软拦截）**：确认前端路由守卫已接 `userInfo.mustChangePassword`，在 `==1` 时强制跳 `/system/change-password` 且禁止其它导航；并在文档标注此为软约束、信任前端。
+- **落地**：已选 **A** 完成硬阻断（见进度跟踪），前端守卫/登录页/LayoutHeader 原有软拦截保留作为第一道（正常客户端到不了 403 分支），后端拦截为兜底。
 
 ---
 
@@ -197,9 +193,9 @@
 ## 实施顺序建议（更新）
 
 - ✅ **第一轮（已完成 commit `82157b7`）**：P1 + P2 + P3 + P4 + P5 + P6
-- 🟡 **第二轮（安全与连接池，部分完成）**：
+- 🟡 **第二轮（安全与连接池，已完成）**：
   - ✅ S5 BlockAttack 拦截器 / P7 HikariCP 连接池上调 / P8 SSE 超时收紧
-  - ⚠️ S2 半完成（cacheManager 已关，redisTemplate+pub/sub 仍开 → 需 S2 收尾）
-  - ⚠️ S3 软拦截（标记+改密清 0 已就绪，登录未硬阻断 → 需确认硬阻断或前端拦截）
-- ⬜ **第三轮（S2 收尾 + 清理）**：S2 收尾（pub/sub 改类型化序列化）→ S3 硬阻断确认 → S1 CORS 白名单 → S4 本地密码改环境变量 → P10 散落 class 清理
+  - ✅ S2 全部收尾（cacheManager + redisTemplate 关 typing，pub/sub 改类型化序列化）
+  - ✅ S3 硬阻断（登录会话标记 + AuthInterceptor 拦截 + 改密清标记）
+- ⬜ **第三轮（清理）**：S1 CORS 白名单 → S4 本地密码改环境变量 → P10 散落 class 清理
 - ⬜ **P9（单独排期）**：AiChatService SSE 编排补集成测试与超时背压（最大未知面，不阻塞前序）

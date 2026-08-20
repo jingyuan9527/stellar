@@ -33,13 +33,19 @@ public class RedisConfig {
 
     /**
      * 业务 RedisTemplate：String key + JSON value，供直接操作 Redis 使用。
+     * <p>value 序列化器与 {@link #cacheManager} 一致<b>关闭 default typing</b>（S2 安全收敛）：
+     * 不写 {@code @class} 类型标记。pub/sub 通道改由各 Listener 用类型化
+     * {@code Jackson2JsonRedisSerializer(消息类.class)} 直读（见 CacheInvalidationListener/AiNotifyListener），
+     * 本模板的 payload 为纯 JSON 即可兼容，无需依赖多态类型信息。
      */
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory factory) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(factory);
         StringRedisSerializer stringSerializer = new StringRedisSerializer();
-        GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer();
+        GenericJackson2JsonRedisSerializer jsonSerializer = GenericJackson2JsonRedisSerializer.builder()
+                .objectMapper(new ObjectMapper().registerModule(new JavaTimeModule()))
+                .build();
         template.setKeySerializer(stringSerializer);
         template.setHashKeySerializer(stringSerializer);
         template.setValueSerializer(jsonSerializer);

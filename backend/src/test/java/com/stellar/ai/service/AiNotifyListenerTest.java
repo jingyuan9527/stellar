@@ -7,7 +7,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.connection.Message;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 
 import java.nio.charset.StandardCharsets;
 
@@ -15,8 +15,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * {@link AiNotifyListener} 单测：反序列化为 AiNotifyMessage 时推送 SSE，
- * 其他类型不推送，反序列化异常吞掉。
+ * {@link AiNotifyListener} 单测：类型化序列化反序列化为 AiNotifyMessage 时推送 SSE，
+ * 非 AiNotifyMessage 载荷/非法 JSON 反序列化异常吞掉。
  */
 @ExtendWith(MockitoExtension.class)
 class AiNotifyListenerTest {
@@ -27,7 +27,8 @@ class AiNotifyListenerTest {
     @Mock
     Message redisMessage;
 
-    private final GenericJackson2JsonRedisSerializer serializer = new GenericJackson2JsonRedisSerializer();
+    private final Jackson2JsonRedisSerializer<AiNotifyMessage> serializer =
+            new Jackson2JsonRedisSerializer<>(AiNotifyMessage.class);
 
     @Test
     void onMessage_AiNotifyMessage_推送SSE() {
@@ -41,7 +42,7 @@ class AiNotifyListenerTest {
 
     @Test
     void onMessage_非AiNotifyMessage_不推送() {
-        when(redisMessage.getBody()).thenReturn(serializer.serialize("hello"));
+        when(redisMessage.getBody()).thenReturn("\"hello\"".getBytes(StandardCharsets.UTF_8));
 
         new AiNotifyListener(sseEmitterManager).onMessage(redisMessage, null);
 

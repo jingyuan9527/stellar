@@ -1,6 +1,10 @@
 package com.stellar.interceptor;
 
+import cn.dev33.satoken.session.SaSession;
 import cn.dev33.satoken.stp.StpUtil;
+import com.stellar.common.BusinessException;
+import com.stellar.common.ResultCode;
+import com.stellar.common.SecurityConstants;
 import com.stellar.common.annotation.PublicAccess;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -76,9 +80,54 @@ class AuthInterceptorTest {
     void preHandle_无注解_要求登录_调用checkLogin() {
         when(handlerMethod.getMethodAnnotation(PublicAccess.class)).thenReturn(null);
         doReturn(Object.class).when(handlerMethod).getBeanType();
+        SaSession session = mock(SaSession.class);
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getSession).thenReturn(session);
             assertTrue(interceptor.preHandle(request, response, handlerMethod));
             stp.verify(StpUtil::checkLogin);
+        }
+    }
+
+    @Test
+    void preHandle_强制改密未完成_拦截受保护接口() {
+        when(handlerMethod.getMethodAnnotation(PublicAccess.class)).thenReturn(null);
+        doReturn(Object.class).when(handlerMethod).getBeanType();
+        SaSession session = mock(SaSession.class);
+        when(session.get(SecurityConstants.SESSION_KEY_MUST_CHANGE_PASSWORD)).thenReturn(Boolean.TRUE);
+        when(request.getRequestURI()).thenReturn("/system/monitor");
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getSession).thenReturn(session);
+            BusinessException e = assertThrows(BusinessException.class,
+                    () -> interceptor.preHandle(request, response, handlerMethod));
+            assertEquals(ResultCode.FORBIDDEN.getCode(), e.getCode());
+            assertEquals("首次登录需先修改默认密码", e.getMessage());
+        }
+    }
+
+    @Test
+    void preHandle_强制改密未完成_改密接口放行() {
+        when(handlerMethod.getMethodAnnotation(PublicAccess.class)).thenReturn(null);
+        doReturn(Object.class).when(handlerMethod).getBeanType();
+        SaSession session = mock(SaSession.class);
+        when(session.get(SecurityConstants.SESSION_KEY_MUST_CHANGE_PASSWORD)).thenReturn(Boolean.TRUE);
+        when(request.getRequestURI()).thenReturn("/user/change-password");
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getSession).thenReturn(session);
+            assertTrue(interceptor.preHandle(request, response, handlerMethod));
+            stp.verify(StpUtil::checkLogin);
+        }
+    }
+
+    @Test
+    void preHandle_强制改密未完成_取用户信息放行() {
+        when(handlerMethod.getMethodAnnotation(PublicAccess.class)).thenReturn(null);
+        doReturn(Object.class).when(handlerMethod).getBeanType();
+        SaSession session = mock(SaSession.class);
+        when(session.get(SecurityConstants.SESSION_KEY_MUST_CHANGE_PASSWORD)).thenReturn(Boolean.TRUE);
+        when(request.getRequestURI()).thenReturn("/user/info");
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getSession).thenReturn(session);
+            assertTrue(interceptor.preHandle(request, response, handlerMethod));
         }
     }
 

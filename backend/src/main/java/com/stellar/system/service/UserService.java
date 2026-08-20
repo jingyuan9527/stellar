@@ -2,6 +2,7 @@ package com.stellar.system.service;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.stellar.common.BusinessException;
+import com.stellar.common.SecurityConstants;
 import com.stellar.system.dto.ChangePasswordRequest;
 import com.stellar.system.entity.SysUser;
 import com.stellar.system.mapper.SysUserMapper;
@@ -47,6 +48,8 @@ public class UserService {
         update.setMustChangePassword(0);
         update.setUpdateTime(LocalDateTime.now());
         sysUserMapper.updateById(update);
+        // 同步清除当前会话的强制改密拦截标记（DB 已清，session 标记不清则本会话仍被拦截）
+        StpUtil.getSession().delete(SecurityConstants.SESSION_KEY_MUST_CHANGE_PASSWORD);
     }
 
     /**

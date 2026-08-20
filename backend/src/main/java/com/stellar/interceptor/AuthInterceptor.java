@@ -1,6 +1,9 @@
 package com.stellar.interceptor;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.stellar.common.BusinessException;
+import com.stellar.common.ResultCode;
+import com.stellar.common.SecurityConstants;
 import com.stellar.common.annotation.PublicAccess;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -15,6 +18,8 @@ import org.springframework.web.servlet.HandlerInterceptor;
  *   <li>命中 {@link PublicAccess}（方法或类级）：游客与登录用户均放行，跳过登录校验。</li>
  *   <li>未命中：要求 Sa-Token 登录，未登录抛 {@code NotLoginException}，
  *       由 {@code GlobalExceptionHandler} 转为统一 401 envelope。</li>
+ *   <li>已登录但会话带「强制改密」标记（S3：默认口令首登未改密）：除改密/登出/取用户信息外
+ *       其余受保护接口一律 403 拦截，防止非配合客户端凭默认口令访问业务功能。</li>
  *   <li>非 Controller 方法（静态资源等）：直接放行，交由后续过滤器/处理器处理。</li>
  * </ul>
  *
@@ -37,8 +42,24 @@ public class AuthInterceptor implements HandlerInterceptor {
             }
             // 其余接口要求登录；未登录抛 NotLoginException，由全局异常处理器统一处理
             StpUtil.checkLogin();
+            // S3 真·强制改密：会话标记未清前，仅放行改密/登出/取用户信息，其余受保护接口一律 403
+            if (Boolean.TRUE.equals(StpUtil.getSession().get(SecurityConstants.SESSION_KEY_MUST_CHANGE_PASSWORD))
+                    && !isAllowedDuringForcedChange(request.getRequestURI())) {
+                log.warn("[鉴权] 强制改密未完成，拦截受保护接口: {} {}", request.getMethod(), request.getRequestURI());
+                throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "首次登录需先修改默认密码");
+            }
         }
         return true;
+    }
+
+    /** 强制改密状态下仍允许访问的接口路径（改密/取当前用户/登出），其余受保护接口一律拦截 */
+    private boolean isAllowedDuringForcedChange(String uri) {
+        for (String path : SecurityConstants.FORCED_CHANGE_PASSWORD_ALLOWED_PATHS) {
+            if (path.equals(uri)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

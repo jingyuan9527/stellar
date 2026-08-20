@@ -3,6 +3,7 @@ package com.stellar.system.service;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.stellar.common.BusinessException;
+import com.stellar.common.SecurityConstants;
 import com.stellar.interceptor.WebUtils;
 import com.stellar.system.dto.LoginRequest;
 import com.stellar.system.dto.LoginResult;
@@ -66,6 +67,10 @@ public class AuthService {
         clearFail(username);
         clearIpAttempt(ip);
         StpUtil.login(user.getId());
+        // S3 真·强制：默认口令首登标记未清前，会话打标由 AuthInterceptor 拦截非改密/登出/取信息外的所有受保护接口
+        if (user.getMustChangePassword() != null && user.getMustChangePassword() == 1) {
+            StpUtil.getSession().set(SecurityConstants.SESSION_KEY_MUST_CHANGE_PASSWORD, Boolean.TRUE);
+        }
         LoginResult result = new LoginResult();
         result.setToken(StpUtil.getTokenValue());
         result.setUserInfo(user);

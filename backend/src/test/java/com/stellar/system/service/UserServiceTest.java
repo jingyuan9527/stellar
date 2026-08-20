@@ -1,7 +1,9 @@
 package com.stellar.system.service;
 
+import cn.dev33.satoken.session.SaSession;
 import cn.dev33.satoken.stp.StpUtil;
 import com.stellar.common.BusinessException;
+import com.stellar.common.SecurityConstants;
 import com.stellar.system.dto.ChangePasswordRequest;
 import com.stellar.system.entity.SysUser;
 import com.stellar.system.mapper.SysUserMapper;
@@ -98,6 +100,8 @@ class UserServiceTest {
             when(sysUserMapper.selectById(1L)).thenReturn(u);
             when(passwordEncoder.matches("old", "old-hash")).thenReturn(true);
             when(passwordEncoder.encode("newpass")).thenReturn("new-hash");
+            SaSession session = mock(SaSession.class);
+            stp.when(StpUtil::getSession).thenReturn(session);
 
             service.changePassword(req);
 
@@ -106,6 +110,8 @@ class UserServiceTest {
             assertEquals(1L, cap.getValue().getId());
             assertEquals("new-hash", cap.getValue().getPassword());
             assertEquals(Integer.valueOf(0), cap.getValue().getMustChangePassword());
+            // S3：改密成功同步清除会话内的强制改密拦截标记
+            verify(session).delete(SecurityConstants.SESSION_KEY_MUST_CHANGE_PASSWORD);
         }
     }
 

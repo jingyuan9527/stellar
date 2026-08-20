@@ -1,8 +1,10 @@
 package com.stellar.system.service;
 
+import cn.dev33.satoken.session.SaSession;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.stellar.common.BusinessException;
+import com.stellar.common.SecurityConstants;
 import com.stellar.system.dto.LoginRequest;
 import com.stellar.system.dto.LoginResult;
 import com.stellar.system.entity.SysUser;
@@ -120,17 +122,36 @@ class AuthServiceTest {
         when(sysUserMapper.selectOne(any(Wrapper.class))).thenReturn(u);
         when(passwordEncoder.matches(anyString(), anyString())).thenReturn(true);
 
+        SaSession session = mock(SaSession.class);
         LoginRequest request = req("admin", "p");
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(() -> StpUtil.getTokenValue()).thenReturn("tok-123");
+            stp.when(StpUtil::getSession).thenReturn(session);
             LoginResult result = service.login(request, httpRequest);
             stp.verify(() -> StpUtil.login(1L));
             assertEquals("tok-123", result.getToken());
             assertEquals("admin", result.getUserInfo().getUsername());
             assertEquals(Integer.valueOf(1), result.getUserInfo().getMustChangePassword());
+            // S3 真·强制：首登标记未清，会话写入拦截标记
+            verify(session).set(SecurityConstants.SESSION_KEY_MUST_CHANGE_PASSWORD, Boolean.TRUE);
         }
         verify(stringRedisTemplate).delete(AuthService.LOGIN_FAIL_PREFIX + "admin");
         verify(stringRedisTemplate).delete(AuthService.LOGIN_ATTEMPT_PREFIX + "1.2.3.4");
+    }
+
+    @Test
+    void login_成功_无强制改密标记_不写会话标记() {
+        SysUser u = user(1L, "admin", "hash", 1);
+        u.setMustChangePassword(0);
+        when(sysUserMapper.selectOne(any(Wrapper.class))).thenReturn(u);
+        when(passwordEncoder.matches(anyString(), anyString())).thenReturn(true);
+
+        SaSession session = mock(SaSession.class);
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getSession).thenReturn(session);
+            service.login(req("admin", "p"), httpRequest);
+            verify(session, never()).set(SecurityConstants.SESSION_KEY_MUST_CHANGE_PASSWORD, Boolean.TRUE);
+        }
     }
 
     @Test
