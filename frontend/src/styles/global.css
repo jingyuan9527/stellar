@@ -8,7 +8,7 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -20,6 +20,49 @@ body {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+/* 键盘可达性：所有可聚焦元素统一可见描边（点击不显示，仅键盘/程序化聚焦） */
+:focus-visible {
+  outline: 2px solid var(--c-info, #2080f0);
+  outline-offset: 2px;
+}
+
+/* 区块标题：全站统一基类，各页仅保留间距覆盖 */
+.section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--c-text-1);
+  padding-left: 4px;
+  margin: 0;
+}
+
+/* 错误提示条（收敛自各页自造 .alert/.bubble.error）：随语义色自适应深浅主题 */
+.alert-error {
+  background: var(--c-error-bg);
+  color: var(--c-error);
+  border: 1px solid color-mix(in srgb, var(--c-error) 25%, transparent);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 骨架屏：行内高亮呼吸动效，配合 SkeletonList 使用 */
+@keyframes skeleton-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.skeleton-line {
+  border-radius: var(--r-sm);
+  background: var(--c-fill-2);
+  animation: skeleton-blink 1.2s ease-in-out infinite;
+}
+
+/* 列表 stagger 入场：子项依次淡入上浮 */
+@keyframes list-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 ::-webkit-scrollbar {
@@ -34,4 +77,33 @@ a {
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* 页面切换过渡（BasicLayout RouterView 包裹的 Transition） */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line {
+    animation: none;
+  }
+  .page-enter-active,
+  .page-leave-active {
+    transition: none;
+  }
+  .page-enter-from,
+  .page-leave-to {
+    opacity: 1;
+    transform: none;
+  }
 }

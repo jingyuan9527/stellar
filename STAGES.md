@@ -11,6 +11,16 @@
 
 > 随实现推进，对应行为规范同步补写进本文档，避免文档超前于代码（铁律8）。
 
+- **阶段 16（已实现）** 设计系统第二轮收口（在 P0-P3 token 化基础上继续）：
+  - **语义色 token 补全**：`tokens.css` 新增 `--c-success`/`--c-warning`/`--c-error` + `--c-success-bg`/`--c-warning-bg`/`--c-error-bg`（`color-mix` 随语义色自适应深浅主题，暗色下三色提亮保 AA 对比）；新增 `--c-brand-bg`/`--c-info-bg` 柔化底。全站裸 hex 状态色（math 反馈/进度/排行榜前三、chat 错误气泡/删除悬停、memos 同步失败/图片角标/搜索高亮、monitor 磁盘环/HTTP 4xx·5xx/连接池预警/`.danger`/`.alert`、menu-visibility 公开项）全部替换为语义 token；`chartColors.ts` 运行时读取补 `success/warning/error` 供 echarts 用。`ThemeDrawer` 预设色板 / `store/theme` 默认品牌色 / favicon 为有意保留的品牌默认值（非语义用法）。
+  - **主色认知统一**：聊天气泡/答题进度条/会话选中态/作答区底统一到**品牌绿 `--c-brand`**（用户气泡 `rgba(100,150,255,.15)`→`--c-brand-bg`、math 答题进度 `--c-info`→`--c-brand`、answer-area 蓝底→`--c-brand-bg`、session-item.active 蓝底→`--c-brand-bg`）；链接类一律 `--c-info`（chat/sessions 参考链接 `#2d8cf0`→`--c-info`、ref 胶囊底→`--c-info-bg`、memos 图片角标改 `--c-warning`、footer-link hover 改 `--c-info`）。
+  - **图表语言**：dashboard 已在 P0-P3 接入 `components/Chart.vue` + `getChartColors()`，本阶段无改动（核实一致）。
+  - **`.section-title` 全局化**：基类提入 `global.css`（16px/700/`--c-text-1`/`padding-left:4px`），dashboard/monitor/about/ThemeDrawer/BackgroundTab 删除各自重复定义，仅留间距覆盖。
+  - **空/加载/错误态收敛**：新增全局 `.alert-error` 类（monitor 连接池预警改用，替代自造 `.alert` 样式）；新增 `components/SkeletonList.vue` 骨架组件替换 menu-visibility「加载中…」文本态与 sessions 抽屉加载文本；空态统一 NEmpty。
+  - **暗色对比 + 键盘可达**：弱文本从 `opacity: .5~.75` 压字改 `--c-text-2`/`--c-text-3` 明确着色（math/chat/sessions/memos/monitor/about/BackgroundTab/menu-visibility 全量）；全局 `:focus-visible` 描边（`--c-info` 2px + offset）；自定义可点项补键盘可达：chat session-item、memos card-content 加 `role="button"`+`tabindex="0"`+Enter 触发。
+  - **动效系统化**：`BasicLayout` 两个 RouterView 包 `<Transition name="page" mode="out-in">`（fade+8px 上浮 0.18s，`prefers-reduced-motion` 关闭）；math 排行榜列表 `list-in` stagger 入场（idx×30ms 延迟）。
+  - **杂项**：圆角阶梯重定义为 `--r-xs:4 / --r-sm:6 / --r-md:8 / --r-lg:12 / --r-xl:16`，全站裸 6/8/12px 归一；字体栈 token 化（`--font-sans` 中英混排 + `--mono-font`，monitor JVM 参数等 mono 场景改用）；404 页重构为落地页 Hero 同款视觉（渐变底 + 品牌/信息双辉光 + 圆角 `--r-xl` + 返回首页/上一页按钮）。
+
 - **阶段 15（已实现）** 备忘同步定时任务 + 同步状态记录：`MemosSyncScheduler`（`com.stellar.memos.service`）`@Scheduled(cron="0 0 0/4 * * ?")` 每 4 小时整点触发。`MemosService` 新增 `syncPullManual`/`scheduledSyncPull`（手动与定时共用 `doRecordedPull` 核心：Redis SETNX 互斥锁 `stellar:memos:sync:lock`（TTL 30min 兜底，正常完成 finally 主动释放）防定时/手动并发重叠——定时抢锁失败跳过本次、手动抢锁失败抛「同步正在进行中」；未配置域名/Token 记 `skipped`（定时静默返回、手动抛提示）；`syncPull` 返回 errors>0 记 `partial`；异常记 `failed` 带 errorMessage）。每次同步落一条 `memos_sync_log`（trigger_type scheduled/manual · status success/partial/failed/skipped · fetched/created/updated/marked_deleted/errors/duration_ms/error_message/create_time），落完顺带清理 3 天前旧记录（`trimOldSyncLogs`）。`POST /memos/pull` 改走 `syncPullManual`（手动同样落状态记录），新增 `GET /memos/sync-log/page`（最近 3 天倒序分页）+ `GET /memos/sync-log/latest`（最近一条，无记录返回 null）。前端备忘页工具条下加「同步状态」卡（最近一次：触发/状态/相对时间/耗时/增改删数/失败数/失败原因 + 「展开记录」看最近 3 天明细 NDataTable），点击「立即同步」后刷新状态。新增测试：`MemosServiceTest` 补 8 条（手动成功 success+释放锁+清理 / 未配置 skipped 手动抛+定时静默 / 锁被占用手动抛+定时跳过不落库 / errors>0 partial / 拉取失败 failed 定时吞+手动抛 / pageSyncLog 窗口倒序 / latestSyncLog 有/无记录），`MemosControllerTest` 补 sync-log/page + latest 透传、pull 改断言 `syncPullManual`。
 
 - **阶段 14（已实现）** RAG 检索管线修复与增强（P1-P4 全量落地，阶段13 的后续迭代）：

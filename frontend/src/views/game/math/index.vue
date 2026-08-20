@@ -404,7 +404,7 @@ onBeforeUnmount(() => {
         </template>
         <NEmpty v-if="!leaderboard.length" description="暂无数据，快来成为第一名！" />
         <div v-else class="rank-list">
-          <div v-for="(item, idx) in leaderboard" :key="item.id" class="rank-item">
+          <div v-for="(item, idx) in leaderboard" :key="item.id" class="rank-item" :style="{ animationDelay: `${idx * 30}ms` }">
             <span class="rank-no" :class="{ top: idx < 3 }">{{ idx + 1 }}</span>
             <span class="rank-name">{{ item.playerName }}</span>
             <span class="rank-score">{{ item.score }} 分</span>
@@ -552,7 +552,7 @@ onBeforeUnmount(() => {
         </template>
         <NEmpty v-if="!leaderboard.length" description="暂无数据" />
         <div v-else class="rank-list">
-          <div v-for="(item, idx) in leaderboard" :key="item.id" class="rank-item">
+          <div v-for="(item, idx) in leaderboard" :key="item.id" class="rank-item" :style="{ animationDelay: `${idx * 30}ms` }">
             <span class="rank-no" :class="{ top: idx < 3 }">{{ idx + 1 }}</span>
             <span class="rank-name">{{ item.playerName }}</span>
             <span class="rank-score">{{ item.score }} 分</span>
@@ -588,14 +588,14 @@ onBeforeUnmount(() => {
 }
 
 .rules {
-  opacity: 0.75;
+  color: var(--c-text-2);
   line-height: 1.9;
   font-size: 14px;
 }
 .rules p { margin: 0; }
 
 .tip {
-  color: #f0a020;
+  color: var(--c-warning);
   font-size: 13px;
   margin: 0;
 }
@@ -625,17 +625,18 @@ onBeforeUnmount(() => {
   gap: 12px;
   align-items: center;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   font-size: 13px;
   background: var(--c-fill-2);
+  animation: list-in 0.3s ease both;
 }
 .rank-item:hover { background: var(--c-fill-2); }
 .rank-no {
   font-weight: 700;
   text-align: center;
-  opacity: 0.6;
+  color: var(--c-text-3);
 }
-.rank-no.top { color: #f0a020; opacity: 1; }
+.rank-no.top { color: var(--c-warning); }
 .rank-name {
   font-weight: 600;
   overflow: hidden;
@@ -643,9 +644,9 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .rank-score { color: var(--c-brand); font-weight: 600; }
-.rank-time { opacity: 0.7; }
-.rank-acc { opacity: 0.7; }
-.rank-date { opacity: 0.5; font-size: 12px; }
+.rank-time { color: var(--c-text-3); }
+.rank-acc { color: var(--c-text-3); }
+.rank-date { color: var(--c-text-3); font-size: 12px; }
 
 /* 游戏中 */
 .game-header {
@@ -656,14 +657,14 @@ onBeforeUnmount(() => {
   font-size: 16px;
   font-weight: 600;
 }
-.score { color: #18a058; }
+.score { color: var(--c-brand); }
 
 .progress-block { margin-bottom: 12px; }
 .progress-label {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
-  opacity: 0.7;
+  color: var(--c-text-3);
   margin-bottom: 4px;
 }
 .progress-bar {
@@ -678,8 +679,8 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   transition: width 0.3s ease;
 }
-.progress-fill.answer { background: var(--c-info); }
-.progress-fill.countdown { background: #f0a020; }
+.progress-fill.answer { background: var(--c-brand); }
+.progress-fill.countdown { background: var(--c-warning); }
 
 .latest-question {
   text-align: center;
@@ -691,18 +692,18 @@ onBeforeUnmount(() => {
 .latest-question.placeholder {
   font-size: 16px;
   font-weight: 400;
-  opacity: 0.6;
+  color: var(--c-text-3);
 }
 
 .answer-area {
   margin-top: 16px;
   padding: 16px;
-  border-radius: 12px;
-  background: rgba(32, 128, 240, 0.08);
+  border-radius: var(--r-lg);
+  background: var(--c-brand-bg);
   text-align: center;
 }
 .answer-hint { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
-.answer-sub { font-size: 12px; opacity: 0.6; margin: 0 0 12px; }
+.answer-sub { font-size: 12px; color: var(--c-text-3); margin: 0 0 12px; }
 .answer-form {
   display: flex;
   gap: 8px;
@@ -714,21 +715,21 @@ onBeforeUnmount(() => {
 .wait-hint {
   text-align: center;
   padding: 24px;
-  opacity: 0.6;
+  color: var(--c-text-3);
   font-size: 14px;
 }
 
 .feedback {
   margin-top: 16px;
   padding: 10px 16px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   font-size: 14px;
   text-align: center;
 }
-.feedback.success { background: rgba(24, 160, 88, 0.12); color: #18a058; }
+.feedback.success { background: var(--c-success-bg); color: var(--c-success); }
 .feedback.error {
-  background: rgba(208, 48, 80, 0.12);
-  color: #d03050;
+  background: var(--c-error-bg);
+  color: var(--c-error);
   animation: shake 0.4s;
 }
 @keyframes shake {
@@ -764,14 +765,14 @@ onBeforeUnmount(() => {
 .stat-item {
   text-align: center;
   padding: 16px;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   background: var(--c-fill-2);
 }
-.stat-label { display: block; font-size: 12px; opacity: 0.6; margin-bottom: 4px; }
+.stat-label { display: block; font-size: 12px; color: var(--c-text-3); margin-bottom: 4px; }
 .stat-value { font-size: 24px; font-weight: 800; }
 .stat-value.score { color: var(--c-brand); }
 .stat-value.accuracy { color: var(--c-info); }
-.stat-value.time { color: #f0a020; }
+.stat-value.time { color: var(--c-warning); }
 
 .details { margin-bottom: 20px; }
 .details-title { font-size: 16px; font-weight: 700; margin: 0 0 12px; }
@@ -785,7 +786,7 @@ onBeforeUnmount(() => {
 }
 .detail-q { flex: 1; }
 .detail-a { font-weight: 600; }
-.detail-correct { opacity: 0.6; font-size: 12px; }
+.detail-correct { color: var(--c-text-3); font-size: 12px; }
 .detail-icon { font-size: 16px; }
 
 @media (max-width: 768px) {
@@ -800,5 +801,10 @@ onBeforeUnmount(() => {
     padding: 6px 8px;
   }
   .rank-acc, .rank-date { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rank-item { animation: none; }
+  .feedback.error { animation: none; }
 }
 </style>

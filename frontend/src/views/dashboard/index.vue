@@ -375,10 +375,6 @@ onMounted(loadStats)
 }
 
 .section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--c-text-2);
-  padding-left: 4px;
   margin-top: 4px;
 }
 
@@ -394,7 +390,7 @@ onMounted(loadStats)
   justify-content: center;
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   background: var(--c-fill-2);
   flex-shrink: 0;
 }
@@ -429,7 +425,7 @@ onMounted(loadStats)
   gap: 4px;
   padding: 10px 12px;
   background: var(--c-fill-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 
 .quality-label {
@@ -461,7 +457,7 @@ onMounted(loadStats)
   gap: 4px;
   padding: 12px;
   background: var(--c-fill-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 
 .file-kpi-label {

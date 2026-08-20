@@ -437,7 +437,7 @@ const columns: DataTableColumns<MemosNote> = [
           { default: () => h(iconMap[ic]) })
       return h('span', { class: 'content-cell', title: row.content }, [
         h('span', { class: 'content-text' }, highlightContent(row.content, query.keyword)),
-        hasImage ? icon('image', '#f0a020') : null,
+        hasImage ? icon('image', 'var(--c-warning)') : null,
         hasLink ? icon('link', 'var(--c-info)') : null,
       ])
     },
@@ -657,7 +657,7 @@ onMounted(() => {
             <div class="card-head">
               <NCheckbox :checked="checkedKeys.includes(row.id)"
                 @update:checked="(v: boolean) => toggleCheck(row.id, v)" class="card-check" />
-              <div class="card-content" @click="viewDetail(row)">
+              <div class="card-content" role="button" tabindex="0" @click="viewDetail(row)" @keydown.enter="viewDetail(row)">
                 <template v-if="row.content">
                   <span class="card-content-text" :title="row.content">
                     <template v-for="(p, i) in splitHighlight(row.content, query.keyword)" :key="i">
@@ -665,7 +665,7 @@ onMounted(() => {
                       <template v-else>{{ p.text }}</template>
                     </template>
                   </span>
-                  <NIcon v-if="hasContentImage(row.content)" size="14" class="card-icon" style="color:#f0a020">
+                  <NIcon v-if="hasContentImage(row.content)" size="14" class="card-icon" style="color:var(--c-warning)">
                     <component :is="iconMap.image" />
                   </NIcon>
                   <NIcon v-if="hasContentLink(row.content)" size="14" class="card-icon" style="color:var(--c-info)">
@@ -848,26 +848,26 @@ onMounted(() => {
 
 .sync-summary-time,
 .sync-summary-counts {
-  opacity: 0.75;
+  color: var(--c-text-2);
 }
 
 .sync-errors {
-  color: #d03050;
+  color: var(--c-error);
   font-weight: 600;
 }
 
 .sync-error-msg {
-  color: #d03050;
+  color: var(--c-error);
 }
 
 .sync-empty {
   font-size: 13px;
-  opacity: 0.6;
+  color: var(--c-text-3);
 }
 
 .sync-log-count {
   font-size: 12px;
-  opacity: 0.6;
+  color: var(--c-text-3);
 }
 
 .sync-log-hint {
@@ -875,7 +875,7 @@ onMounted(() => {
 }
 
 .muted {
-  opacity: 0.6;
+  color: var(--c-text-3);
   font-size: 12px;
 }
 
@@ -926,14 +926,14 @@ onMounted(() => {
 
 .note-card {
   border: 1px solid rgba(128, 128, 128, 0.25);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   padding: 10px 12px;
   background: rgba(128, 128, 128, 0.06);
   transition: border-color 0.2s, background-color 0.2s;
 }
 
 .note-card:hover {
-  border-color: rgba(32, 128, 240, 0.5);
+  border-color: var(--c-info);
   background: rgba(128, 128, 128, 0.1);
 }
 
@@ -994,7 +994,7 @@ onMounted(() => {
 
 .card-time {
   font-size: 12px;
-  opacity: 0.6;
+  color: var(--c-text-3);
   margin-left: auto;
 }
 
@@ -1044,7 +1044,7 @@ onMounted(() => {
 
 .tag-model-label {
   font-size: 13px;
-  opacity: 0.8;
+  color: var(--c-text-2);
   white-space: nowrap;
   width: 60px;
   text-align: right;
@@ -1052,7 +1052,7 @@ onMounted(() => {
 
 .rag-status-time {
   font-size: 12px;
-  opacity: 0.6;
+  color: var(--c-text-3);
 }
 .content-cell {
   display: flex;
@@ -1065,7 +1065,7 @@ onMounted(() => {
   white-space: nowrap;
 }
 .search-hit {
-  background: rgba(240, 160, 32, 0.28);
+  background: var(--c-warning-bg);
   color: inherit;
   border-radius: 2px;
   padding: 0 1px;
@@ -1099,13 +1099,13 @@ onMounted(() => {
 .markdown-body :deep(code) {
   background: rgba(128, 128, 128, 0.15);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   font-size: 12px;
 }
 .markdown-body :deep(pre) {
   background: rgba(128, 128, 128, 0.1);
   padding: 10px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   overflow-x: auto;
 }
 .markdown-body :deep(pre code) {
@@ -1123,7 +1123,7 @@ onMounted(() => {
 }
 .markdown-body :deep(img) {
   max-width: 100%;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .markdown-body :deep(table) {
   border-collapse: collapse;

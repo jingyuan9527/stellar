@@ -65,7 +65,9 @@ onBeforeUnmount(() => {
         :native-scrollbar="false"
       >
         <RouterView v-slot="{ Component }">
-          <component :is="Component" :key="refreshKey" />
+          <Transition name="page" mode="out-in">
+            <component :is="Component" :key="refreshKey" />
+          </Transition>
         </RouterView>
         <NBackTop :right="isMobile ? 16 : 40" :bottom="isMobile ? 16 : 40" />
       </NLayoutContent>
@@ -96,7 +98,9 @@ onBeforeUnmount(() => {
           :native-scrollbar="false"
         >
           <RouterView v-slot="{ Component }">
-            <component :is="Component" :key="refreshKey" />
+            <Transition name="page" mode="out-in">
+              <component :is="Component" :key="refreshKey" />
+            </Transition>
           </RouterView>
           <NBackTop :right="isMobile ? 16 : 40" :bottom="isMobile ? 16 : 40" />
         </NLayoutContent>

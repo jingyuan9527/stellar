@@ -137,9 +137,6 @@ const solidItems = computed(() => gradients.filter((g) => g.titleColor))
 }
 
 .section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--c-text-2);
   margin-bottom: 8px;
 }
 
@@ -151,7 +148,7 @@ const solidItems = computed(() => gradients.filter((g) => g.titleColor))
 
 .swatch {
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   border: 1px solid rgba(128, 128, 128, 0.2);
   background: transparent;
   padding: 6px;
@@ -168,18 +165,18 @@ const solidItems = computed(() => gradients.filter((g) => g.titleColor))
 .swatch-preview {
   height: 40px;
   width: 100%;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   border: 1px solid rgba(128, 128, 128, 0.15);
 }
 
 .swatch-name {
   font-size: 11px;
   margin-top: 4px;
-  opacity: 0.8;
+  color: var(--c-text-2);
 }
 
 .hint {
   font-size: 11px;
-  opacity: 0.5;
+  color: var(--c-text-3);
 }
 </style>

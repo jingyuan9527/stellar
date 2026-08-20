@@ -192,7 +192,7 @@ function updateCharts() {
   const cpu = o.system.processCpuUsage
   const cpuPct = cpu < 0 ? 0 : Math.min(100, Math.round(cpu * 100))
   cpuChart?.setOption(ringOption(cpuPct, c.brand, '进程 CPU'), true)
-  diskChart?.setOption(ringOption(diskUsedPercent.value, '#f0a020', '磁盘使用率'), true)
+  diskChart?.setOption(ringOption(diskUsedPercent.value, c.warning, '磁盘使用率'), true)
 
   httpChart?.setOption(
     {
@@ -206,8 +206,8 @@ function updateCharts() {
           barWidth: 36,
           data: [
             { value: o.http.status2xx, itemStyle: { color: c.brand } },
-            { value: o.http.status4xx, itemStyle: { color: '#f0a020' } },
-            { value: o.http.status5xx, itemStyle: { color: '#d03050' } },
+            { value: o.http.status4xx, itemStyle: { color: c.warning } },
+            { value: o.http.status5xx, itemStyle: { color: c.error } },
           ],
         },
       ],
@@ -230,7 +230,7 @@ function updateCharts() {
             { value: o.hikariPool.activeConnections, itemStyle: { color: c.info } },
             {
               value: o.hikariPool.pendingConnections,
-              itemStyle: { color: o.hikariPool.pendingConnections > 0 ? '#d03050' : c.brand },
+              itemStyle: { color: o.hikariPool.pendingConnections > 0 ? c.error : c.brand },
             },
           ],
         },
@@ -560,7 +560,7 @@ onBeforeUnmount(() => {
               <div class="kv-value">{{ formatNumber(overview?.hikariPool.maximumPoolSize) }}</div>
             </div>
           </div>
-          <div v-if="(overview?.hikariPool.pendingConnections ?? 0) > 0" class="alert">
+          <div v-if="(overview?.hikariPool.pendingConnections ?? 0) > 0" class="alert alert-error">
             等待队列大于 0：连接池可能打满，请求在排队，请关注！
           </div>
         </NCard>
@@ -574,14 +574,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--c-text-2);
-  padding-left: 4px;
-  margin-top: 4px;
 }
 
 .section-row {
@@ -603,7 +595,7 @@ onBeforeUnmount(() => {
   gap: 10px;
   padding: 8px 12px;
   background: var(--c-fill-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   font-size: 13px;
 }
 
@@ -642,7 +634,7 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding: 8px 14px;
   background: var(--c-fill-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   font-size: 13px;
 }
 
@@ -700,7 +692,7 @@ onBeforeUnmount(() => {
   gap: 4px;
   padding: 10px 12px;
   background: var(--c-fill-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 
 .kv-label {
@@ -714,16 +706,11 @@ onBeforeUnmount(() => {
 }
 
 .danger {
-  color: #d03050;
+  color: var(--c-error);
 }
 
 .alert {
   margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(208, 48, 80, 0.1);
-  color: #d03050;
-  font-size: 13px;
 }
 
 .gc-table {
@@ -737,7 +724,7 @@ onBeforeUnmount(() => {
   grid-template-columns: 1.6fr 0.8fr 1fr 1fr;
   gap: 8px;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   font-size: 13px;
 }
 

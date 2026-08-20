@@ -91,10 +91,6 @@ const linkItems = computed<LinkItem[]>(() => {
 /** 页脚技术栈 */
 const techStack = ['Vue 3', 'Vite', 'UnoCSS', 'Naive UI', 'Spring Boot 3', 'PostgreSQL', 'Redis', 'Sa-Token']
 
-function scrollToTools() {
-  document.getElementById('tools')?.scrollIntoView({ behavior: 'smooth' })
-}
-
 onMounted(async () => {
   if (!authStore.isLogin) {
     await menuStore.loadPublicConfig()
@@ -121,9 +117,6 @@ onMounted(async () => {
           <NTag v-for="t in skills" :key="t" size="small" round :bordered="false">{{ t }}</NTag>
         </div>
         <div class="hero-actions">
-          <NButton type="primary" size="large" round @click="scrollToTools">
-            进入工具
-          </NButton>
           <NButton size="large" round quaternary @click="router.push('/about')">
             关于我
           </NButton>
@@ -415,7 +408,7 @@ onMounted(async () => {
 }
 
 .footer-link:hover {
-  color: var(--c-brand);
+  color: var(--c-info);
 }
 
 .footer-stack {

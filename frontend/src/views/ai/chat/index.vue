@@ -355,7 +355,10 @@ onMounted(() => {
           :key="s.id"
           class="session-item"
           :class="{ active: s.id === currentSessionId }"
+          role="button"
+          tabindex="0"
           @click="selectSession(s.id)"
+          @keydown.enter="selectSession(s.id)"
         >
           <span class="session-title">{{ s.title }}</span>
           <NPopconfirm @positive-click="handleDeleteSession(s.id)">
@@ -614,7 +617,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   font-size: 13px;
   gap: 8px;
@@ -623,7 +626,7 @@ onMounted(() => {
   background: var(--n-color-hover, rgba(128, 128, 128, 0.08));
 }
 .session-item.active {
-  background: var(--n-color-hover, rgba(100, 150, 255, 0.12));
+  background: var(--c-brand-bg);
   font-weight: 600;
 }
 .session-title {
@@ -641,8 +644,8 @@ onMounted(() => {
   flex-shrink: 0;
 }
 .session-del:hover {
-  background: rgba(255, 80, 80, 0.15);
-  color: #d03050;
+  background: var(--c-error-bg);
+  color: var(--c-error);
 }
 .chat-panel {
   flex: 1;
@@ -667,13 +670,13 @@ onMounted(() => {
 }
 .field-label {
   font-size: 12px;
-  opacity: 0.65;
+  color: var(--c-text-3);
   white-space: nowrap;
 }
 .header-hint {
   margin-left: auto;
   font-size: 12px;
-  opacity: 0.5;
+  color: var(--c-text-3);
 }
 
 /* 移动端设置弹层内字段纵向排列 */
@@ -694,7 +697,7 @@ onMounted(() => {
 .mobile-hint {
   margin: 0;
   font-size: 12px;
-  opacity: 0.5;
+  color: var(--c-text-3);
 }
 .message-list {
   flex: 1;
@@ -722,12 +725,12 @@ onMounted(() => {
 }
 .msg-role {
   font-size: 11px;
-  opacity: 0.5;
+  color: var(--c-text-3);
   margin-bottom: 4px;
 }
 .bubble {
   padding: 10px 14px;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.6;
@@ -737,7 +740,7 @@ onMounted(() => {
   max-width: 100%;
   max-height: 300px;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   display: block;
   margin-bottom: 8px;
 }
@@ -748,7 +751,7 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 .msg-row.user .bubble {
-  background: rgba(100, 150, 255, 0.15);
+  background: var(--c-brand-bg);
   border-bottom-right-radius: 4px;
 }
 .msg-row.assistant .bubble {
@@ -756,12 +759,12 @@ onMounted(() => {
   border-bottom-left-radius: 4px;
 }
 .typing {
-  opacity: 0.6;
+  color: var(--c-text-3);
   font-style: italic;
 }
 .bubble.error {
-  background: rgba(208, 48, 80, 0.12);
-  color: #d03050;
+  background: var(--c-error-bg);
+  color: var(--c-error);
 }
 .error-title {
   display: block;
@@ -771,7 +774,7 @@ onMounted(() => {
 .error-detail {
   display: block;
   font-size: 13px;
-  opacity: 0.85;
+  color: var(--c-text-3);
 }
 .msg-text {
   display: block;
@@ -783,7 +786,7 @@ onMounted(() => {
   font-size: 12px;
 }
 .refs-label {
-  opacity: 0.55;
+  color: var(--c-text-3);
   margin-bottom: 4px;
 }
 .refs-list {
@@ -800,17 +803,17 @@ onMounted(() => {
   white-space: nowrap;
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(100, 150, 255, 0.1);
+  background: var(--c-info-bg);
   color: var(--n-text-color, inherit);
 }
 .ref-link {
-  color: #2d8cf0;
+  color: var(--c-info);
 }
 .ref-link:hover {
   text-decoration: underline;
 }
 .ref-text {
-  opacity: 0.8;
+  color: var(--c-text-3);
 }
 .msg-tools {
   display: flex;

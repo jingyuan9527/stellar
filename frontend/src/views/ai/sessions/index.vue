@@ -9,6 +9,7 @@ import { pageAllChatSessions, getChatMessagesAdmin, deleteChatSessionAdmin } fro
 import type { AiChatSessionAdmin, AiChatMessage } from '@/types/api'
 import { formatTime } from '@/utils/format'
 import { useIsMobile } from '@/composables/useBreakpoint'
+import SkeletonList from '@/components/SkeletonList.vue'
 
 const message = useMessage()
 const isMobile = useIsMobile()
@@ -38,7 +39,7 @@ const allColumns: DataTableColumns<AiChatSessionAdmin> = [
       default: () => [
         h(NTag, { size: 'small', bordered: false, type: row.subjectType === 'account' ? 'info' : 'warning' },
           { default: () => row.subjectType === 'account' ? '账号' : 'IP' }),
-        h('span', { style: 'font-size: 12px; opacity: 0.7' },
+        h('span', { style: 'font-size: 12px; color: var(--c-text-3)' },
           row.username || row.subjectId),
       ],
     }),
@@ -127,7 +128,7 @@ onMounted(loadData)
 
     <NDrawer v-model:show="drawerShow" :width="drawerWidth" placement="right">
       <NDrawerContent title="会话消息" closable>
-        <div v-if="drawerLoading" style="text-align: center; padding: 40px">加载中…</div>
+        <div v-if="drawerLoading" style="padding: 24px"><SkeletonList :rows="5" height="60px" /></div>
         <div v-else class="msg-stream">
           <template v-for="m in drawerMessages" :key="m.id">
             <div v-if="m.role !== 'system'" class="msg-row" :class="m.role">
@@ -198,12 +199,12 @@ onMounted(loadData)
 }
 .msg-role {
   font-size: 11px;
-  opacity: 0.5;
+  color: var(--c-text-3);
   margin-bottom: 3px;
 }
 .bubble {
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.6;
@@ -213,7 +214,7 @@ onMounted(loadData)
   max-width: 100%;
   max-height: 300px;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   display: block;
   margin-bottom: 8px;
 }
@@ -224,7 +225,7 @@ onMounted(loadData)
   margin-bottom: 8px;
 }
 .msg-row.user .bubble {
-  background: rgba(100, 150, 255, 0.15);
+  background: var(--c-brand-bg);
 }
 .msg-row.assistant .bubble {
   background: rgba(128, 128, 128, 0.1);
@@ -239,7 +240,7 @@ onMounted(loadData)
   font-size: 12px;
 }
 .refs-label {
-  opacity: 0.55;
+  color: var(--c-text-3);
   margin-bottom: 4px;
 }
 .refs-list {
@@ -256,16 +257,16 @@ onMounted(loadData)
   white-space: nowrap;
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(100, 150, 255, 0.1);
+  background: var(--c-info-bg);
   font-size: 12px;
 }
 .ref-link {
-  color: #2d8cf0;
+  color: var(--c-info);
 }
 .ref-link:hover {
   text-decoration: underline;
 }
 .ref-text {
-  opacity: 0.8;
+  color: var(--c-text-3);
 }
 </style>

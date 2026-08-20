@@ -6,6 +6,7 @@ import { routes } from '@/router'
 import { getMenuVisibilityList, batchUpdateMenuVisibility } from '@/api/menu-visibility'
 import type { MenuVisibilityItem } from '@/types/api'
 import { iconMap } from '@/utils/icons'
+import SkeletonList from '@/components/SkeletonList.vue'
 
 const message = useMessage()
 
@@ -135,12 +136,12 @@ onMounted(loadData)
         </NSpace>
       </template>
       <NSpace style="margin-bottom: 16px">
-        <span style="opacity: 0.65; font-size: 13px">
+        <span style="color: var(--c-text-2); font-size: 13px">
           按一级菜单分组，勾选对游客公开的页面。天然公开的首页/聊天/图片等无需配置，不会出现在此列表。
           管理类页面不建议公开。
         </span>
       </NSpace>
-      <div v-if="loading" class="loading">加载中...</div>
+      <div v-if="loading" class="loading"><SkeletonList :rows="3" height="56px" /></div>
       <div v-else class="group-grid">
         <NCard
           v-for="group in groups"
@@ -151,7 +152,7 @@ onMounted(loadData)
         >
           <template #header>
             <NSpace align="center" size="small">
-              <NIcon v-if="group.icon" size="18" style="opacity: 0.7">
+              <NIcon v-if="group.icon" size="18" style="color: var(--c-text-3)">
                 <component :is="iconMap[group.icon]" />
               </NIcon>
               <span class="group-name">{{ group.name }}</span>
@@ -195,9 +196,7 @@ onMounted(loadData)
 }
 
 .loading {
-  padding: 24px;
-  text-align: center;
-  opacity: 0.6;
+  padding: 16px 0;
 }
 
 .group-grid {
@@ -212,7 +211,7 @@ onMounted(loadData)
 
 .group-count {
   font-size: 12px;
-  opacity: 0.5;
+  color: var(--c-text-3);
 }
 
 .group-items {
@@ -234,7 +233,7 @@ onMounted(loadData)
 }
 
 .group-item.public .item-name {
-  color: #18a058;
+  color: var(--c-success);
 }
 
 .item-info {
@@ -250,7 +249,7 @@ onMounted(loadData)
 
 .item-path {
   font-size: 12px;
-  opacity: 0.5;
+  color: var(--c-text-3);
   word-break: break-all;
 }
 

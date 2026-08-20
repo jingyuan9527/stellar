@@ -263,13 +263,13 @@ onMounted(() => {
 
 .hero-title {
   font-size: 16px;
-  opacity: 0.75;
+  color: var(--c-text-2);
   margin: 0 0 8px;
 }
 
 .hero-bio {
   font-size: 14px;
-  opacity: 0.6;
+  color: var(--c-text-3);
   margin: 0 0 12px;
 }
 
@@ -277,12 +277,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.section-title {
-  font-size: 18px;
-  font-weight: 700;
-  margin: 0;
 }
 
 .about-content {
@@ -349,7 +343,7 @@ onMounted(() => {
 .project-desc {
   margin: 0;
   font-size: 13px;
-  opacity: 0.7;
+  color: var(--c-text-2);
   line-height: 1.6;
   display: -webkit-box;
   -webkit-line-clamp: 3;
