@@ -107,21 +107,25 @@ function handleAction(key: string) {
   gap: 4px;
   height: 28px;
   padding: 0 10px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   font-size: 13px;
+  color: var(--c-text-2);
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s, color 0.2s;
   flex-shrink: 0;
 }
 
 .tab-item:hover {
   background: var(--c-fill-2);
+  color: var(--c-text-1);
 }
 
 .tab-item.active {
-  background: var(--c-brand);
-  color: #fff;
+  background: var(--c-brand-bg);
+  color: var(--c-brand);
+  box-shadow: inset 0 -2px 0 var(--c-brand);
+  font-weight: 600;
 }
 
 .tab-close {
@@ -130,7 +134,7 @@ function handleAction(key: string) {
 }
 
 .tab-close:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--c-fill-2);
 }
 
 .tabs-actions {

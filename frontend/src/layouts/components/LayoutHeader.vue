@@ -196,7 +196,7 @@ async function handleSubmitPassword() {
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   transition: background 0.2s;
 }
@@ -207,5 +207,11 @@ async function handleSubmitPassword() {
 
 .username {
   font-size: 14px;
+}
+
+/* 面包屑末项（当前页）：主文字色 + 加粗，呼应侧栏 active 语言 */
+:deep(.n-breadcrumb-item:last-child .n-breadcrumb-item__link) {
+  color: var(--c-text-1);
+  font-weight: 600;
 }
 </style>
