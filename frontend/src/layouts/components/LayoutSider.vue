@@ -38,7 +38,12 @@ function renderLogoIcon() {
   gap: 10px;
   height: 56px;
   padding: 0 18px;
-  border-bottom: 1px solid var(--n-border-color, rgba(0, 0, 0, 0.06));
+  border-bottom: 1px solid var(--c-border);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--c-brand) 8%, transparent),
+    color-mix(in srgb, var(--c-info) 8%, transparent)
+  );
   overflow: hidden;
   white-space: nowrap;
 }
