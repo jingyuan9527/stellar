@@ -10,6 +10,7 @@ export interface SysUser {
   nickname: string
   avatar: string
   status: number
+  mustChangePassword: number
   createTime: string
   updateTime: string
 }

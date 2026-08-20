@@ -11,6 +11,14 @@
 
 > 随实现推进，对应行为规范同步补写进本文档，避免文档超前于代码（铁律8）。
 
+- **阶段 21（已实现）** 安全与连接池收敛（OPTIMIZE_SPEC S2/S3/S5/P7/P8 落地）：
+  - **S2 关闭 Redis Jackson defaultTyping**：`RedisConfig.cacheManager()` 的 value 序列化器不再 `.defaultTyping(true)`（不写 `@class` 类型标记，杜绝 Redis 被攻陷时经不可信 `@class` 触发反序列化 gadget）；代价是缓存 POJO 读回退化为 `LinkedHashMap`——当前缓存落点均为可信配置型数据（ai-model/provider/persona/setting/dict/profile/profile-project/menu-visibility），调用方只透传序列化或判空、不依赖强类型（已逐一核实无 `ClassCastException` 路径）。**迁移**：旧版带 `@class` 的存量条目无法按原形状读回（List 会退化成带 `list` 包裹的 Map），新增 `RedisCacheBootstrap`（`com.stellar.config`）启动时按 cacheName 清单逐缓存 `clear()`（缓存为派生数据，清空无害；Redis 暂不可用 try/catch 降级仅 warn）。`redisTemplate`（pub/sub 通道 AiNotify/CacheInvalidation）保留默认 typing 不动（同一可信链路）。
+  - **S3 默认密码强制改密**：`sys_user` 加 `must_change_password` 列（schema.sql CREATE + `ADD COLUMN IF NOT EXISTS` 幂等补老库，`db/init.sql` 同步）；`DataInitializer` 播种 admin 带 `must_change_password=1`；登录返回的 `userInfo` 携带标记；`UserService.changePassword` 改密成功后清 0。前端：`/system/change-password` 新增隐藏路由（`meta.hidden` 不进侧栏）+ 专属改密页（复用改密表单逻辑）；`router.beforeEach` 已登录先兜底 `fetchUserInfo`，标记未清前除改密页外**全站拦截**（含公开页，游客态不受影响）；登录页命中标记跳改密页；LayoutHeader 改密弹窗成功后本地同步清标记放行。
+  - **S5 防全表误操作**：`MyBatisPlusConfig` 在分页拦截器后挂 `BlockAttackInnerInterceptor`，无 WHERE 的 `update()/delete()` 直接抛异常拦截（已核对全库 update/delete 调用均带条件）。
+  - **P7 HikariCP 连接池**：`maximum-pool-size` 8→15、`minimum-idle` 2→5（异步 AI worker aiTask 4 + aiTool 4 + 请求线程并发持连接易打满）。
+  - **P8 SSE 超时收紧**：`SseEmitterManager` `EMITTER_TIMEOUT` 86400000(24h)→3600000(1h)，30s 心跳保活下不影响长期存活。
+  - **测试**：`AuthServiceTest` 成功登录用例断言 `mustChangePassword` 透传；`UserServiceTest` 改密成功用例断言 `mustChangePassword=0` 清标记。全量 701 用例通过（+13 覆盖新增断言），`pnpm typecheck` 通过。
+
 - **阶段 20（已实现）** 后端优化清单 P1-P6（OPTIMIZE_SPEC.md 全量落地）：
   - **P1 IP 解析收敛**：`WebUtils.getClientIp(HttpServletRequest)` 成为唯一实现（规则：`X-Forwarded-For` 首段且跳过 `unknown` > `X-Real-IP` > `getRemoteAddr()`，trim 去空白；无请求上下文返回 `unknown`）。删除 9 处重复实现：`SubjectUtils.getClientIp` 改为委托 `WebUtils`、`LogAspect.getIp`、`AiImageController.getClientIp`、`AiNotifyController.getClientIp`、`GameController.getClientIp`、`AiChatSessionService.getClientIp`、`AiTtsService.getClientIp`、`AiVideoService.getSubjectId`（内联解析）、`AiImageService.getSubjectId`（原走 SubjectUtils）。
   - **P2 import 清理**：`WebUtils` 删除无用 `import com.stellar.ai.service.AiChatService`（消除跨包编译依赖）。

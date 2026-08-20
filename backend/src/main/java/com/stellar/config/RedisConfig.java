@@ -51,20 +51,19 @@ public class RedisConfig {
     /**
      * Spring Cache 管理器：cacheName 加 {@code stellar:} 前缀，默认 30min TTL，
      * 禁止缓存 null（防穿透由调用方自行处理）。
-     * <p>value 序列化器必须同时满足两点（缺一即报错）：
-     * <ul>
-     *   <li>{@code .objectMapper(new ObjectMapper().registerModule(new JavaTimeModule()))} 注册 JavaTimeModule，
-     *       否则序列化 {@link java.time.LocalDateTime} 报 "Java 8 date/time type not supported"；</li>
-     *   <li>{@code .defaultTyping(true)} 启用 default typing（写入 {@code @class} 类型标记），
-     *       否则反序列化时 POJO 退化为 {@link java.util.LinkedHashMap}，CGLIB 代理处强转抛 {@link ClassCastException}。
-     *       注：builder 传入自定义 ObjectMapper 时，typing 默认是关闭的，必须显式开启。</li>
-     * </ul>
+     * <p>value 序列化器<b>关闭 default typing</b>（S2 安全收敛）：不写 {@code @class} 类型标记，
+     * 杜绝 Redis 被攻陷时经不可信 {@code @class} 触发反序列化 gadget 的风险。
+     * 代价是缓存的 POJO 读回时退化为 {@link java.util.LinkedHashMap}——当前缓存落点均为
+     * 可信配置型数据且调用方只透传序列化或判空，不依赖强类型，可接受。
+     * 注意：builder 传自定义 ObjectMapper 时 typing 默认即关闭，显式传入 {code ObjectMapper}
+     * 仅为注册 JavaTimeModule 支持 {@link java.time.LocalDateTime} 序列化。
+     * <p>旧版本写入的带 {@code @class} 缓存条目无法按原形状读回，由 {@link RedisCacheBootstrap}
+     * 启动时统一清理迁移（详见该类）。
      */
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory factory) {
         GenericJackson2JsonRedisSerializer valueSerializer = GenericJackson2JsonRedisSerializer.builder()
                 .objectMapper(new ObjectMapper().registerModule(new JavaTimeModule()))
-                .defaultTyping(true)
                 .build();
         RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofMinutes(30))

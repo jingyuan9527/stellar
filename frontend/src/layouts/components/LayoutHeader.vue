@@ -78,6 +78,10 @@ async function handleSubmitPassword() {
     await changePassword({ oldPassword, newPassword })
     message.success('密码修改成功')
     showPasswordModal.value = false
+    // 清除本地强制改密标记（S3），避免守卫继续拦截
+    if (authStore.userInfo) {
+      authStore.userInfo.mustChangePassword = 0
+    }
   } catch {
     // 错误已由拦截器提示
   } finally {

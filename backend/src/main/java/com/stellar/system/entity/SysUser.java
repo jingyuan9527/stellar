@@ -27,6 +27,9 @@ public class SysUser {
 
     private Integer status;
 
+    /** 是否强制改密：1=默认口令首次登录需强制改密，改密成功后清 0 */
+    private Integer mustChangePassword;
+
     @TableLogic
     @JsonIgnore
     private Integer deleted;

@@ -198,6 +198,13 @@ export const routes: RouteRecordRaw[] = [
             meta: { title: '账号安全', icon: 'person', order: 1 },
           },
           {
+            // S3 首次登录强制改密页：hidden 不进侧栏菜单，仅供登录后守卫跳转
+            path: 'change-password',
+            name: 'SystemChangePassword',
+            component: () => import('@/views/system/change-password/index.vue'),
+            meta: { title: '修改密码', requiresAuth: true, hidden: true },
+          },
+          {
             path: 'log',
             name: 'SystemLog',
             component: () => import('@/views/system/log/index.vue'),
@@ -261,6 +268,22 @@ router.beforeEach(async (to, _from, next) => {
       return
     }
     next()
+    return
+  }
+
+  // 已登录：确保 userInfo 已加载（供下方改密守卫判定），失效 token 在此兜底踢回登录
+  if (authStore.isLogin && !authStore.userInfo) {
+    try {
+      await authStore.fetchUserInfo()
+    } catch {
+      authStore.handleUnauthorized()
+      return
+    }
+  }
+
+  // S3 首次登录强制改密：默认口令标记未清除前，除改密页外全站拦截（含公开页，游客态不受影响）
+  if (authStore.isLogin && authStore.userInfo?.mustChangePassword === 1 && to.path !== '/system/change-password') {
+    next('/system/change-password')
     return
   }
 

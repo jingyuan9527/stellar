@@ -105,6 +105,7 @@ class UserServiceTest {
             verify(sysUserMapper).updateById(cap.capture());
             assertEquals(1L, cap.getValue().getId());
             assertEquals("new-hash", cap.getValue().getPassword());
+            assertEquals(Integer.valueOf(0), cap.getValue().getMustChangePassword());
         }
     }
 

@@ -20,7 +20,8 @@ import com.stellar.ai.service.AiNotifyListener;
 @Component
 public class SseEmitterManager {
 
-    private static final long EMITTER_TIMEOUT = 86400_000L;
+    /** SSE 兜底超时 1h（P8 收紧自 24h）：长连接资源占用有界，30s 心跳保活下实际可长期存活 */
+    private static final long EMITTER_TIMEOUT = 3600_000L;
 
     private final ConcurrentHashMap<String, CopyOnWriteArraySet<SseEmitter>> emitters = new ConcurrentHashMap<>();
 

@@ -33,7 +33,13 @@ async function handleLogin(e: Event) {
   }
   loading.value = true
   try {
-    await authStore.login({ username: form.username, password: form.password })
+    const res = await authStore.login({ username: form.username, password: form.password })
+    // S3 默认口令首次登录强制改密
+    if (res.userInfo?.mustChangePassword === 1) {
+      message.warning('首次登录请先修改默认密码')
+      router.replace('/system/change-password')
+      return
+    }
     message.success('登录成功')
     const redirect = (route.query.redirect as string) || '/'
     router.replace(redirect)

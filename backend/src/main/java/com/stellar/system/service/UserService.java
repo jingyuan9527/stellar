@@ -43,6 +43,8 @@ public class UserService {
         SysUser update = new SysUser();
         update.setId(userId);
         update.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        // 改密成功即清除强制改密标记（S3：默认口令首次登录强制改密）
+        update.setMustChangePassword(0);
         update.setUpdateTime(LocalDateTime.now());
         sysUserMapper.updateById(update);
     }

@@ -115,7 +115,9 @@ class AuthServiceTest {
 
     @Test
     void login_成功_返回token并清空失败计数() {
-        when(sysUserMapper.selectOne(any(Wrapper.class))).thenReturn(user(1L, "admin", "hash", 1));
+        SysUser u = user(1L, "admin", "hash", 1);
+        u.setMustChangePassword(1);
+        when(sysUserMapper.selectOne(any(Wrapper.class))).thenReturn(u);
         when(passwordEncoder.matches(anyString(), anyString())).thenReturn(true);
 
         LoginRequest request = req("admin", "p");
@@ -125,6 +127,7 @@ class AuthServiceTest {
             stp.verify(() -> StpUtil.login(1L));
             assertEquals("tok-123", result.getToken());
             assertEquals("admin", result.getUserInfo().getUsername());
+            assertEquals(Integer.valueOf(1), result.getUserInfo().getMustChangePassword());
         }
         verify(stringRedisTemplate).delete(AuthService.LOGIN_FAIL_PREFIX + "admin");
         verify(stringRedisTemplate).delete(AuthService.LOGIN_ATTEMPT_PREFIX + "1.2.3.4");

@@ -20,9 +20,9 @@ spring:
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
     hikari:
-      # 个人站并发低，收敛连接池省内存/连接（每连接 ~1MB 堆外）
-      maximum-pool-size: 8
-      minimum-idle: 2
+      # 异步 AI worker（aiTask 4 + aiTool 4）与请求线程并发持连接易打满旧值 8，上调至 15 + min 5（个人站仍收敛）
+      maximum-pool-size: 15
+      minimum-idle: 5
       connection-timeout: 3000
       max-lifetime: 1800000
   data:
