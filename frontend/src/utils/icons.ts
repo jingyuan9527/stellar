@@ -50,6 +50,10 @@ import {
   LinkOutline,
   PulseOutline,
   ArrowForwardOutline,
+  LocationOutline,
+  ArrowUpOutline,
+  ArrowDownOutline,
+  OpenOutline,
 } from '@vicons/ionicons5'
 
 export const iconMap: Record<string, Component> = {
@@ -103,4 +107,8 @@ export const iconMap: Record<string, Component> = {
   link: LinkOutline,
   pulse: PulseOutline,
   arrow: ArrowForwardOutline,
+  location: LocationOutline,
+  arrowUp: ArrowUpOutline,
+  arrowDown: ArrowDownOutline,
+  open: OpenOutline,
 }

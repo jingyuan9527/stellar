@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NCard, NButton, NImage, NSpace, NTag, NGrid, NGridItem } from 'naive-ui'
+import { NCard, NButton, NImage, NSpace, NTag, NGrid, NGridItem, NIcon } from 'naive-ui'
 import { getPublicProfile, getPublicProfileProjects } from '@/api/profile'
 import type { Profile, ProfileProject } from '@/types/api'
+import { iconMap } from '@/utils/icons'
 
 const profile = ref<Profile | null>(null)
 const projects = ref<ProfileProject[]>([])
@@ -167,7 +168,10 @@ onMounted(() => {
       <h2 class="section-title">联系方式</h2>
       <NCard :bordered="false">
         <div class="contact">
-          <p v-if="profile?.location" class="contact-item">📍 所在地：{{ profile.location }}</p>
+          <p v-if="profile?.location" class="contact-item">
+            <NIcon size="15" class="contact-ico"><component :is="iconMap.location" /></NIcon>
+            所在地：{{ profile.location }}
+          </p>
           <NSpace v-if="linkItems.length" :size="8">
             <NButton
               v-for="l in linkItems"
@@ -292,8 +296,17 @@ onMounted(() => {
 }
 
 .contact-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0 0 12px;
   font-size: 14px;
+}
+
+.contact-ico {
+  display: flex;
+  align-items: center;
+  color: var(--c-text-3);
 }
 
 .project-card {

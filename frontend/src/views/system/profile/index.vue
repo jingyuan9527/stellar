@@ -6,13 +6,21 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns, UploadCustomRequestOptions } from 'naive-ui'
 import { getProfile, updateProfile, getProfileProjects, createProfileProject, updateProfileProject, deleteProfileProject } from '@/api/profile'
+import { useRouter } from 'vue-router'
 import { uploadFile } from '@/api/file'
 import type { Profile, ProfileProject } from '@/types/api'
 import { iconMap } from '@/utils/icons'
 
+const router = useRouter()
 const message = useMessage()
 const saving = ref(false)
 const form = ref<Partial<Profile>>({})
+
+/** 新标签打开公开 about 预览，闭环编辑与展示 */
+function openAboutPreview() {
+  const url = router.resolve('/about').href
+  window.open(url, '_blank')
+}
 
 const aboutPreview = computed(() => Boolean(form.value.about))
 
@@ -175,6 +183,13 @@ onMounted(() => {
 <template>
   <div class="profile-admin-page">
     <NCard title="个人主页" :bordered="false">
+      <div class="card-toolbar">
+        <span class="card-tip">编辑内容，实时预览下方项目区与公开页</span>
+        <NButton secondary size="small" @click="openAboutPreview">
+          <template #icon><NIcon><component :is="iconMap.open" /></NIcon></template>
+          查看公开主页
+        </NButton>
+      </div>
       <NSpace vertical :size="16" style="max-width: 640px">
         <NFormItem label="昵称">
           <NInput v-model:value="form.nickname" placeholder="展示昵称" />
@@ -280,6 +295,19 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.card-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.card-tip {
+  font-size: 13px;
+  color: var(--c-text-3);
 }
 
 .about-editor {

@@ -42,11 +42,20 @@ const aiKpiCards = computed(() => [
 ])
 
 const todayKpiCards = computed(() => [
-  { label: '今日文案生成', value: stats.value?.textGen?.today ?? 0, icon: 'log', color: kpiPalette.value[0] },
-  { label: '今日图片生成', value: stats.value?.imageTask?.today ?? 0, icon: 'image', color: kpiPalette.value[1] },
-  { label: '今日视频生成', value: stats.value?.videoTask?.today ?? 0, icon: 'film', color: kpiPalette.value[0] },
-  { label: '今日 TTS 合成', value: stats.value?.tts?.today ?? 0, icon: 'volume', color: kpiPalette.value[1] },
+  { label: '今日文案生成', value: stats.value?.textGen?.today ?? 0, icon: 'log', color: kpiPalette.value[0], sub: todayShare.value },
+  { label: '今日图片生成', value: stats.value?.imageTask?.today ?? 0, icon: 'image', color: kpiPalette.value[1], sub: todayShare.value },
+  { label: '今日视频生成', value: stats.value?.videoTask?.today ?? 0, icon: 'film', color: kpiPalette.value[0], sub: todayShare.value },
+  { label: '今日 TTS 合成', value: stats.value?.tts?.today ?? 0, icon: 'volume', color: kpiPalette.value[1], sub: todayShare.value },
 ])
+
+/** 今日生成占近 7 日比例（今日调用 / 近 7 日调用总和） */
+const todayShare = computed<number | null>(() => {
+  const trend = stats.value?.aiUsage?.dailyTrend ?? []
+  const total = trend.reduce((s, d) => s + d.calls, 0)
+  const today = stats.value?.aiUsage?.todayCalls ?? 0
+  if (!total || !today) return null
+  return Math.round((today / total) * 100)
+})
 
 function renderStatIcon(name: string, color: string) {
   const Icon = iconMap[name]
@@ -76,6 +85,25 @@ const trendOption = computed<EChartsCoreOption>(() => {
       { name: 'Token', type: 'bar', yAxisIndex: 0, data: trend.map((d) => d.tokens), itemStyle: { color: c.brand }, barMaxWidth: 16 },
       { name: '调用', type: 'bar', yAxisIndex: 1, data: trend.map((d) => d.calls), itemStyle: { color: c.info }, barMaxWidth: 16 },
     ],
+  }
+})
+
+// ===== 近 7 日趋势解读（后半周 vs 前半周 + 峰值，纯前端推导） =====
+const trendInsight = computed<{ total: number; up: boolean; pct: number; peakDate: string; peakCalls: number } | null>(() => {
+  const t = stats.value?.aiUsage?.dailyTrend ?? []
+  if (t.length < 2) return null
+  const mid = Math.ceil(t.length / 2)
+  const firstHalf = t.slice(0, mid).reduce((s, d) => s + d.calls, 0)
+  const secondHalf = t.slice(mid).reduce((s, d) => s + d.calls, 0)
+  const delta = secondHalf - firstHalf
+  const pct = firstHalf ? Math.round((Math.abs(delta) / firstHalf) * 100) : 0
+  const peak = t.reduce((a, b) => (b.calls > a.calls ? b : a), t[0])
+  return {
+    total: t.reduce((s, d) => s + d.calls, 0),
+    up: delta >= 0,
+    pct,
+    peakDate: peak.date,
+    peakCalls: peak.calls,
   }
 })
 
@@ -250,6 +278,7 @@ onMounted(loadStats)
             </div>
             <NStatistic :label="item.label" :value="formatNumber(item.value)" />
           </div>
+          <div v-if="item.sub != null" class="stat-sub">今日占近 7 日 {{ item.sub }}%</div>
         </NCard>
       </NGridItem>
     </NGrid>
@@ -258,6 +287,14 @@ onMounted(loadStats)
     <NCard title="近 7 日 AI 调用趋势" :bordered="false" :loading="loading">
       <div v-if="stats?.aiUsage?.dailyTrend?.length" class="trend">
         <Chart :option="trendOption" height="240px" />
+        <div v-if="trendInsight" class="trend-caption">
+          <NIcon size="15" :class="trendInsight.up ? 'up' : 'down'">
+            <component :is="trendInsight.up ? iconMap.arrowUp : iconMap.arrowDown" />
+          </NIcon>
+          <span>近 7 日共 {{ formatNumber(trendInsight.total) }} 次调用，后半周较前半周
+            <b :class="trendInsight.up ? 'up' : 'down'">{{ trendInsight.up ? '上升' : '下降' }} {{ trendInsight.pct }}%</b>；
+            峰值 {{ trendInsight.peakDate }}（{{ formatNumber(trendInsight.peakCalls) }} 次）</span>
+        </div>
       </div>
       <BrandEmpty size="small" description="暂无数据" v-else />
     </NCard>
@@ -398,6 +435,37 @@ onMounted(loadStats)
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.stat-sub {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+
+.trend-caption {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--c-text-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trend-caption .up {
+  color: var(--c-success);
+}
+
+.trend-caption .down {
+  color: var(--c-error);
+}
+
+.trend-caption b.up {
+  color: var(--c-success);
+}
+
+.trend-caption b.down {
+  color: var(--c-error);
 }
 
 .stat-icon {
