@@ -4,7 +4,7 @@ import MarkdownIt from 'markdown-it'
 import {
   NCard, NForm, NFormItem, NInput, NButton, NSpace, NDataTable, NTag,
   NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem, NIcon, NSelect,
-  NAlert, NDropdown, NModal, NPagination, NCheckbox, useMessage,
+  NAlert, NDropdown, NModal, NPagination, NCheckbox, NEmpty, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, SelectOption, DropdownOption } from 'naive-ui'
 import {
@@ -689,7 +689,7 @@ onMounted(() => {
               <span class="card-time">{{ formatTime(row.remoteUpdateTime || row.createTime) }}</span>
             </div>
           </div>
-          <div v-if="!loading && !tableData.length" class="card-empty">暂无笔记</div>
+          <NEmpty v-if="!loading && !tableData.length" class="card-empty" />
           <NPagination v-if="total > 0" class="card-pagination" :page="pagination.page"
             :page-size="pagination.pageSize" :item-count="pagination.itemCount"
             :page-sizes="[10, 20, 50]" show-size-picker
@@ -999,9 +999,7 @@ onMounted(() => {
 }
 
 .card-empty {
-  text-align: center;
-  color: var(--c-text-3);
-  padding: 24px 0;
+  padding: 8px;
 }
 
 .card-pagination {

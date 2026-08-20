@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import {
-  NSpace, NButton, NInput, NSelect, NEmpty, NAlert, NPopconfirm, NPopover, NSpin, useMessage,
+  NSpace, NButton, NInput, NSelect, NEmpty, NAlert, NPopconfirm, NPopover, useMessage,
 } from 'naive-ui'
 import { useAuthStore } from '@/store/auth'
 import { useIsMobile } from '@/composables/useBreakpoint'
@@ -471,9 +471,7 @@ onMounted(() => {
       </header>
 
       <div ref="messageListRef" class="message-list">
-        <div v-if="loadingMessages && messages.length === 0" class="msg-empty">
-          <NSpin size="small" />
-        </div>
+        <NEmpty v-if="loadingMessages && messages.length === 0" class="msg-empty" />
         <template v-for="m in messages" :key="m.id">
           <div v-if="m.role !== 'system'" class="msg-row" :class="m.role">
             <div class="msg-role">{{ m.role === 'user' ? '我' : 'AI' }}</div>

@@ -12,8 +12,11 @@ const router = useRouter()
       <div class="nf-glow nf-glow-a" />
       <div class="nf-glow nf-glow-b" />
       <div class="nf-inner">
-        <NResult status="404" title="404" description="抱歉，你访问的页面不存在">
-          <template #footer>
+<NResult status="404" title="404" description="抱歉，你访问的页面不存在">
+            <template #default>
+              <p class="nf-tagline">在 Stellar 个人知识沉淀池里，灵感与实验都被妥善收藏。</p>
+            </template>
+            <template #footer>
             <div class="nf-actions">
               <NButton type="primary" round @click="router.replace('/')">
                 <template #icon><NIcon><component :is="iconMap.home" /></NIcon></template>
@@ -47,8 +50,8 @@ const router = useRouter()
   border: 1px solid var(--c-border);
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, var(--c-brand) 10%, var(--c-fill)),
-    color-mix(in srgb, var(--c-info) 10%, var(--c-fill))
+    color-mix(in srgb, var(--c-brand) 8%, transparent),
+    color-mix(in srgb, var(--c-info) 8%, transparent)
   );
   padding: 56px 32px;
 }
@@ -87,6 +90,12 @@ const router = useRouter()
   gap: 12px;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+.nf-tagline {
+  margin: 0;
+  font-size: 13px;
+  color: var(--c-text-3);
 }
 
 @media (max-width: 768px) {

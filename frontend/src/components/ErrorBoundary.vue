@@ -60,7 +60,7 @@ function reload() {
 .error-box {
   text-align: center;
   padding: 32px 40px;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   background: var(--n-color, var(--c-fill-2));
   max-width: 480px;
 }

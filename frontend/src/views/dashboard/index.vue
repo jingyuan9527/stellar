@@ -3,6 +3,7 @@ import { computed, h, onMounted, ref } from 'vue'
 import type { EChartsCoreOption } from 'echarts/core'
 import { NCard, NGrid, NGridItem, NIcon, NStatistic, NEmpty, NTag } from 'naive-ui'
 import Chart from '@/components/Chart.vue'
+import StateError from '@/components/StateError.vue'
 import { useAuthStore } from '@/store/auth'
 import { useThemeStore } from '@/store/theme'
 import { getChartColors } from '@/utils/chartColors'
@@ -13,6 +14,9 @@ import type { DashboardStats, DashboardTaskStat } from '@/types/api'
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
 const stats = ref<DashboardStats | null>(null)
+// 首屏整页加载骨架 / 失败占位（消除数据未回空白）
+const loading = ref(false)
+const loadError = ref(false)
 
 const greeting = computed(() => {
   const hour = new Date().getHours()
@@ -190,10 +194,15 @@ function formatRate(rate: number | undefined | null): string {
 }
 
 async function loadStats() {
+  loading.value = true
+  loadError.value = false
   try {
     stats.value = await getDashboardStats()
   } catch {
-    // 错误已由拦截器提示
+    loadError.value = true
+    // 错误已由拦截器提示，页面下方展示 StateError 占位
+  } finally {
+    loading.value = false
   }
 }
 
@@ -212,11 +221,13 @@ onMounted(loadStats)
       </div>
     </NCard>
 
+    <StateError v-if="loadError" @retry="loadStats" />
+
     <!-- AI 调用概览 -->
     <div class="section-title">AI 调用概览</div>
     <NGrid :x-gap="16" :y-gap="16" :cols="4" responsive="screen" item-responsive>
       <NGridItem v-for="item in aiKpiCards" :key="item.label" span="4 m:2 l:1">
-        <NCard :bordered="false" class="stat-card">
+        <NCard :bordered="false" class="stat-card" :loading="loading">
           <div class="stat">
             <div class="stat-icon" :style="{ background: item.color + '1a' }">
               <component :is="renderStatIcon(item.icon, item.color)" />
@@ -231,7 +242,7 @@ onMounted(loadStats)
     <div class="section-title">今日生成</div>
     <NGrid :x-gap="16" :y-gap="16" :cols="4" responsive="screen" item-responsive>
       <NGridItem v-for="item in todayKpiCards" :key="item.label" span="4 m:2 l:1">
-        <NCard :bordered="false" class="stat-card">
+        <NCard :bordered="false" class="stat-card" :loading="loading">
           <div class="stat">
             <div class="stat-icon" :style="{ background: item.color + '1a' }">
               <component :is="renderStatIcon(item.icon, item.color)" />
@@ -243,7 +254,7 @@ onMounted(loadStats)
     </NGrid>
 
     <!-- 近 7 日趋势 -->
-    <NCard title="近 7 日 AI 调用趋势" :bordered="false">
+    <NCard title="近 7 日 AI 调用趋势" :bordered="false" :loading="loading">
       <div v-if="stats?.aiUsage?.dailyTrend?.length" class="trend">
         <Chart :option="trendOption" height="240px" />
       </div>
@@ -254,7 +265,7 @@ onMounted(loadStats)
     <div class="section-title">AI 生成质量</div>
     <NGrid :x-gap="16" :y-gap="16" :cols="3" responsive="screen" item-responsive>
       <NGridItem v-for="item in taskQualityCards" :key="item.title" span="3 m:1">
-        <NCard :bordered="false" class="quality-card">
+        <NCard :bordered="false" class="quality-card" :loading="loading">
           <div class="quality-head">
             <div class="stat-icon" :style="{ background: item.color + '1a' }">
               <component :is="renderStatIcon(item.icon, item.color)" />
@@ -289,7 +300,7 @@ onMounted(loadStats)
     <!-- 文件 + TTS -->
     <NGrid :x-gap="16" :y-gap="16" :cols="2" responsive="screen" item-responsive>
       <NGridItem span="2 m:1">
-        <NCard title="文件存储" :bordered="false">
+        <NCard title="文件存储" :bordered="false" :loading="loading">
           <div v-if="stats?.file" class="file-section">
             <div class="file-kpi">
               <div class="file-kpi-item">
@@ -311,7 +322,7 @@ onMounted(loadStats)
         </NCard>
       </NGridItem>
       <NGridItem span="2 m:1">
-        <NCard title="TTS 语音合成" :bordered="false">
+        <NCard title="TTS 语音合成" :bordered="false" :loading="loading">
           <div v-if="stats?.tts" class="file-section">
             <div class="file-kpi">
               <div class="file-kpi-item">
@@ -336,13 +347,13 @@ onMounted(loadStats)
     <!-- 按模型类型 + 按供应商 -->
     <NGrid :x-gap="16" :y-gap="16" :cols="2" responsive="screen" item-responsive>
       <NGridItem span="2 m:1">
-        <NCard title="按模型类型" :bordered="false">
+        <NCard title="按模型类型" :bordered="false" :loading="loading">
           <Chart v-if="stats?.aiUsage?.byType?.length" :option="modelTypeOption" height="200px" />
           <NEmpty v-else description="暂无数据" />
         </NCard>
       </NGridItem>
       <NGridItem span="2 m:1">
-        <NCard title="按供应商" :bordered="false">
+        <NCard title="按供应商" :bordered="false" :loading="loading">
           <Chart v-if="stats?.aiUsage?.byProvider?.length" :option="providerOption" height="200px" />
           <NEmpty v-else description="暂无数据" />
         </NCard>
