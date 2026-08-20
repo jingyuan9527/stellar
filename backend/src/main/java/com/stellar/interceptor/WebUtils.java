@@ -4,12 +4,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.util.StringUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
-import com.stellar.ai.service.AiChatService;
 
 /**
- * Web 层通用工具：当前仅封装客户端真实 IP 解析（穿透代理头）。
- * <p>解析优先级：X-Forwarded-For 首段 &gt; X-Real-IP &gt; 远端地址；无请求上下文（如异步线程）返回 {@code unknown}。
- * 拦截器与 Service 共用，避免 X-Forwarded-For 解析逻辑散落多处（见 RateLimitInterceptor / AiChatService）。
+ * Web 层通用工具：客户端真实 IP 解析（穿透代理头）的<b>唯一实现</b>，
+ * 拦截器/切面/Controller/Service 共用，避免 X-Forwarded-For 解析逻辑散落多处。
+ * <p>解析优先级：X-Forwarded-For 首段（跳过 unknown）&gt; X-Real-IP &gt; 远端地址；
+ * 无请求上下文（如异步线程）返回 {@code unknown}。
  */
 public final class WebUtils {
 
@@ -23,17 +23,31 @@ public final class WebUtils {
         if (request == null) {
             return "unknown";
         }
-        String ip = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(ip)) {
-            ip = ip.split(",")[0].trim();
-        }
+        String ip = firstNonUnknown(request.getHeader("X-Forwarded-For"));
         if (!StringUtils.hasText(ip)) {
-            ip = request.getHeader("X-Real-IP");
+            ip = firstNonUnknown(request.getHeader("X-Real-IP"));
         }
         if (!StringUtils.hasText(ip)) {
             ip = request.getRemoteAddr();
         }
         return StringUtils.hasText(ip) ? ip : "unknown";
+    }
+
+    /**
+     * 逗号分隔头取第一个非空白、非 unknown 的 IP（如 X-Forwarded-For: 1.2.3.4, 5.6.7.8）。
+     * 代理链中的 unknown 占位需跳过，取第一个真实 IP。
+     */
+    private static String firstNonUnknown(String headerValue) {
+        if (!StringUtils.hasText(headerValue)) {
+            return null;
+        }
+        for (String part : headerValue.split(",")) {
+            String candidate = part.trim();
+            if (StringUtils.hasText(candidate) && !"unknown".equalsIgnoreCase(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     /**

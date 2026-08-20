@@ -2,8 +2,6 @@ package com.stellar.infra;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.stellar.system.entity.SysLog;
-import com.stellar.system.entity.SysUser;
-import com.stellar.system.mapper.SysUserMapper;
 import com.stellar.system.service.SysLogService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,19 +15,18 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * {@link ExternalCallLogger} 单测：success/failure 四重载、操作人解析（登录/匿名/异常）、
+ * {@link ExternalCallLogger} 单测：success/failure 四重载、操作人解析（登录只取 userId/匿名/异常）、
  * 参数与错误信息截断、写 sys_log 异常吞掉。
+ * <p>P3 起登录态解析只填 operatorUserId，用户名由 saveLog 异步线程查库填充（本层不再查库）。
  */
 @ExtendWith(MockitoExtension.class)
 class ExternalCallLoggerTest {
 
     @Mock
     SysLogService sysLogService;
-    @Mock
-    SysUserMapper sysUserMapper;
 
     private ExternalCallLogger logger() {
-        return new ExternalCallLogger(sysLogService, sysUserMapper);
+        return new ExternalCallLogger(sysLogService);
     }
 
     @Test
@@ -63,20 +60,17 @@ class ExternalCallLoggerTest {
     }
 
     @Test
-    void success_登录_按用户解析用户名() {
+    void success_登录_只取userId不查库() {
         ExternalCallLogger logger = logger();
-        SysUser u = new SysUser();
-        u.setId(1L);
-        u.setUsername("admin");
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(true);
             stp.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-            when(sysUserMapper.selectById(1L)).thenReturn(u);
             logger.success("AI图片", "generate", "p", 5L);
         }
         ArgumentCaptor<SysLog> cap = ArgumentCaptor.forClass(SysLog.class);
         verify(sysLogService).saveLog(cap.capture());
-        assertEquals("admin", cap.getValue().getOperator());
+        assertEquals(1L, cap.getValue().getOperatorUserId());
+        assertNull(cap.getValue().getOperator(), "用户名应由 saveLog 异步线程解析，本层不填");
     }
 
     @Test
@@ -85,12 +79,12 @@ class ExternalCallLoggerTest {
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(true);
             stp.when(StpUtil::getLoginIdAsLong).thenReturn(9L);
-            when(sysUserMapper.selectById(9L)).thenReturn(null);
             logger.success("AI图片", "generate", "p", 5L);
         }
         ArgumentCaptor<SysLog> cap = ArgumentCaptor.forClass(SysLog.class);
         verify(sysLogService).saveLog(cap.capture());
-        assertEquals("user:9", cap.getValue().getOperator());
+        assertEquals(9L, cap.getValue().getOperatorUserId());
+        assertNull(cap.getValue().getOperator());
     }
 
     @Test

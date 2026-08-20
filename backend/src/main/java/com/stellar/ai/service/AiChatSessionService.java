@@ -20,8 +20,8 @@ import com.stellar.ai.service.rag.RagSearchService;
 import com.stellar.ai.service.rag.RetrievalResult;
 import com.stellar.ai.vo.AiChatResult;
 import com.stellar.ai.vo.RagSource;
+import com.stellar.interceptor.WebUtils;
 import jakarta.annotation.Resource;
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -523,22 +523,7 @@ public class AiChatSessionService {
     }
 
     private String getClientIp() {
-        try {
-            HttpServletRequest req = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
-            String ip = req.getHeader("X-Forwarded-For");
-            if (ip != null && !ip.isBlank()) {
-                ip = ip.split(",")[0].trim();
-            }
-            if (ip == null || ip.isBlank()) {
-                ip = req.getHeader("X-Real-IP");
-            }
-            if (ip == null || ip.isBlank()) {
-                ip = req.getRemoteAddr();
-            }
-            return ip;
-        } catch (Exception e) {
-            return "unknown";
-        }
+        return WebUtils.getClientIp();
     }
 
     private Page<Map<String, Object>> mapWithUsername(Page<AiChatSession> page) {

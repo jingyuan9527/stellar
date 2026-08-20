@@ -3,6 +3,8 @@ package com.stellar.config;
 import com.stellar.common.CacheConstants;
 import com.stellar.ai.service.AiNotifyListener;
 import com.stellar.ai.service.AiNotifyPublisher;
+import com.stellar.infra.CacheInvalidationListener;
+import com.stellar.infra.CacheInvalidationPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.cache.annotation.EnableCaching;
@@ -78,14 +80,18 @@ public class RedisConfig {
     }
 
     /**
-     * Redis pub/sub 监听容器：订阅 AI 任务通知 channel，收到消息交给 AiNotifyListener 处理。
+     * Redis pub/sub 监听容器：订阅 AI 任务通知 + RAG 缓存失效两个 channel，
+     * 分别交给对应 Listener 处理。
      */
     @Bean
     public RedisMessageListenerContainer redisMessageListenerContainer(
-            RedisConnectionFactory factory, AiNotifyListener listener) {
+            RedisConnectionFactory factory, AiNotifyListener aiNotifyListener,
+            CacheInvalidationListener cacheInvalidationListener) {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(factory);
-        container.addMessageListener(listener, new ChannelTopic(AiNotifyPublisher.CHANNEL));
+        container.addMessageListener(aiNotifyListener, new ChannelTopic(AiNotifyPublisher.CHANNEL));
+        container.addMessageListener(cacheInvalidationListener,
+                new ChannelTopic(CacheInvalidationPublisher.CHANNEL));
         return container;
     }
 }

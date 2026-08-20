@@ -1,6 +1,7 @@
 package com.stellar.infra;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.stellar.interceptor.WebUtils;
 import jakarta.servlet.http.HttpServletRequest;
 
 public final class SubjectUtils {
@@ -20,16 +21,6 @@ public final class SubjectUtils {
     }
 
     public static String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip != null && !ip.isBlank()) {
-            ip = ip.split(",")[0].trim();
-        }
-        if (ip == null || ip.isBlank()) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (ip == null || ip.isBlank()) {
-            ip = request.getRemoteAddr();
-        }
-        return ip;
+        return WebUtils.getClientIp(request);
     }
 }

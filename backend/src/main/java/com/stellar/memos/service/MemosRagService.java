@@ -1,16 +1,23 @@
 package com.stellar.memos.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.stellar.ai.service.AiEmbeddingService;
 import com.stellar.ai.service.VectorOps;
 import com.stellar.ai.service.rag.Bm25Index;
 import com.stellar.common.BusinessException;
+import com.stellar.infra.CacheInvalidationEvent;
+import com.stellar.infra.CacheInvalidationMessage;
+import com.stellar.infra.CacheInvalidationPublisher;
 import com.stellar.memos.entity.MemosNote;
 import com.stellar.memos.mapper.MemosNoteMapper;
 import com.stellar.memos.vo.MemosJobResultVO;
 import com.stellar.system.service.SysSettingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -20,8 +27,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -44,18 +51,29 @@ public class MemosRagService {
     private static final String KEY_BASE_URL = MemosService.KEY_BASE_URL;
     /** 上次全量重建时间（sys_setting），供前端展示 RAG 索引构建状态 */
     private static final String KEY_LAST_REBUILD = "memos_rag_last_rebuild";
+    /** 笔记缓存固定单键（全量列表，无分区缓存）。 */
+    private static final String CACHE_KEY = "notes";
 
-    /** LRU 向量缓存：笔记量小（几百条）全量驻留内存毫秒级余弦，超出逐出 */
-    private final Map<Long, CachedNote> noteCache = Collections.synchronizedMap(
-            new LinkedHashMap<>(128, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<Long, CachedNote> eldest) {
-                    return size() > 128;
-                }
-            });
+    /**
+     * 笔记向量缓存（Caffeine 单键：get(k, loader) 原子单飞，重建/失效不重复查库，带驱逐防 OOM）。
+     * 笔记量小（几百条）全量驻留内存毫秒级余弦。
+     */
+    private final Cache<String, List<CachedNote>> noteCache = Caffeine.newBuilder()
+            .maximumSize(1)
+            .expireAfterWrite(30, TimeUnit.MINUTES)
+            .build();
 
     /** BM25 倒排索引缓存（与 noteCache 同生命周期：getCachedNotes 重建时一并重建，invalidateCache 时清空）。 */
-    private volatile Bm25Index noteBm25;
+    private final Cache<String, Bm25Index> noteBm25Cache = Caffeine.newBuilder()
+            .maximumSize(1)
+            .expireAfterWrite(30, TimeUnit.MINUTES)
+            .build();
+
+    /**
+     * 多实例缓存失效广播（可选注入：单测直接 new 时为 null，跳过广播）。
+     */
+    @Autowired(required = false)
+    private CacheInvalidationPublisher cacheInvalidationPublisher;
 
     /** 全量重建并发锁：连点/并发触发时拒绝后到者，避免重复向量化烧 token。 */
     private final AtomicBoolean rebuildLock = new AtomicBoolean(false);
@@ -237,10 +255,7 @@ public class MemosRagService {
         if (notes.isEmpty()) {
             return List.of();
         }
-        Bm25Index idx = noteBm25;
-        if (idx == null) {
-            return List.of();
-        }
+        Bm25Index idx = noteBm25Cache.get(CACHE_KEY, k -> Bm25Index.build(notes.stream().map(CachedNote::content).toList()));
         List<Bm25Index.Score> scores = idx.search(query, topK > 0 ? topK : 4);
         if (scores.isEmpty()) {
             return List.of();
@@ -256,41 +271,55 @@ public class MemosRagService {
         return result;
     }
 
-    /** 笔记数据变更（标记删除等不影响内容但需从检索剔除）时由 MemosService 调用清缓存。 */
+    /** 笔记数据变更（标记删除等不影响内容但需从检索剔除）时由 MemosService 调用清缓存，并广播各实例。 */
     public void invalidateCache() {
-        noteCache.clear();
-        noteBm25 = null;
+        noteCache.invalidate(CACHE_KEY);
+        noteBm25Cache.invalidate(CACHE_KEY);
+        publishInvalidation(CacheInvalidationMessage.SCOPE_MEMOS, null);
+    }
+
+    private void publishInvalidation(String scope, String key) {
+        if (cacheInvalidationPublisher != null) {
+            cacheInvalidationPublisher.publish(scope, key);
+        }
+    }
+
+    /** 其他实例数据变更广播 → 本实例清空检索缓存（多实例一致性）。 */
+    @EventListener
+    public void onCacheInvalidation(CacheInvalidationEvent event) {
+        if (!CacheInvalidationMessage.SCOPE_MEMOS.equals(event.scope())) {
+            return;
+        }
+        noteCache.invalidate(CACHE_KEY);
+        noteBm25Cache.invalidate(CACHE_KEY);
+        log.debug("[备忘RAG] 收到远端缓存失效，清空检索缓存");
     }
 
     // ===== 内部 =====
 
     private List<CachedNote> getCachedNotes() {
-        synchronized (noteCache) {
-            if (!noteCache.isEmpty()) {
-                return new ArrayList<>(noteCache.values());
+        // Caffeine get(k, loader)：原子单飞加载（并发仅一次查库），不持锁
+        return noteCache.get(CACHE_KEY, k -> loadNotes());
+    }
+
+    /** 全量加载存活笔记（含未向量化 vector=null）：BM25 关键词通道不依赖向量，与稠密通道互补。 */
+    private List<CachedNote> loadNotes() {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, uid, content, embedding FROM memos_note WHERE remote_deleted=0");
+        List<CachedNote> loaded = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Number id = (Number) row.get("id");
+            if (id == null) {
+                continue;
             }
-            // 全量加载（含未向量化笔记 vector=null）：BM25 关键词通道不依赖向量，
-            // 向量化失败/未赶上增量时关键词检索仍可用，与稠密通道互补
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    "SELECT id, uid, content, embedding FROM memos_note "
-                            + "WHERE remote_deleted=0");
-            List<CachedNote> loaded = new ArrayList<>(rows.size());
-            for (Map<String, Object> row : rows) {
-                Number id = (Number) row.get("id");
-                if (id == null) {
-                    continue;
-                }
-                float[] vector = VectorOps.parseVector((String) row.get("embedding"));
-                loaded.add(new CachedNote(id.longValue(), (String) row.get("uid"),
-                        (String) row.get("content"), vector == null || vector.length == 0 ? null : vector));
-            }
-            for (CachedNote n : loaded) {
-                noteCache.put(n.id(), n);
-            }
-            // BM25 与向量缓存同源同序：docIndex 对齐 loaded 列表下标（LinkedHashMap 插入序一致）
-            noteBm25 = Bm25Index.build(loaded.stream().map(CachedNote::content).toList());
-            return loaded;
+            float[] vector = VectorOps.parseVector((String) row.get("embedding"));
+            loaded.add(new CachedNote(id.longValue(), (String) row.get("uid"),
+                    (String) row.get("content"), vector == null || vector.length == 0 ? null : vector));
         }
+        List<CachedNote> immutable = List.copyOf(loaded);
+        // BM25 与向量缓存同源同序：docIndex 对齐 immutable 列表下标
+        noteBm25Cache.put(CACHE_KEY, Bm25Index.build(immutable.stream().map(CachedNote::content).toList()));
+        return immutable;
     }
 
     private CachedNote findCached(long id, List<CachedNote> notes) {

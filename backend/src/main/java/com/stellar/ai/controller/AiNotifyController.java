@@ -3,15 +3,13 @@ package com.stellar.ai.controller;
 import cn.dev33.satoken.stp.StpUtil;
 import com.stellar.common.annotation.PublicAccess;
 import com.stellar.infra.SseEmitterManager;
-import jakarta.servlet.http.HttpServletRequest;
+import com.stellar.interceptor.WebUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
@@ -47,21 +45,6 @@ public class AiNotifyController {
         if (StpUtil.isLogin()) {
             return "account:" + StpUtil.getLoginIdAsString();
         }
-        HttpServletRequest req = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
-        return "ip:" + getClientIp(req);
-    }
-
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip != null && !ip.isBlank()) {
-            ip = ip.split(",")[0].trim();
-        }
-        if (ip == null || ip.isBlank()) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (ip == null || ip.isBlank()) {
-            ip = request.getRemoteAddr();
-        }
-        return ip;
+        return "ip:" + WebUtils.getClientIp();
     }
 }

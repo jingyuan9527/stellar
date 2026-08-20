@@ -8,6 +8,7 @@ import com.stellar.game.dto.GameScoreSubmitDTO;
 import com.stellar.enums.OperationType;
 import com.stellar.game.service.GameScoreService;
 import com.stellar.game.vo.GameScoreVO;
+import com.stellar.interceptor.WebUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -40,7 +41,7 @@ public class GameController {
     @PostMapping("/scores")
     @Log(title = "游戏成绩", type = OperationType.INSERT)
     public Result<GameScoreVO> submit(@Valid @RequestBody GameScoreSubmitDTO dto, HttpServletRequest request) {
-        return Result.success(gameScoreService.submit(dto, getClientIp(request)));
+        return Result.success(gameScoreService.submit(dto, WebUtils.getClientIp(request)));
     }
 
     /**
@@ -51,22 +52,5 @@ public class GameController {
     @Log(title = "游戏排行榜", type = OperationType.QUERY)
     public Result<List<GameScoreVO>> topScores() {
         return Result.success(gameScoreService.topScores());
-    }
-
-    /**
-     * 解析客户端真实 IP，穿透代理头（与 RateLimitInterceptor 一致）。
-     */
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip != null && !ip.isBlank()) {
-            ip = ip.split(",")[0].trim();
-        }
-        if (ip == null || ip.isBlank()) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (ip == null || ip.isBlank()) {
-            ip = request.getRemoteAddr();
-        }
-        return ip;
     }
 }

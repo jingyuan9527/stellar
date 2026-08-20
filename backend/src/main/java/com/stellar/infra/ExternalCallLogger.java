@@ -2,9 +2,7 @@ package com.stellar.infra;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.stellar.system.entity.SysLog;
-import com.stellar.system.entity.SysUser;
 import com.stellar.interceptor.WebUtils;
-import com.stellar.system.mapper.SysUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,6 +14,7 @@ import com.stellar.system.service.SysLogService;
  * 外部接口调用日志：统一记录 AI LLM / 图片 / 视频 / TTS / Embedding 等第三方接口调用结果。
  * <p>复用 sys_log 表（module=外部调用，operationType=OTHER），异步落库；
  * 同时输出运行日志，便于按 traceId 排查。异步线程无 web 上下文时 operator/ip/url 降级。
+ * <p>operator 解析：同步阶段只取 userId（不查库），用户名由 {@link SysLogService#saveLog} 异步线程解析。
  */
 @Slf4j
 @Service
@@ -23,7 +22,6 @@ import com.stellar.system.service.SysLogService;
 public class ExternalCallLogger {
 
     private final SysLogService sysLogService;
-    private final SysUserMapper sysUserMapper;
 
     private static final int MAX_PARAMS = 2000;
     private static final int MAX_ERROR = 2000;
@@ -58,7 +56,11 @@ public class ExternalCallLogger {
             SysLog sysLog = new SysLog();
             sysLog.setModule("外部调用");
             sysLog.setOperationType("OTHER");
-            sysLog.setOperator(operator != null ? operator : resolveOperator());
+            if (operator != null) {
+                sysLog.setOperator(operator);
+            } else {
+                resolveOperator(sysLog);
+            }
             sysLog.setRequestMethod("POST");
             sysLog.setRequestUrl(provider + " / " + action);
             sysLog.setJavaMethod(provider);
@@ -74,16 +76,18 @@ public class ExternalCallLogger {
         }
     }
 
-    private String resolveOperator() {
+    /**
+     * 只取登录 userId（不查库），用户名由 saveLog 异步线程解析；未登录/异常记 anonymous。
+     */
+    private void resolveOperator(SysLog sysLog) {
         try {
-            if (!StpUtil.isLogin()) {
-                return "anonymous";
+            if (StpUtil.isLogin()) {
+                sysLog.setOperatorUserId(StpUtil.getLoginIdAsLong());
+            } else {
+                sysLog.setOperator("anonymous");
             }
-            Long userId = StpUtil.getLoginIdAsLong();
-            SysUser user = sysUserMapper.selectById(userId);
-            return user != null ? user.getUsername() : "user:" + userId;
         } catch (Exception e) {
-            return "anonymous";
+            sysLog.setOperator("anonymous");
         }
     }
 

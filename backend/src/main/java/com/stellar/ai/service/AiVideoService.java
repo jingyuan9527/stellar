@@ -19,14 +19,12 @@ import com.stellar.ai.vo.AiResolvedConfig;
 import com.stellar.ai.vo.AiVideoHistoryVO;
 import com.stellar.ai.vo.AiVideoStatusVO;
 import com.stellar.ai.vo.AiVideoTaskVO;
-import jakarta.servlet.http.HttpServletRequest;
+import com.stellar.interceptor.WebUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -446,21 +444,6 @@ public class AiVideoService {
         if (StpUtil.isLogin()) {
             return StpUtil.getLoginIdAsString();
         }
-        try {
-            HttpServletRequest req = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
-            String ip = req.getHeader("X-Forwarded-For");
-            if (ip != null && !ip.isBlank()) {
-                ip = ip.split(",")[0].trim();
-            }
-            if (ip == null || ip.isBlank()) {
-                ip = req.getHeader("X-Real-IP");
-            }
-            if (ip == null || ip.isBlank()) {
-                ip = req.getRemoteAddr();
-            }
-            return ip;
-        } catch (Exception e) {
-            return "unknown";
-        }
+        return WebUtils.getClientIp();
     }
 }

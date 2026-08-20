@@ -4,10 +4,9 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.annotation.Log;
+import com.stellar.interceptor.WebUtils;
 import com.stellar.system.entity.SysLog;
-import com.stellar.system.entity.SysUser;
 import com.stellar.enums.OperationType;
-import com.stellar.system.mapper.SysUserMapper;
 import com.stellar.system.service.SysLogService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +34,6 @@ import java.util.regex.Pattern;
 public class LogAspect {
 
     private final SysLogService sysLogService;
-    private final SysUserMapper sysUserMapper;
     private final ObjectMapper objectMapper;
 
     private static final Pattern SENSITIVE_PATTERN = Pattern.compile(
@@ -55,7 +53,7 @@ public class LogAspect {
         if (request != null) {
             sysLog.setRequestMethod(request.getMethod());
             sysLog.setRequestUrl(request.getRequestURI());
-            sysLog.setIp(getIp(request));
+            sysLog.setIp(WebUtils.getClientIp(request));
         }
 
         String className = joinPoint.getTarget().getClass().getName();
@@ -66,7 +64,7 @@ public class LogAspect {
             paramNames = ms.getParameterNames();
         }
         sysLog.setParams(maskParams(joinPoint.getArgs(), paramNames));
-        sysLog.setOperator(resolveOperator(logAnno.type(), joinPoint.getArgs()));
+        resolveOperator(sysLog, logAnno.type(), joinPoint.getArgs());
 
         try {
             Object result = joinPoint.proceed();
@@ -91,28 +89,39 @@ public class LogAspect {
         }
     }
 
-    private String resolveOperator(OperationType type, Object[] args) {
+    /**
+     * 解析操作人：LOGIN 取请求体 username；其余类型仅取 userId（查用户名挪到 saveLog 异步线程，
+     * 消除请求线程上的同步 SELECT）。未登录记 anonymous。
+     */
+    private void resolveOperator(SysLog sysLog, OperationType type, Object[] args) {
         if (type == OperationType.LOGIN) {
-            for (Object arg : args) {
-                if (arg == null) continue;
-                try {
-                    JsonNode node = objectMapper.valueToTree(arg);
-                    JsonNode username = node.get("username");
-                    if (username != null && username.isTextual()) {
-                        return username.asText();
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-            return "unknown";
+            sysLog.setOperator(resolveLoginOperator(args));
+            return;
         }
         try {
-            Long userId = StpUtil.getLoginIdAsLong();
-            SysUser user = sysUserMapper.selectById(userId);
-            return user != null ? user.getUsername() : "user:" + userId;
+            if (StpUtil.isLogin()) {
+                sysLog.setOperatorUserId(StpUtil.getLoginIdAsLong());
+            } else {
+                sysLog.setOperator("anonymous");
+            }
         } catch (Exception e) {
-            return "anonymous";
+            sysLog.setOperator("anonymous");
         }
+    }
+
+    private String resolveLoginOperator(Object[] args) {
+        for (Object arg : args) {
+            if (arg == null) continue;
+            try {
+                JsonNode node = objectMapper.valueToTree(arg);
+                JsonNode username = node.get("username");
+                if (username != null && username.isTextual()) {
+                    return username.asText();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return "unknown";
     }
 
     /**
@@ -147,20 +156,6 @@ public class LogAspect {
         }
     }
 
-    private String getIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (isBlank(ip) || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (isBlank(ip) || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        if (ip != null && ip.contains(",")) {
-            ip = ip.split(",")[0].trim();
-        }
-        return ip;
-    }
-
     private HttpServletRequest getRequest() {
         try {
             RequestAttributes attrs = RequestContextHolder.getRequestAttributes();
@@ -185,9 +180,5 @@ public class LogAspect {
     private String truncate(String s, int max) {
         if (s == null) return null;
         return s.length() > max ? s.substring(0, max) : s;
-    }
-
-    private boolean isBlank(String s) {
-        return s == null || s.trim().isEmpty();
     }
 }

@@ -11,6 +11,14 @@
 
 > 随实现推进，对应行为规范同步补写进本文档，避免文档超前于代码（铁律8）。
 
+- **阶段 20（已实现）** 后端优化清单 P1-P6（OPTIMIZE_SPEC.md 全量落地）：
+  - **P1 IP 解析收敛**：`WebUtils.getClientIp(HttpServletRequest)` 成为唯一实现（规则：`X-Forwarded-For` 首段且跳过 `unknown` > `X-Real-IP` > `getRemoteAddr()`，trim 去空白；无请求上下文返回 `unknown`）。删除 9 处重复实现：`SubjectUtils.getClientIp` 改为委托 `WebUtils`、`LogAspect.getIp`、`AiImageController.getClientIp`、`AiNotifyController.getClientIp`、`GameController.getClientIp`、`AiChatSessionService.getClientIp`、`AiTtsService.getClientIp`、`AiVideoService.getSubjectId`（内联解析）、`AiImageService.getSubjectId`（原走 SubjectUtils）。
+  - **P2 import 清理**：`WebUtils` 删除无用 `import com.stellar.ai.service.AiChatService`（消除跨包编译依赖）。
+  - **P3 operator 异步解析**：`LogAspect` 与 `ExternalCallLogger` 在请求线程只取 `StpUtil.getLoginIdAsLong()` 填入 `SysLog.operatorUserId`（`@TableField(exist=false)` 不落库），用户名查库挪到 `SysLogService.saveLog`（`@Async("logTaskExecutor")`）异步线程，配 Caffeine 5min 短缓存（`userId→username`，2000 上限）避免重复查；LOGIN 类型仍直接解析请求体 username，未登录记 anonymous。请求线程不再有任何同步 `sys_user` SELECT。
+  - **P4+P5 RAG 缓存改造**：`AiKnowledgeService`（vectorCache/bm25Cache）与 `MemosRagService`（noteCache/noteBm25Cache）从 `Collections.synchronizedMap` 改为 **Caffeine**（`com.github.ben-manes.caffeine`，Boot BOM 管版本）：`maximumSize`（kb 16/notes 1）+ `expireAfterWrite(30min)` 带驱逐防 OOM；加载改 `cache.get(k, loader)` 原子单飞——同 key 并发仅一次查库、不同 key 并发、加载不持全局锁（替代原粗 `synchronized(map)` + 持锁执行 JDBC）。
+  - **P6 多实例缓存一致性**：新增 `com.stellar.infra` 三件套 `CacheInvalidationMessage`（record，scope=kb/memos）/`CacheInvalidationPublisher`（Redis pub/sub channel=`stellar:cache:invalidate`）/`CacheInvalidationListener`（MessageListener → 转 `CacheInvalidationEvent` Spring 事件，避免 infra 反向依赖业务包）；`AiKnowledgeService`/`MemosRagService` 数据变更失效本地缓存后广播，各实例 `@EventListener` 收到后失效本实例缓存（Redis pub/sub 广播含发布者自身，重复失效幂等无害）；`RedisConfig.redisMessageListenerContainer` 增加订阅该 channel。发布失败仅告警（本地已失效，其他实例最多短暂陈旧）。
+  - **测试**：`ExternalCallLoggerTest` 适配（登录态断言 `operatorUserId` + operator 为 null，不再断言请求线程查库）；`SysLogServiceTest` 新增 5 用例（operatorUserId 解析用户名 / 用户不存在记 `user:` 前缀 / 已填 operator 不覆盖 / 解析异常不阻断落库）。全量 701 用例通过。
+
 - **阶段 19（已实现）** 仪表盘「真·环比箭头」：KPI 卡带环比 pill（参考 tokens.css `--c-success`/`--c-error` 语义色 + `icons.ts` `iconMap.arrowUp/arrowDown`）：
   - **后端区间聚合**：`SysAiUsageMapper` 新增 `@Select` 方法 `selectTotalsBetween(start, end)`（`SELECT COALESCE(SUM(total_tokens),0) AS tokens, COUNT(*) AS calls FROM sys_ai_usage WHERE create_time >= #{start} AND create_time < #{end}`）；`SysAiUsageService.stats()` 调两次——当前 7 日 `[today-6 00:00, now]` 与前 7 日 `[today-13 00:00, today-6 00:00]`——写入 `AiUsageStatsVO` 新增 `periodTokens/periodCalls/prevPeriodTokens/prevPeriodCalls`（long，null 兜底 0）。
   - **任务周窗**：`DashboardService.buildTaskStatByType` 遍历 ai_task 时按同一 7 日窗口累加 `weekTotal`（本周）/`prevWeekTotal`（上周），`DashboardStatsVO.TaskStat` 加两个 long 字段，`buildTaskStat` 签名透传。

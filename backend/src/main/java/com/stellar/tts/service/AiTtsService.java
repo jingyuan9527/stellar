@@ -5,13 +5,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.common.BusinessException;
 import com.stellar.ai.vo.AiResolvedConfig;
-import jakarta.servlet.http.HttpServletRequest;
+import com.stellar.interceptor.WebUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -179,21 +177,6 @@ public class AiTtsService {
     }
 
     private String getClientIp() {
-        try {
-            HttpServletRequest req = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
-            String ip = req.getHeader("X-Forwarded-For");
-            if (ip != null && !ip.isBlank()) {
-                ip = ip.split(",")[0].trim();
-            }
-            if (ip == null || ip.isBlank()) {
-                ip = req.getHeader("X-Real-IP");
-            }
-            if (ip == null || ip.isBlank()) {
-                ip = req.getRemoteAddr();
-            }
-            return ip;
-        } catch (Exception e) {
-            return "unknown";
-        }
+        return WebUtils.getClientIp();
     }
 }

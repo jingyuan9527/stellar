@@ -2,6 +2,8 @@ package com.stellar.ai.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.stellar.common.BusinessException;
 import com.stellar.ai.dto.AiKnowledgeBaseDTO;
 import com.stellar.ai.entity.AiKnowledgeBase;
@@ -9,8 +11,13 @@ import com.stellar.ai.entity.AiKnowledgeChunk;
 import com.stellar.ai.mapper.AiKnowledgeBaseMapper;
 import com.stellar.ai.mapper.AiKnowledgeChunkMapper;
 import com.stellar.ai.service.rag.Bm25Index;
+import com.stellar.infra.CacheInvalidationEvent;
+import com.stellar.infra.CacheInvalidationMessage;
+import com.stellar.infra.CacheInvalidationPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -24,8 +31,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -49,22 +55,27 @@ public class AiKnowledgeService {
     private static final int EMBED_BATCH = 32;
     private static final int DEFAULT_TOP_K = 4;
     private static final int VECTOR_CACHE_MAX_KB = 16;
-    private final Map<Long, List<CachedChunk>> vectorCache = Collections.synchronizedMap(
-            new LinkedHashMap<>(VECTOR_CACHE_MAX_KB, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<Long, List<CachedChunk>> eldest) {
-                    return size() > VECTOR_CACHE_MAX_KB;
-                }
-            });
+
+    /**
+     * 向量检索缓存（Caffeine 带驱逐，防 OOM）。{@code get(k, loader)} 同 kb 原子单飞加载
+     * （并发只查一次库、不持全局锁），不同 kb 完全并发；加载期间不占任何锁。
+     */
+    private final Cache<Long, List<CachedChunk>> vectorCache = Caffeine.newBuilder()
+            .maximumSize(VECTOR_CACHE_MAX_KB)
+            .expireAfterWrite(30, TimeUnit.MINUTES)
+            .build();
 
     /** BM25 倒排索引缓存（与 vectorCache 同 key 同生命周期，随数据变更一起失效）。 */
-    private final Map<Long, Bm25Index> bm25Cache = Collections.synchronizedMap(
-            new LinkedHashMap<>(VECTOR_CACHE_MAX_KB, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<Long, Bm25Index> eldest) {
-                    return size() > VECTOR_CACHE_MAX_KB;
-                }
-            });
+    private final Cache<Long, Bm25Index> bm25Cache = Caffeine.newBuilder()
+            .maximumSize(VECTOR_CACHE_MAX_KB)
+            .expireAfterWrite(30, TimeUnit.MINUTES)
+            .build();
+
+    /**
+     * 多实例缓存失效广播（可选注入：单测直接 new 时为 null，跳过广播）。
+     */
+    @Autowired(required = false)
+    private CacheInvalidationPublisher cacheInvalidationPublisher;
 
     /** 重建索引并发锁：连点/并发触发时拒绝后到者，避免重复向量化烧 token。 */
     private final AtomicBoolean rebuildLock = new AtomicBoolean(false);
@@ -410,59 +421,71 @@ public class AiKnowledgeService {
     }
 
     private List<CachedChunk> getCachedChunks(Long kbId) {
-        synchronized (vectorCache) {
-            List<CachedChunk> cached = vectorCache.get(kbId);
-            if (cached != null) {
-                return cached;
-            }
-            // 全量加载（含未向量化分块 vector=null）：BM25 关键词通道不依赖向量，
-            // 向量化失败/切模型清空后关键词检索仍可用，与稠密通道互补
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    "SELECT id, chunk_text, source_name, embedding FROM ai_knowledge_chunk "
-                            + "WHERE kb_id=?", kbId);
-            List<CachedChunk> loaded = new ArrayList<>(rows.size());
-            for (Map<String, Object> row : rows) {
-                Number id = (Number) row.get("id");
-                if (id == null) {
-                    continue;
-                }
-                float[] vector = VectorOps.parseVector((String) row.get("embedding"));
-                loaded.add(new CachedChunk(id.longValue(), (String) row.get("chunk_text"),
-                        (String) row.get("source_name"), vector == null || vector.length == 0 ? null : vector));
-            }
-            List<CachedChunk> immutable = List.copyOf(loaded);
-            vectorCache.put(kbId, immutable);
-            return immutable;
-        }
+        // Caffeine get(k, loader)：同 kb 原子单飞（并发仅一次查库），不同 kb 并发，加载不持锁
+        return vectorCache.get(kbId, this::loadChunksFromDb);
     }
 
-    /** 数据变更（增删改文档/重建/切模型）后失效向量与 BM25 两套检索缓存。 */
+    /** 全量加载分块（含未向量化分块 vector=null）：BM25 关键词通道不依赖向量，与稠密通道互补。 */
+    private List<CachedChunk> loadChunksFromDb(Long kbId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, chunk_text, source_name, embedding FROM ai_knowledge_chunk WHERE kb_id=?", kbId);
+        List<CachedChunk> loaded = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Number id = (Number) row.get("id");
+            if (id == null) {
+                continue;
+            }
+            float[] vector = VectorOps.parseVector((String) row.get("embedding"));
+            loaded.add(new CachedChunk(id.longValue(), (String) row.get("chunk_text"),
+                    (String) row.get("source_name"), vector == null || vector.length == 0 ? null : vector));
+        }
+        return List.copyOf(loaded);
+    }
+
+    /** 数据变更（增删改文档/重建/切模型）后失效向量与 BM25 两套检索缓存，并广播各实例。 */
     private void invalidateIndexCache(Long kbId) {
+        Runnable invalidate = () -> {
+            vectorCache.invalidate(kbId);
+            bm25Cache.invalidate(kbId);
+            publishInvalidation(CacheInvalidationMessage.SCOPE_KB, String.valueOf(kbId));
+        };
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    vectorCache.remove(kbId);
-                    bm25Cache.remove(kbId);
+                    invalidate.run();
                 }
             });
             return;
         }
-        vectorCache.remove(kbId);
-        bm25Cache.remove(kbId);
+        invalidate.run();
+    }
+
+    private void publishInvalidation(String scope, String key) {
+        if (cacheInvalidationPublisher != null) {
+            cacheInvalidationPublisher.publish(scope, key);
+        }
+    }
+
+    /** 其他实例数据变更广播 → 本实例失效对应 KB 缓存（多实例一致性）。 */
+    @EventListener
+    public void onCacheInvalidation(CacheInvalidationEvent event) {
+        if (!CacheInvalidationMessage.SCOPE_KB.equals(event.scope())) {
+            return;
+        }
+        try {
+            Long kbId = Long.valueOf(event.key());
+            vectorCache.invalidate(kbId);
+            bm25Cache.invalidate(kbId);
+            log.debug("[知识库] 收到远端缓存失效 kbId={}", event.key());
+        } catch (Exception e) {
+            log.warn("[知识库] 远端缓存失效处理失败 key={}: {}", event.key(), e.getMessage());
+        }
     }
 
     /** BM25 索引按 kbId 缓存（与 vectorCache 同源同序：docIndex 对齐 CachedChunk 列表下标）。 */
     private Bm25Index getBm25Index(Long kbId, List<CachedChunk> chunks) {
-        synchronized (bm25Cache) {
-            Bm25Index idx = bm25Cache.get(kbId);
-            if (idx != null) {
-                return idx;
-            }
-            Bm25Index built = Bm25Index.build(chunks.stream().map(CachedChunk::text).toList());
-            bm25Cache.put(kbId, built);
-            return built;
-        }
+        return bm25Cache.get(kbId, k -> Bm25Index.build(chunks.stream().map(CachedChunk::text).toList()));
     }
 
     /** 检索结果详情（含 chunkId/sourceName/score），供 RAG 管线使用。 */

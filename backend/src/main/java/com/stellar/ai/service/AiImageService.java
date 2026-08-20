@@ -12,13 +12,10 @@ import com.stellar.ai.mapper.AiTaskMapper;
 import com.stellar.system.mapper.SysFileMapper;
 import com.stellar.ai.vo.AiImageTaskVO;
 import com.stellar.ai.vo.AiResolvedConfig;
-import com.stellar.infra.SubjectUtils;
-import jakarta.servlet.http.HttpServletRequest;
+import com.stellar.interceptor.WebUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -196,11 +193,6 @@ public class AiImageService {
         if (StpUtil.isLogin()) {
             return StpUtil.getLoginIdAsString();
         }
-        try {
-            HttpServletRequest req = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
-            return SubjectUtils.getClientIp(req);
-        } catch (Exception e) {
-            return "unknown";
-        }
+        return WebUtils.getClientIp();
     }
 }

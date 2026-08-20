@@ -11,6 +11,7 @@ import com.stellar.ai.dto.AiImageHistoryQueryDTO;
 import com.stellar.enums.OperationType;
 import com.stellar.ai.service.AiImageService;
 import com.stellar.ai.vo.AiImageTaskVO;
+import com.stellar.interceptor.WebUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -63,7 +64,7 @@ public class AiImageController {
     @Log(title = "AI图片历史", type = OperationType.QUERY)
     public Result<Page<AiImageTaskVO>> page(@ModelAttribute AiImageHistoryQueryDTO query, HttpServletRequest request) {
         String subjectType = StpUtil.isLogin() ? "account" : "ip";
-        String subjectId = StpUtil.isLogin() ? StpUtil.getLoginIdAsString() : getClientIp(request);
+        String subjectId = StpUtil.isLogin() ? StpUtil.getLoginIdAsString() : WebUtils.getClientIp(request);
         return Result.success(aiImageService.pageHistory(query, subjectType, subjectId));
     }
 
@@ -75,26 +76,9 @@ public class AiImageController {
     @Log(title = "AI图片历史", type = OperationType.DELETE)
     public Result<Void> delete(@PathVariable Long taskId, HttpServletRequest request) {
         String subjectType = StpUtil.isLogin() ? "account" : "ip";
-        String subjectId = StpUtil.isLogin() ? StpUtil.getLoginIdAsString() : getClientIp(request);
+        String subjectId = StpUtil.isLogin() ? StpUtil.getLoginIdAsString() : WebUtils.getClientIp(request);
         aiImageService.deleteTask(taskId, subjectType, subjectId);
         return Result.success();
-    }
-
-    /**
-     * 解析客户端真实 IP，穿透代理头（与 RateLimitInterceptor 一致）。
-     */
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip != null && !ip.isBlank()) {
-            ip = ip.split(",")[0].trim();
-        }
-        if (ip == null || ip.isBlank()) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (ip == null || ip.isBlank()) {
-            ip = request.getRemoteAddr();
-        }
-        return ip;
     }
 }
 
