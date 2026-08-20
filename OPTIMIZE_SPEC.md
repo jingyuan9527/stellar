@@ -20,7 +20,7 @@
   - ✅ **S5** `MyBatisPlusConfig` 挂 `BlockAttackInnerInterceptor`，无 WHERE 的 update/delete 直接拦截。
   - ✅ **P7** HikariCP `maximum-pool-size` 8→15、`minimum-idle` 2→5，缓解异步 AI worker 并发持连接打满。
   - ✅ **P8** `SseEmitterManager` `EMITTER_TIMEOUT` 24h→1h（30s 心跳保活下不影响长期存活）。
-- **待办（下一轮）**：S1 CORS 白名单 / S4 本地密码改环境变量 / P10 散落 class / P9 AiChatService 测试。
+- **待办（下一轮，本轮新研究项）**：**P9** AiChatService SSE 编排（P9-1 单轮超时 2min→5min 对齐 / P9-2 背压隔离 / P9-5 补集成测试）/ **P11** 仪表盘 ai_task 全量扫描下推 SQL / **P12** memos 检索前导通配 LIKE（规模化时改 pg_trgm）/ S1 CORS 白名单 / S4 本地密码改环境变量 / P10 散落 class。
 
 ---
 
@@ -181,21 +181,65 @@
 
 ---
 
-## ⚪ P9 — 补充 AiChatService SSE 编排的测试与超时（待补，已知缺口）
+## 🔴 P9 — AiChatService SSE 编排深入审查（已研究，含实质问题）
 
-- **问题**：`AiChatService`（约千行、SSE 异步编排、覆盖率 17.2%、非确定性）流式连接管理 / token 计费 / 异常恢复未深入审查，是最大未知面。
-- **做法**（建议在以上落地后单独排期）：
-  1. 补集成测试覆盖 SSE 流式返回、token 计费、异常恢复路径。
-  2. 明确流超时与背压策略，避免客户端慢导致服务端连接堆积。
+> 已读实码（1059 行）逐方法分析。整体**设计良好**：生命周期回调干净无泄漏、客户端断开优雅处理、计费有 usage 兜底、日志隐私意识强（截断、不落响应体）。但发现以下实质问题。
+
+### P9-1（高）单轮流式 emitter 超时(2min) < HTTP 请求超时(5min) → 慢模型被掐断 + 漏计费
+- **位置**：`ai/service/AiChatService.java:127`（`new SseEmitter(120000L)`）vs `:141`（`.timeout(Duration.ofMinutes(5))`）。
+- **问题**：`doStreamChat` 的 SSE emitter 超时仅 **2 分钟**，但上游 LLM HTTP 请求超时是 **5 分钟**。若模型 3 分钟才出完，`onTimeout` 触发、Spring 自动 complete；此时 HTTP 仍在进行，`parseStream` 后续 `emitter.send()` 抛 `ResponseBodyEmitter has already completed` → 被 `isClientDisconnect()` 判为客户端断开**静默 return**，**不再执行 `recordTokenUsage`/`recordHistory`**。结果：用户 2 分钟被掐断、且这次调用**不计费、不落历史**。
+- **对比**：多轮/工具链路走 `createChatEmitter()`（`:365` 用 5 分钟），与 HTTP 超时一致，无此问题——**单轮与多轮超时不一致本身就是 bug 信号**。
+- **做法**：
+  1. 抽常量 `CHAT_SSE_TIMEOUT = Duration.ofMinutes(5).toMillis()`，`doStreamChat` 与 `createChatEmitter` 统一用它（≥ 最坏 HTTP 超时）。
+  2. **顺带提醒**：`SseEmitterManager.EMITTER_TIMEOUT` 已改 1h，但聊天 emitter 是 `new SseEmitter(...)` 自建、不进 manager，P8 对聊天无效。若要统一，聊天 emitter 也应引用同一常量（或挂到 manager）。
+  3. 修复后 `isClientDisconnect` 对"已 complete 后 send"的静默 return 仍合理（真断开），无需改。
+
+### P9-2（中）SSE 分片 `emitter.send()` 阻塞共享 HttpClient worker 线程（背压）
+- **位置**：`parseStream`（`:861-905`）在 `HttpClient.sendAsync` 的响应读取线程里同步调用 `emitter.send()`。
+- **问题**：`httpClient` 是字段级单例（`:64`），`sendAsync` 默认用其内置 executor。`emitter.send()` 是同步阻塞写——**客户端慢时该写阻塞，占用 HttpClient 的 worker 线程**。并发慢客户端多时，HttpClient executor 被占满 → 所有 AI 请求被拖慢（HttpClient 默认 cached 无限池，仍是隐性瓶颈）。
+- **做法**（个人站可暂缓，规模化必做）：SSE 分片发送改投到独立发送线程池（把 `emitter.send` 包一层专用 executor / `SseEmitter` scheduler），避免反向阻塞上游读取线程；或显式给 `httpClient` 配有界、命名清晰的 executor 并监控队列。
+
+### P9-3（低/加固）流式接口缺单主体并发上限
+- **位置**：`streamChat`/`streamMultiChat*` 入口。
+- **问题**：未对"同一 account/ip 的并发 SSE 流"做上限；工具链路还会再发起一次上游 HTTP 调用（`doSecondStream`）。`aiToolExecutor` 仅 4 线程（`AbortPolicy`，被拒时走 `catch` 优雅报错，不崩，但用户看到失败）。
+- **做法**：确认聊天 SSE 入口已挂 `@PublicAccess`+`@RateLimit`（与文案/IP 日限一致）；如需更强隔离，加"单主体最大并发流"信号量。个人站当前风险低。
+
+### P9-4（信息）工具调用会话计费≈2 倍
+- **位置**：`:721`（第一次判定调用计费）+ `:806`（第二次生成调用计费）。
+- **说明**：工具调用会真实发起两次 LLM 调用（判定 + 生成），各计一次 token，属合理；但语义上"用户看到的一段回复"在统计里≈2 倍 token。仅作口径说明，非 bug。
+
+### P9-5（建议）补流式编排的集成测试
+- **做法**：Mock `HttpClient`/上游 SSE 流，覆盖①正常流式转发+`done`+计费；②上游 HTTP 非 200 → `sendError`；③客户端中途断开 → 优雅 return 不崩；④工具调用两阶段（判定有 tool_calls → 执行 → 第二次流）；⑤P9-1 修复后"慢模型不被掐断"。把 `AiChatService` 覆盖率从 17.2% 拉起。
+
+---
+
+## 🔴 P11 — 仪表盘 ai_task 全量扫描（性能时间炸弹）
+
+- **问题**：`system/service/DashboardService.java:67-70` 的 `buildTaskStatByType` 每次刷新仪表盘都 `aiTaskMapper.selectList(new LambdaQueryWrapper<AiTask>().eq(taskType))`——**把该类型全部历史行拉进内存再 Java 遍历**算 total/today/success/周环比。`ai_task` 随每次 AI 调用无限增长（文本生成、图片、视频、TTS 都记），**表越大每次仪表盘越慢、内存越高**，典型"上线一时爽、运行半年卡"。
+- **对比**：同文件 `sys_ai_usage` 统计走 `selectTotalsBetween(start,end)` **有界 SQL 聚合**（命中 `idx_sys_ai_usage_create_time`），作者懂这手法，task 统计漏了。`:156-159` 的 tts 统计同样全量扫描。
+- **位置**：`DashboardService.buildTaskStatByType`（`:66-70`）、tts 统计（`:156-159`）。
+- **做法**（聚合下推 SQL，索引已就绪）：
+  1. `AiTaskMapper` 新增聚合方法：`selectCountByTypeAndStatus(taskType, status)`、`selectCountByTypeAndStatusSince(taskType, status, since)`（命中 `idx_ai_task_request_time`）、近7日/前7日 `request_time` 范围 count。
+  2. `buildTaskStatByType` 改为多次有界 `selectCount`，不再 `selectList` 全表。
+  3. `:111` `fileMapper.selectList` 若也是无界全量，同样改 count/有界查询。
+
+---
+
+## 🟡 P12 — Memos 全文检索走前导通配 LIKE（扩展天花板）
+
+- **问题**：`memos/service/MemosService.java:694-696` 搜索用 `like(content, word) or like(uid, word) or like(tags, word)`，多词之间 AND。**`content` 是前导通配 `LIKE '%word%'`——任何 B-tree 索引都用不上，必走全表顺序扫描**。`idx_memos_note_uid` 仅对 `uid` 前缀匹配有用，对 `content` 检索无效。
+- **位置**：`MemosService` 搜索分支（约 `:690-700`）。
+- **现状评估**：个人笔记量（数百~数千条）下延迟可忽略，**当前不必改**；但这是明确扩展天花板——笔记上万后搜索随表增长线性变慢。
+- **做法**（按需，规模化时做）：
+  1. **PostgreSQL 全文检索**：`content` 建 `tsvector` 生成列 + GIN 索引，`to_tsquery` 替代 LIKE（中文需 `zhparser` 插件，否则按空格分词对中文弱）。
+  2. **或 pg_trgm 三元组索引**（推荐，改动最小）：`CREATE INDEX ... USING gin(content gin_trgm_ops)`，让 `LIKE '%word%'` 也能走索引（对中文子串匹配友好，无需分词插件）。
+  3. 多词 AND 改为 `tsquery` 的 `&` 连接或 `word1% & word2%`（pg_trgm 用 `%` 操作符）。
 
 ---
 
 ## 实施顺序建议（更新）
 
 - ✅ **第一轮（已完成 commit `82157b7`）**：P1 + P2 + P3 + P4 + P5 + P6
-- 🟡 **第二轮（安全与连接池，已完成）**：
-  - ✅ S5 BlockAttack 拦截器 / P7 HikariCP 连接池上调 / P8 SSE 超时收紧
-  - ✅ S2 全部收尾（cacheManager + redisTemplate 关 typing，pub/sub 改类型化序列化）
-  - ✅ S3 硬阻断（登录会话标记 + AuthInterceptor 拦截 + 改密清标记）
-- ⬜ **第三轮（清理）**：S1 CORS 白名单 → S4 本地密码改环境变量 → P10 散落 class 清理
-- ⬜ **P9（单独排期）**：AiChatService SSE 编排补集成测试与超时背压（最大未知面，不阻塞前序）
+- ✅ **第二轮（安全与连接池，已完成）**：S2 全部收尾（cacheManager + redisTemplate 关 typing，pub/sub 改类型化序列化）+ S3 硬阻断（登录会话标记 + AuthInterceptor 拦截 + 改密清标记）+ S5 BlockAttack 拦截器 + P7 HikariCP 连接池上调 + P8 SSE 超时收紧
+- ⬜ **第三轮（性能深挖，本轮新研究）**：**P9-1** 单轮流式 emitter 超时 2min→5min 对齐（防慢模型掐断+漏计费）→ **P11** 仪表盘 ai_task 全量扫描下推 SQL 聚合 → **P9-2** SSE 发送背压隔离（规模化）→ **P9-5** 补流式编排集成测试 → **P12** memos 检索前导通配 LIKE（规模化时改 pg_trgm）
+- ⬜ **第四轮（清理）**：S1 CORS 白名单 → S4 本地密码改环境变量 → P10 散落 class 清理
