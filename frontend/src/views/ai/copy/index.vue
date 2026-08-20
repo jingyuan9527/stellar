@@ -99,7 +99,7 @@ const allColumns: DataTableColumns<AiChatRecord> = [
     title: '结果', key: 'result', width: 150,
     render: (row) => row.status === 'failed'
       ? h(NTag, { type: 'error', size: 'small' }, { default: () => '失败' })
-      : h('span', { style: 'opacity: 0.7' },
+      : h('span', { style: 'color: var(--c-text-3)' },
           row.result ? (row.result.length > 30 ? row.result.slice(0, 30) + '...' : row.result) : '-'),
   },
   { title: '返回时间', key: 'responseTime', width: 170, render: (row) => formatTime(row.responseTime) },
@@ -394,6 +394,6 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 500;
   margin-bottom: 6px;
-  opacity: 0.8;
+  color: var(--c-text-3);
 }
 </style>

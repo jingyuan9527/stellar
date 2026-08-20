@@ -47,7 +47,7 @@ const allColumns: DataTableColumns<AiTemplate> = [
   },
   {
     title: '提示词', key: 'prompt', ellipsis: { tooltip: true },
-    render: (row) => h('span', { style: 'opacity: 0.6; font-size: 12px' }, row.prompt.slice(0, 80) + (row.prompt.length > 80 ? '...' : '')),
+    render: (row) => h('span', { style: 'color: var(--c-text-3); font-size: 12px' }, row.prompt.slice(0, 80) + (row.prompt.length > 80 ? '...' : '')),
   },
   {
     title: '类型', key: 'builtIn', width: 70,

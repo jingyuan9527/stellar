@@ -174,7 +174,7 @@ onBeforeUnmount(() => {
 
 .answer-label {
   font-size: 13px;
-  opacity: 0.5;
+  color: var(--c-text-3);
   margin-bottom: 8px;
 }
 
@@ -190,7 +190,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   font-size: 14px;
-  opacity: 0.7;
+  color: var(--c-text-3);
 }
 
 .loading-icon {

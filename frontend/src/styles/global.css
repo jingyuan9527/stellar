@@ -48,15 +48,19 @@ a {
   line-height: 1.6;
 }
 
-/* 骨架屏：行内高亮呼吸动效，配合 SkeletonList 使用 */
-@keyframes skeleton-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+/* 骨架屏：渐变 sweep 动效，配合 SkeletonList 使用（prefers-reduced-motion 下关停，见底部 media 查询） */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 .skeleton-line {
   border-radius: var(--r-sm);
-  background: var(--c-fill-2);
-  animation: skeleton-blink 1.2s ease-in-out infinite;
+  background: linear-gradient(90deg,
+    var(--c-fill-2) 25%,
+    color-mix(in srgb, var(--c-fill-2) 60%, #fff) 50%,
+    var(--c-fill-2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
 }
 
 /* 列表 stagger 入场：子项依次淡入上浮 */

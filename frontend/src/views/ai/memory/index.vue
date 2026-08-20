@@ -339,7 +339,7 @@ onMounted(() => {
 }
 .hint {
   font-size: 12px;
-  opacity: 0.6;
+  color: var(--c-text-3);
   margin: 0 0 12px;
 }
 </style>

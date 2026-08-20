@@ -653,7 +653,7 @@ onMounted(() => {
 
         <!-- 移动端：卡片列表（内容整卡换行展示，杜绝横向滚动挤走正文） -->
         <div v-else class="note-cards">
-          <div v-for="row in tableData" :key="row.id" class="note-card" :class="{ 'card-deleted': row.remoteDeleted === 1 }">
+          <div v-for="(row, idx) in tableData" :key="row.id" class="note-card" :class="{ 'card-deleted': row.remoteDeleted === 1 }" :style="{ animationDelay: idx * 40 + 'ms' }">
             <div class="card-head">
               <NCheckbox :checked="checkedKeys.includes(row.id)"
                 @update:checked="(v: boolean) => toggleCheck(row.id, v)" class="card-check" />
@@ -930,6 +930,7 @@ onMounted(() => {
   padding: 10px 12px;
   background: rgba(128, 128, 128, 0.06);
   transition: border-color 0.2s, background-color 0.2s;
+  animation: list-in 0.3s ease both;
 }
 
 .note-card:hover {
@@ -938,7 +939,7 @@ onMounted(() => {
 }
 
 .note-card.card-deleted {
-  opacity: 0.55;
+  color: var(--c-text-3);
 }
 
 .note-card.card-deleted .card-content-text {
@@ -1069,7 +1070,7 @@ onMounted(() => {
   padding: 0 1px;
 }
 :deep(.row-deleted) {
-  opacity: 0.55;
+  color: var(--c-text-3);
 }
 :deep(.row-deleted td) {
   text-decoration: line-through;

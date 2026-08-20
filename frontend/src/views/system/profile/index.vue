@@ -297,7 +297,7 @@ onMounted(() => {
 
 .about-preview-label {
   font-size: 12px;
-  opacity: 0.5;
+  color: var(--c-text-3);
   margin-bottom: 8px;
 }
 

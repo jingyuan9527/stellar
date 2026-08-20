@@ -93,8 +93,8 @@ const allColumns: DataTableColumns<ConchAnswer> = [
   {
     title: '匹配描述', key: 'matchDescription', ellipsis: { tooltip: true },
     render: (row) => row.matchDescription
-      ? h('span', { style: 'opacity: 0.7; font-size: 12px' }, row.matchDescription)
-      : h('span', { style: 'opacity: 0.3' }, '—'),
+      ? h('span', { style: 'color: var(--c-text-3); font-size: 12px' }, row.matchDescription)
+      : h('span', { style: 'color: var(--c-text-3)' }, '—'),
   },
   {
     title: '启用', key: 'enabled', width: 80,
@@ -262,7 +262,7 @@ const allRecordColumns: DataTableColumns<ConchRecord> = [
     title: '命中回答', key: 'answerText', width: 160,
     render: (row) => row.answerText
       ? h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => row.answerText })
-      : h('span', { style: 'opacity: 0.3' }, '—'),
+      : h('span', { style: 'color: var(--c-text-3)' }, '—'),
   },
   {
     title: '用户', key: 'userId', width: 100,
@@ -456,7 +456,7 @@ onMounted(() => {
 
 .switch-hint {
   font-size: 12px;
-  opacity: 0.6;
+  color: var(--c-text-3);
 }
 
 .inline-audio {

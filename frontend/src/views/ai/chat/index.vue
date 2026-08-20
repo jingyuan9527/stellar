@@ -351,10 +351,11 @@ onMounted(() => {
       </div>
       <div v-show="!isMobile || !sessionCollapsed" class="session-list">
         <div
-          v-for="s in sessions"
+          v-for="(s, idx) in sessions"
           :key="s.id"
           class="session-item"
           :class="{ active: s.id === currentSessionId }"
+          :style="{ animationDelay: idx * 40 + 'ms' }"
           role="button"
           tabindex="0"
           @click="selectSession(s.id)"
@@ -363,7 +364,14 @@ onMounted(() => {
           <span class="session-title">{{ s.title }}</span>
           <NPopconfirm @positive-click="handleDeleteSession(s.id)">
             <template #trigger>
-              <span class="session-del" @click.stop>×</span>
+              <span
+                class="session-del"
+                role="button"
+                tabindex="0"
+                :aria-label="'删除会话：' + s.title"
+                @click.stop="handleDeleteSession(s.id)"
+                @keydown.enter.stop="handleDeleteSession(s.id)"
+              >×</span>
             </template>
             删除该会话？
           </NPopconfirm>
@@ -619,6 +627,7 @@ onMounted(() => {
   cursor: pointer;
   font-size: 13px;
   gap: 8px;
+  animation: list-in 0.3s ease both;
 }
 .session-item:hover {
   background: var(--n-color-hover, rgba(128, 128, 128, 0.08));

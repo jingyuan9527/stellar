@@ -226,8 +226,8 @@ onMounted(loadStats)
     <!-- AI 调用概览 -->
     <div class="section-title">AI 调用概览</div>
     <NGrid :x-gap="16" :y-gap="16" :cols="4" responsive="screen" item-responsive>
-      <NGridItem v-for="item in aiKpiCards" :key="item.label" span="4 m:2 l:1">
-        <NCard :bordered="false" class="stat-card" :loading="loading">
+      <NGridItem v-for="(item, idx) in aiKpiCards" :key="item.label" span="4 m:2 l:1">
+        <NCard :bordered="false" class="stat-card" :loading="loading" :style="{ animationDelay: idx * 40 + 'ms' }">
           <div class="stat">
             <div class="stat-icon" :style="{ background: item.color + '1a' }">
               <component :is="renderStatIcon(item.icon, item.color)" />
@@ -241,8 +241,8 @@ onMounted(loadStats)
     <!-- 今日生成 -->
     <div class="section-title">今日生成</div>
     <NGrid :x-gap="16" :y-gap="16" :cols="4" responsive="screen" item-responsive>
-      <NGridItem v-for="item in todayKpiCards" :key="item.label" span="4 m:2 l:1">
-        <NCard :bordered="false" class="stat-card" :loading="loading">
+      <NGridItem v-for="(item, idx) in todayKpiCards" :key="item.label" span="4 m:2 l:1">
+        <NCard :bordered="false" class="stat-card" :loading="loading" :style="{ animationDelay: idx * 40 + 'ms' }">
           <div class="stat">
             <div class="stat-icon" :style="{ background: item.color + '1a' }">
               <component :is="renderStatIcon(item.icon, item.color)" />
@@ -264,8 +264,8 @@ onMounted(loadStats)
     <!-- AI 生成质量 -->
     <div class="section-title">AI 生成质量</div>
     <NGrid :x-gap="16" :y-gap="16" :cols="3" responsive="screen" item-responsive>
-      <NGridItem v-for="item in taskQualityCards" :key="item.title" span="3 m:1">
-        <NCard :bordered="false" class="quality-card" :loading="loading">
+      <NGridItem v-for="(item, idx) in taskQualityCards" :key="item.title" span="3 m:1">
+        <NCard :bordered="false" class="quality-card" :loading="loading" :style="{ animationDelay: idx * 40 + 'ms' }">
           <div class="quality-head">
             <div class="stat-icon" :style="{ background: item.color + '1a' }">
               <component :is="renderStatIcon(item.icon, item.color)" />
@@ -389,6 +389,10 @@ onMounted(loadStats)
   margin-top: 4px;
 }
 
+.stat-card {
+  animation: list-in 0.3s ease both;
+}
+
 .stat {
   display: flex;
   align-items: center;
@@ -409,6 +413,7 @@ onMounted(loadStats)
 /* AI 生成质量卡 */
 .quality-card {
   height: 100%;
+  animation: list-in 0.3s ease both;
 }
 
 .quality-head {

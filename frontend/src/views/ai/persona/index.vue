@@ -27,7 +27,7 @@ const allColumns: DataTableColumns<AiPersona> = [
   { title: '描述', key: 'description', ellipsis: { tooltip: true } },
   {
     title: '系统提示词', key: 'systemPrompt', ellipsis: { tooltip: true },
-    render: (row) => h('span', { style: 'opacity: 0.6; font-size: 12px' },
+    render: (row) => h('span', { style: 'color: var(--c-text-3); font-size: 12px' },
       row.systemPrompt.slice(0, 80) + (row.systemPrompt.length > 80 ? '...' : '')),
   },
   {

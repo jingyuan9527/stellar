@@ -132,7 +132,7 @@ onMounted(() => {
           :key="p.id"
           span="2 m:1"
         >
-          <NCard :bordered="false" class="project-card" :style="{ '--project-accent': projectAccent(idx) }">
+          <NCard :bordered="false" class="project-card" :style="{ '--project-accent': projectAccent(idx), animationDelay: idx * 40 + 'ms' }">
             <div class="project-body">
               <div class="project-head">
                 <h3 class="project-name">{{ p.name }}</h3>
@@ -301,6 +301,7 @@ onMounted(() => {
   overflow: hidden;
   border-left: 4px solid var(--project-accent, var(--c-brand));
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  animation: list-in 0.3s ease both;
 }
 
 .project-card:hover {
