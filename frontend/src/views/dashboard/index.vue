@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import type { EChartsCoreOption } from 'echarts/core'
-import { NCard, NGrid, NGridItem, NIcon, NStatistic, NEmpty, NTag } from 'naive-ui'
+import { NCard, NGrid, NGridItem, NIcon, NStatistic, NTag } from 'naive-ui'
 import Chart from '@/components/Chart.vue'
 import StateError from '@/components/StateError.vue'
+import BrandEmpty from '@/components/BrandEmpty.vue'
 import { useAuthStore } from '@/store/auth'
 import { useThemeStore } from '@/store/theme'
 import { getChartColors } from '@/utils/chartColors'
@@ -258,7 +259,7 @@ onMounted(loadStats)
       <div v-if="stats?.aiUsage?.dailyTrend?.length" class="trend">
         <Chart :option="trendOption" height="240px" />
       </div>
-      <NEmpty v-else description="暂无数据" />
+      <BrandEmpty size="small" description="暂无数据" v-else />
     </NCard>
 
     <!-- AI 生成质量 -->
@@ -317,7 +318,7 @@ onMounted(loadStats)
               </div>
             </div>
             <Chart v-if="stats.file.byType?.length" :option="fileTypeOption" height="200px" />
-            <NEmpty v-else description="暂无数据" />
+            <BrandEmpty size="small" description="暂无数据" v-else />
           </div>
         </NCard>
       </NGridItem>
@@ -339,7 +340,7 @@ onMounted(loadStats)
               </div>
             </div>
           </div>
-          <NEmpty v-else description="暂无数据" />
+          <BrandEmpty size="small" description="暂无数据" v-else />
         </NCard>
       </NGridItem>
     </NGrid>
@@ -349,13 +350,13 @@ onMounted(loadStats)
       <NGridItem span="2 m:1">
         <NCard title="按模型类型" :bordered="false" :loading="loading">
           <Chart v-if="stats?.aiUsage?.byType?.length" :option="modelTypeOption" height="200px" />
-          <NEmpty v-else description="暂无数据" />
+          <BrandEmpty size="small" description="暂无数据" v-else />
         </NCard>
       </NGridItem>
       <NGridItem span="2 m:1">
         <NCard title="按供应商" :bordered="false" :loading="loading">
           <Chart v-if="stats?.aiUsage?.byProvider?.length" :option="providerOption" height="200px" />
-          <NEmpty v-else description="暂无数据" />
+          <BrandEmpty size="small" description="暂无数据" v-else />
         </NCard>
       </NGridItem>
     </NGrid>

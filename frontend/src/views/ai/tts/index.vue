@@ -173,7 +173,7 @@ function handleDownload() {
 }
 
 function goToAiConfig() {
-  router.push('/system/ai-config')
+  router.push('/ai/config')
 }
 
 onMounted(() => {

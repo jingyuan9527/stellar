@@ -11,6 +11,13 @@
 
 > 随实现推进，对应行为规范同步补写进本文档，避免文档超前于代码（铁律8）。
 
+- **阶段 18（已实现）** 空态品牌化 + 导航/信息架构体检收口：
+  - **G 空态品牌化**：新增 `components/BrandEmpty.vue`（内联品牌微光 SVG 插画——品牌绿/信息蓝 `color-mix` 同源辉光 + `--c-fill-2` 线框，与首页 Hero/404 同一语言，全程走 `--c-*` token 暗色自动生效；`size` 三档 small/medium/large + 可选 action 按钮 + `title`/`description` 文案）。迁移落点：dashboard 5 处 `<NEmpty description="暂无数据">`→`<BrandEmpty size="small">`（去 NEmpty import）、chat 会话空态（title「还没有对话」+ 新建对话 action 触发 `newSession`）与消息中心空态、memos `.card-empty`、conch（「先向海螺提个问题吧」）、cover 两弹窗（草稿/清空）。tts 最近合成极紧凑位保留 `NEmpty size="small"`（BrandEmpty 略重）。文案色统一 `--c-text-3`。
+  - **H① 游客/登录命名统一**：首页工具卡按一级 title 平铺分组（游客见「AI创作/实用工具/游戏」），侧栏二级组名从「创作工具/管理」改「AI工具/AI管理」，消除游客「AI创作」vs 登录「创作工具」叫法分裂。
+  - **H② AI 配置 路由同源**：`/system/ai-config` 迁 `router` 至 `/ai/config`，组件目录 `views/system/ai-config/` → `views/ai/config/`（菜单、URL、面包屑同源），tts 页「AI 配置」跳转与全站 AI 工具页引导文案、后端 TTS 注释同步。
+  - **H③ 游客公开工具页壳落差**：`BasicLayout` 已按登录态分支（游客 `PublicHeader` + 无侧栏），本轮核实无需改动。
+  - **H④ 公开双来源注释**：`router.beforeEach` 补注释说明 `meta.requiresAuth === false`（天然永远公开）与后端 `publicKeys`（后台可动态开放）为两套独立公开来源、非互斥。
+
 - **阶段 16（已实现）** 设计系统第二轮收口（在 P0-P3 token 化基础上继续）：
   - **语义色 token 补全**：`tokens.css` 新增 `--c-success`/`--c-warning`/`--c-error` + `--c-success-bg`/`--c-warning-bg`/`--c-error-bg`（`color-mix` 随语义色自适应深浅主题，暗色下三色提亮保 AA 对比）；新增 `--c-brand-bg`/`--c-info-bg` 柔化底。全站裸 hex 状态色（math 反馈/进度/排行榜前三、chat 错误气泡/删除悬停、memos 同步失败/图片角标/搜索高亮、monitor 磁盘环/HTTP 4xx·5xx/连接池预警/`.danger`/`.alert`、menu-visibility 公开项）全部替换为语义 token；`chartColors.ts` 运行时读取补 `success/warning/error` 供 echarts 用。`ThemeDrawer` 预设色板 / `store/theme` 默认品牌色 / favicon 为有意保留的品牌默认值（非语义用法）。
   - **主色认知统一**：聊天气泡/答题进度条/会话选中态/作答区底统一到**品牌绿 `--c-brand`**（用户气泡 `rgba(100,150,255,.15)`→`--c-brand-bg`、math 答题进度 `--c-info`→`--c-brand`、answer-area 蓝底→`--c-brand-bg`、session-item.active 蓝底→`--c-brand-bg`）；链接类一律 `--c-info`（chat/sessions 参考链接 `#2d8cf0`→`--c-info`、ref 胶囊底→`--c-info-bg`、memos 图片角标改 `--c-warning`、footer-link hover 改 `--c-info`）。

@@ -5,6 +5,7 @@ import {
 } from 'naive-ui'
 import { useAuthStore } from '@/store/auth'
 import { useIsMobile } from '@/composables/useBreakpoint'
+import BrandEmpty from '@/components/BrandEmpty.vue'
 import {
   listMyChatSessions, createChatSession, getChatMessages, deleteChatSession,
   clearMyChatSessions, streamChat, listEnabledPersonas, listKnowledgeBases,
@@ -376,7 +377,15 @@ onMounted(() => {
             删除该会话？
           </NPopconfirm>
         </div>
-        <NEmpty v-if="sessions.length === 0" description="暂无会话" size="small" />
+        <BrandEmpty
+          v-if="sessions.length === 0"
+          size="small"
+          title="还没有对话"
+          description="会话将保存于此，可随时新建"
+          show-action
+          action-text="新建对话"
+          @action="newSession"
+        />
       </div>
       <div v-show="!isMobile || !sessionCollapsed" class="session-panel-footer">
         <NPopconfirm @positive-click="handleClearSessions">
@@ -572,7 +581,12 @@ onMounted(() => {
             <span class="error-detail">{{ streamError }}</span>
           </div>
         </div>
-        <NEmpty v-if="!loadingMessages && messages.length === 0 && !streaming" description="开始一段新对话" style="margin: auto" />
+        <BrandEmpty
+          v-if="!loadingMessages && messages.length === 0 && !streaming"
+          size="small"
+          title="开始一段新对话"
+          description="向 AI 提问，获取灵感与答案"
+        />
       </div>
 
       <footer class="input-area">

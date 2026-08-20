@@ -194,7 +194,7 @@ async function generate() {
     return
   }
   if (!configured.value) {
-    message.warning('请先在 AI创作 → 管理 → AI 配置 中完成配置')
+    message.warning('请先在 AI创作 → AI管理 → AI 配置 中完成配置')
     return
   }
   streaming.value = true
@@ -292,7 +292,7 @@ onMounted(() => {
       <template #aside>
         <NSpace vertical :size="16">
           <NAlert v-if="!configured" type="warning" :bordered="false">
-            AI 接口未配置，请前往 AI创作 → 管理 → AI 配置 完成设置。
+            AI 接口未配置，请前往 AI创作 → AI管理 → AI 配置 完成设置。
           </NAlert>
 
           <div>

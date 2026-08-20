@@ -4,9 +4,10 @@ import MarkdownIt from 'markdown-it'
 import {
   NCard, NForm, NFormItem, NInput, NButton, NSpace, NDataTable, NTag,
   NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem, NIcon, NSelect,
-  NAlert, NDropdown, NModal, NPagination, NCheckbox, NEmpty, useMessage,
+  NAlert, NDropdown, NModal, NPagination, NCheckbox, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, SelectOption, DropdownOption } from 'naive-ui'
+import BrandEmpty from '@/components/BrandEmpty.vue'
 import {
   getMemosConfig, saveMemosConfig, pullMemos, tagMemos, pushMemosTags,
   getMemosPage, getMemosStats, getMemosWebhookConfig, saveMemosWebhookSecret,
@@ -689,7 +690,7 @@ onMounted(() => {
               <span class="card-time">{{ formatTime(row.remoteUpdateTime || row.createTime) }}</span>
             </div>
           </div>
-          <NEmpty v-if="!loading && !tableData.length" class="card-empty" />
+          <BrandEmpty v-if="!loading && !tableData.length" size="small" description="暂无笔记" class="card-empty" />
           <NPagination v-if="total > 0" class="card-pagination" :page="pagination.page"
             :page-size="pagination.pageSize" :item-count="pagination.itemCount"
             :page-sizes="[10, 20, 50]" show-size-picker

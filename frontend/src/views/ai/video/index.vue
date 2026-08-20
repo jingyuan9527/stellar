@@ -289,7 +289,7 @@ onBeforeUnmount(() => {
       <template #aside>
         <NSpace vertical :size="16">
           <NAlert v-if="models.length === 0" type="warning" :bordered="false">
-            暂无可用的视频模型，请联系管理员在 AI创作 → 管理 → AI 配置 中添加 VIDEO 类型模型。
+            暂无可用的视频模型，请联系管理员在 AI创作 → AI管理 → AI 配置 中添加 VIDEO 类型模型。
           </NAlert>
 
           <div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NModal, NButton, NCheckboxGroup, NCheckbox, NSpace, NEmpty, useMessage } from 'naive-ui'
+import { NModal, NButton, NCheckboxGroup, NCheckbox, NSpace, useMessage } from 'naive-ui'
+import BrandEmpty from '@/components/BrandEmpty.vue'
 import { useUIStore } from '../store/ui'
 import { useCoverStore } from '../store/cover'
 import { useCoverDraftsStore } from '../store/coverDrafts'
@@ -53,7 +54,7 @@ function handleOk() {
         />
       </NSpace>
     </NCheckboxGroup>
-    <NEmpty v-if="ALL.length === 0" description="无可清空数据" />
+    <BrandEmpty v-if="ALL.length === 0" size="small" description="无可清空数据" />
     <template #footer>
       <NSpace justify="end">
         <NButton @click="show = false">取消</NButton>

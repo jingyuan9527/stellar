@@ -13,7 +13,7 @@ import lombok.Data;
 @Data
 public class AiTtsRequest {
 
-    /** AUDIO 类型模型 ID（system/ai-config 配置的供应商模型） */
+    /** AUDIO 类型模型 ID（ai/config 配置的供应商模型） */
     @NotNull(message = "模型不能为空")
     private Long modelId;
 

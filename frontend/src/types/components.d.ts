@@ -7,6 +7,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    BrandEmpty: typeof import('./../components/BrandEmpty.vue')['default']
     Chart: typeof import('./../components/Chart.vue')['default']
     ErrorBoundary: typeof import('./../components/ErrorBoundary.vue')['default']
     NAlert: typeof import('naive-ui')['NAlert']

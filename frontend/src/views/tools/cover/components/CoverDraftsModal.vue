@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import {
-  NModal, NButton, NList, NListItem, NThing, NInput, NSpace, NEmpty,
+  NModal, NButton, NList, NListItem, NThing, NInput, NSpace,
   NPopconfirm, useMessage,
 } from 'naive-ui'
+import BrandEmpty from '@/components/BrandEmpty.vue'
 import { useUIStore } from '../store/ui'
 import { useCoverDraftsStore } from '../store/coverDrafts'
 import { useCoverStore } from '../store/cover'
@@ -87,6 +88,6 @@ function handleRename(id: string, oldName: string) {
         </NThing>
       </NListItem>
     </NList>
-    <NEmpty v-else description="暂无草稿" />
+    <BrandEmpty size="small" description="暂无草稿" v-else />
   </NModal>
 </template>

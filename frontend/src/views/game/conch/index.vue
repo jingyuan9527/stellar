@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
-import { NCard, NSpace, NButton, NInput, NIcon, NEmpty, NAlert, NTag, useMessage } from 'naive-ui'
+import { NCard, NSpace, NButton, NInput, NIcon, NAlert, NTag, useMessage } from 'naive-ui'
+import BrandEmpty from '@/components/BrandEmpty.vue'
 import { iconMap } from '@/utils/icons'
 import { askConch } from '@/api/conch'
 import type { ConchAskResult } from '@/types/api'
@@ -68,10 +69,10 @@ onBeforeUnmount(() => {
               <div class="answer-text">{{ result.answerText }}</div>
             </div>
           </Transition>
-          <NEmpty
+          <BrandEmpty
             v-if="!result && !asking"
-            description="拉动海螺的绳子，它将回答你"
             size="small"
+            description="先向海螺提个问题吧"
           />
           <div v-if="asking" class="asking-hint">
             <NIcon size="20" class="loading-icon">

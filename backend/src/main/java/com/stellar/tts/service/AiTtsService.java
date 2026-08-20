@@ -32,7 +32,7 @@ import com.stellar.infra.ExternalCallLogger;
  * <p>当前对接 MiMo-V2.5-TTS 预置音色模式：合成文本放 role=assistant 消息，
  * 风格指令放 role=user 消息（可空），audio.voice 指定预置音色，audio.format=wav。
  * 非流式调用，响应 message.audio.data 为 base64 wav，解码后返回。
- * <p>配置按 modelId 解析 AUDIO 类型模型（system/ai-config 配置供应商+模型），记 token 消费。
+ * <p>配置按 modelId 解析 AUDIO 类型模型（ai/config 配置供应商+模型），记 token 消费。
  */
 @Slf4j
 @Service

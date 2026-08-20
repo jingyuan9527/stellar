@@ -47,7 +47,7 @@ export const routes: RouteRecordRaw[] = [
             path: 'create',
             name: 'AiCreate',
             redirect: '/ai/chat',
-            meta: { title: '创作工具', icon: 'sparkles', order: 1 },
+            meta: { title: 'AI工具', icon: 'sparkles', order: 1 },
             children: [
               {
                 path: '/ai/chat',
@@ -85,7 +85,7 @@ export const routes: RouteRecordRaw[] = [
             path: 'manage',
             name: 'AiManage',
             redirect: '/ai/template',
-            meta: { title: '管理', icon: 'settings', order: 2 },
+            meta: { title: 'AI管理', icon: 'settings', order: 2 },
             children: [
               {
                 path: '/ai/template',
@@ -124,9 +124,9 @@ export const routes: RouteRecordRaw[] = [
                 meta: { title: 'RAG评估', icon: 'trophy', order: 6, group: '管理' },
               },
               {
-                path: '/system/ai-config',
+                path: '/ai/config',
                 name: 'AiConfig',
-                component: () => import('@/views/system/ai-config/index.vue'),
+                component: () => import('@/views/ai/config/index.vue'),
                 meta: { title: 'AI 配置', icon: 'sparkles', order: 7, group: '管理' },
               },
             ],
@@ -265,6 +265,10 @@ router.beforeEach(async (to, _from, next) => {
   }
 
   // 首页等天然公开路由：游客放行；登录用户也记入多标签（否则 tab 栏停在旧页）
+  // 公开来源有两套，互不互斥：
+  // - 硬编码 `meta.requiresAuth === false` = 天然永远公开（首页/关于我/聊天/图片/TTS/数学/海螺…）
+  // - 后端 sys_menu_visibility 配置的 publicKeys = 后台可动态开放的工具页
+  // 两套独立判定：天然公开直接放行；配置公开在未登录分支按 publicKeys 命中放行。
   if (to.meta.requiresAuth === false) {
     if (authStore.isLogin) {
       tabStore.addTab(to)
