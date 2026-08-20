@@ -301,6 +301,36 @@ class MemosServiceTest {
         assertThrows(BusinessException.class, service::syncPull);
     }
 
+    @Test
+    void syncPull_webhook空壳_按新增计_仅补时间戳() {
+        // webhook 已抢先插入本地行（payload 无远端时间戳），定时拉取首次全量带回来真实时间
+        mockConfig("https://memo.booksy.cf", "tok");
+        MemosApiClient.MemosRemoteMemo rm = memo("u1", "hello", "");
+        when(memosApiClient.listAllMemos(anyString(), anyString())).thenReturn(List.of(rm));
+        MemosNote stub = new MemosNote();
+        stub.setId(1L);
+        stub.setUid("u1");
+        stub.setContent("hello");
+        stub.setTags("");
+        stub.setTagsSynced(1);
+        stub.setRemoteDeleted(0);
+        // 空壳特征：远端时间戳缺失
+        stub.setRemoteCreateTime(null);
+        stub.setRemoteUpdateTime(null);
+        when(memosNoteMapper.selectList(any())).thenReturn(List.of(stub));
+
+        MemosSyncResultVO result = service.syncPull();
+
+        // 按首次同步新增统计，而非更新
+        assertEquals(1, result.getCreated());
+        assertEquals(0, result.getUpdated());
+        // 仅补全元数据，未触发内容/标签 merge
+        assertEquals(LocalDateTime.of(2025, 1, 1, 0, 0), stub.getRemoteCreateTime());
+        assertEquals(LocalDateTime.of(2025, 1, 2, 0, 0), stub.getRemoteUpdateTime());
+        verify(memosNoteMapper).updateById(stub);
+        verify(memosRagService, never()).embedNoteAsync(any(), anyString());
+    }
+
     // ===== 记录式同步（手动/定时：锁 + 状态落库 + 清理） =====
 
     @Test

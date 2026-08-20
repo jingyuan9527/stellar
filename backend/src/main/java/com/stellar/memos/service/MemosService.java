@@ -315,6 +315,11 @@ public class MemosService {
                 if (local == null) {
                     insertMemo(rm, now);
                     result.setCreated(result.getCreated() + 1);
+                } else if (isWebhookStub(local)) {
+                    // 实时 webhook 先插入的空壳（payload 无远端时间戳）：本次为首次全量同步，
+                    // 只补全远端时间戳并按新增计，避免把新 memo 误判成更新
+                    backfillStub(local, rm, now);
+                    result.setCreated(result.getCreated() + 1);
                 } else {
                     boolean changed = mergeRemote(local, rm, now);
                     if (changed) {
@@ -488,6 +493,22 @@ public class MemosService {
         memosNoteMapper.insert(note);
         // 新笔记异步向量化（失败不阻断同步，rebuild 兜底）
         memosRagService.embedNoteAsync(note.getId(), note.getContent());
+    }
+
+    /** webhook 先插入的空壳：远端时间戳缺失即视为待补全元数据的占位行。 */
+    private boolean isWebhookStub(MemosNote local) {
+        return local.getRemoteCreateTime() == null && local.getRemoteUpdateTime() == null;
+    }
+
+    /** 全量拉取补全 webhook 空壳缺失的远端时间戳（内容/标签 webhook 已落，仅填元数据）。 */
+    private void backfillStub(MemosNote local, MemosApiClient.MemosRemoteMemo rm, LocalDateTime now) {
+        local.setRemoteCreateTime(rm.createTime());
+        local.setRemoteUpdateTime(rm.updateTime());
+        local.setRemoteDeleted(0);
+        local.setUpdateTime(now);
+        memosNoteMapper.updateById(local);
+        log.info("[备忘同步] 补全 webhook 空壳远端时间戳 uid={} id={} create={} update={}",
+                rm.uid(), local.getId(), rm.createTime(), rm.updateTime());
     }
 
     /**
