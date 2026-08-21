@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.ai.service.AiChatService;
 import com.stellar.common.BusinessException;
 import com.stellar.infra.ExternalCallLogger;
+import com.stellar.infra.RedisMutex;
 import com.stellar.infra.SafeUrlValidator;
 import com.stellar.memos.client.MemosApiClient;
 import com.stellar.memos.dto.MemosConfigDTO;
@@ -15,7 +16,6 @@ import com.stellar.memos.dto.MemosQueryDTO;
 import com.stellar.memos.entity.MemosNote;
 import com.stellar.memos.entity.MemosSyncLog;
 import com.stellar.memos.mapper.MemosNoteMapper;
-import com.stellar.memos.mapper.MemosSyncLogMapper;
 import com.stellar.memos.vo.MemosConfigVO;
 import com.stellar.memos.vo.MemosJobResultVO;
 import com.stellar.memos.vo.MemosNoteVO;
@@ -26,33 +26,25 @@ import com.stellar.memos.vo.MemosWebhookConfigVO;
 import com.stellar.system.service.SysSettingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Base64;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * 备忘同步服务：拉取 memo.booksy.cf 笔记备份到本地（远端删除 → 本地标记删除）、
- * 勾选笔记 AI 打标签并自动写回远端（content 末尾追加 #标签）、手动标签写回兜底。
+ * 备忘同步编排：拉取 memo.booksy.cf 笔记备份到本地（远端删除 → 本地标记删除）、
+ * 勾选笔记 AI 打标签并自动写回远端（content 末尾追加 #标签）、手动标签写回兜底、webhook 实时接收。
  * <p>动作互不影响、各自触发：{@link #syncPull} / {@link #aiTag} / {@link #pushTags}。
  * AI 打标签为勾选制，成功后自动写回，失败置待写回可手动重试。
+ * <p>关注点拆分：签名校验与去重在 {@link MemosWebhookGuard}，同步互斥在 infra {@link RedisMutex}，
+ * 状态记录存取在 {@link MemosSyncLogStore}，标签文本处理在 {@link MemosTagCodec}；本类只做流程编排与合并语义。
  */
 @Slf4j
 @Service
@@ -65,17 +57,10 @@ public class MemosService {
     static final String KEY_PROMPT = "memo_tag_prompt";
     static final String KEY_WEBHOOK_SECRET = "memos_webhook_secret";
 
-    /** webhook-id 去重 key 前缀（Redis），TTL 内重复投递直接忽略 */
-    private static final String WEBHOOK_DEDUP_KEY_PREFIX = "stellar:memos:webhook:";
-    private static final Duration WEBHOOK_DEDUP_TTL = Duration.ofMinutes(5);
-
     /** 定时/手动同步互斥锁 key（Redis SETNX，防定时与手动同时拉取） */
     static final String SYNC_LOCK_KEY = "stellar:memos:sync:lock";
     /** 互斥锁兜底 TTL：正常同步完成后主动释放；异常未释放时此处兜底防死锁 */
     private static final Duration SYNC_LOCK_TTL = Duration.ofMinutes(30);
-
-    /** 同步状态记录保留天数：查询窗口与清理阈值，3 天前的记录由同步任务顺带删除 */
-    private static final int SYNC_LOG_KEEP_DAYS = 3;
 
     /** 同步触发方式 / 状态 */
     static final String SYNC_TRIGGER_SCHEDULED = "scheduled";
@@ -84,9 +69,6 @@ public class MemosService {
     static final String SYNC_STATUS_PARTIAL = "partial";
     static final String SYNC_STATUS_FAILED = "failed";
     static final String SYNC_STATUS_SKIPPED = "skipped";
-
-    /** 签名时间戳容差（秒）：超出视为失效，防重放 */
-    private static final long SIGNATURE_TOLERANCE_SECONDS = 300;
 
     /** Memos 支持的活动类型 */
     private static final String TYPE_MEMO_CREATED = "memos.memo.created";
@@ -100,18 +82,17 @@ public class MemosService {
                     + "要求：\n- 只输出标签本身，用顿号或逗号分隔，放在一行\n"
                     + "- 不要输出编号、解释或多余文字\n- 标签要精准概括笔记主题\n\n笔记内容：\n{{content}}";
 
-    /** 匹配 content 末尾的 #标签 块（标签写回后远端回读会带上，入库时剥离保持原文纯净） */
-    private static final Pattern TRAILING_TAG_BLOCK = Pattern.compile("(?s)(?:\\s*#[^\\s#]+)+$");
-
     private final MemosNoteMapper memosNoteMapper;
     private final MemosApiClient memosApiClient;
     private final SysSettingService sysSettingService;
     private final AiChatService aiChatService;
     private final ExternalCallLogger externalCallLogger;
-    private final ObjectMapper objectMapper;
-    private final RedisTemplate<String, Object> redisTemplate;
     private final MemosRagService memosRagService;
-    private final MemosSyncLogMapper memosSyncLogMapper;
+    private final MemosWebhookGuard webhookGuard;
+    private final RedisMutex redisMutex;
+    private final MemosSyncLogStore syncLogStore;
+    private final MemosTagCodec tagCodec;
+    private final ObjectMapper objectMapper;
 
     // ===== 配置 =====
 
@@ -162,8 +143,8 @@ public class MemosService {
      * 与主动拉取共用 {@link #mergeRemote}/{@link #insertMemo} 落库逻辑，保留本地待写回标签。
      */
     public Map<String, Object> handleWebhook(byte[] rawBody, String webhookId, String timestamp, String signature) {
-        verifySignature(rawBody, webhookId, timestamp, signature);
-        if (!dedupeWebhookId(webhookId)) {
+        webhookGuard.verifySignature(rawBody, webhookId, timestamp, signature);
+        if (!webhookGuard.dedupeWebhookId(webhookId)) {
             log.info("[备忘同步] Webhook 重复投递已忽略 id={}", webhookId);
             return Map.of("status", "duplicate");
         }
@@ -190,66 +171,6 @@ public class MemosService {
         } catch (Exception e) {
             log.error("[备忘同步] Webhook payload 解析失败 id={}: {}", webhookId, e.getMessage(), e);
             throw new BusinessException("Webhook payload 解析失败");
-        }
-    }
-
-    /** 校验签名（Standard Webhooks 兼容）：时效 + HMAC-SHA256 常量时间比较。 */
-    private void verifySignature(byte[] rawBody, String webhookId, String timestamp, String signature) {
-        String secret = sysSettingService.get(KEY_WEBHOOK_SECRET, "");
-        if (!StringUtils.hasText(secret)) {
-            throw new BusinessException("Webhook 签名密钥未配置");
-        }
-        if (!StringUtils.hasText(webhookId) || !StringUtils.hasText(timestamp) || !StringUtils.hasText(signature)) {
-            throw new BusinessException("Webhook 缺少签名头（webhook-id/webhook-timestamp/webhook-signature）");
-        }
-        long ts;
-        try {
-            ts = Long.parseLong(timestamp);
-        } catch (NumberFormatException e) {
-            throw new BusinessException("Webhook 时间戳格式非法");
-        }
-        long nowSec = System.currentTimeMillis() / 1000;
-        if (Math.abs(nowSec - ts) > SIGNATURE_TOLERANCE_SECONDS) {
-            throw new BusinessException("Webhook 时间戳超出容差窗口");
-        }
-        byte[] key = decodeSecret(secret);
-        String signedContent = webhookId + "." + timestamp + "." + new String(rawBody, StandardCharsets.UTF_8);
-        String expected;
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(key, "HmacSHA256"));
-            expected = "v1," + Base64.getEncoder().encodeToString(
-                    mac.doFinal(signedContent.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception e) {
-            throw new BusinessException("Webhook 签名计算失败: " + e.getMessage());
-        }
-        if (!MessageDigest.isEqual(signature.getBytes(StandardCharsets.UTF_8),
-                expected.getBytes(StandardCharsets.UTF_8))) {
-            throw new BusinessException("Webhook 签名校验失败");
-        }
-    }
-
-    /** 解析签名密钥：whsec_ 前缀 base64 解码，其余按 UTF-8 原样（与 Memos 端 resolveSigningKey 一致）。 */
-    private byte[] decodeSecret(String secret) {
-        if (secret.startsWith("whsec_")) {
-            try {
-                return Base64.getDecoder().decode(secret.substring("whsec_".length()));
-            } catch (IllegalArgumentException e) {
-                throw new BusinessException("Webhook 签名密钥格式错误（whsec_ 后非合法 base64）");
-            }
-        }
-        return secret.getBytes(StandardCharsets.UTF_8);
-    }
-
-    /** webhook-id 去重：Redis SETNX + TTL，返回 false 表示已处理过（防重放）。 */
-    private boolean dedupeWebhookId(String webhookId) {
-        try {
-            Boolean first = redisTemplate.opsForValue().setIfAbsent(
-                    WEBHOOK_DEDUP_KEY_PREFIX + webhookId, "1", WEBHOOK_DEDUP_TTL);
-            return Boolean.TRUE.equals(first);
-        } catch (Exception e) {
-            log.warn("[备忘同步] Webhook 去重 Redis 异常，放行处理 id={}: {}", webhookId, e.getMessage());
-            return true;
         }
     }
 
@@ -353,7 +274,7 @@ public class MemosService {
         return result;
     }
 
-    // ===== 记录式同步（手动/定时共用）：状态落库 + Redis 互斥 + 3 天清理 =====
+    // ===== 记录式同步（手动/定时共用）：状态落库 + Redis 互斥 + 清理 =====
 
     /** 是否已配置 Memos 域名与 Token（用于未配置时记 skipped 而非 failed）。 */
     public boolean isPullConfigured() {
@@ -379,12 +300,12 @@ public class MemosService {
 
     /**
      * 记录式同步核心：Redis SETNX 互斥（防定时与手动重叠）→ 校验配置 → 调 {@link #syncPull} →
-     * 状态落 {@code memos_sync_log}（success/partial/failed/skipped）→ 顺带清理 3 天前旧记录。
+     * 状态落 {@code memos_sync_log}（success/partial/failed/skipped）→ 顺带清理保留期外旧记录。
      * <p>{@code scheduled=true} 时异常吞掉返回 null（仅日志+落 failed 记录）；
      * 手动则原样上抛，保证前端拿到明确提示。
      */
     private MemosSyncResultVO doRecordedPull(String triggerType, boolean scheduled) {
-        if (!acquireSyncLock()) {
+        if (!redisMutex.tryAcquire(SYNC_LOCK_KEY, SYNC_LOCK_TTL)) {
             if (scheduled) {
                 log.warn("[备忘同步] 上一轮同步仍在进行，跳过本次定时同步");
                 return null;
@@ -398,7 +319,7 @@ public class MemosService {
             // 未配置：记 skipped；定时静默返回，手动抛提示（避免再被下面的 catch 记成 failed）
             if (!isPullConfigured()) {
                 record.setStatus(SYNC_STATUS_SKIPPED);
-                persistSyncRecord(record, start);
+                syncLogStore.persist(record, start);
                 log.warn("[备忘同步] {}同步跳过：未配置 Memos 域名/Token", triggerType);
                 if (scheduled) {
                     return null;
@@ -413,12 +334,12 @@ public class MemosService {
                 record.setUpdated(result.getUpdated());
                 record.setMarkedDeleted(result.getMarkedDeleted());
                 record.setErrors(result.getErrors());
-                persistSyncRecord(record, start);
+                syncLogStore.persist(record, start);
                 return result;
             } catch (Exception e) {
                 record.setStatus(SYNC_STATUS_FAILED);
                 record.setErrorMessage(e.getMessage());
-                persistSyncRecord(record, start);
+                syncLogStore.persist(record, start);
                 if (scheduled) {
                     log.error("[备忘同步] 定时同步失败: {}", e.getMessage(), e);
                     return null;
@@ -429,52 +350,7 @@ public class MemosService {
                 throw new BusinessException("同步失败: " + e.getMessage());
             }
         } finally {
-            releaseSyncLock();
-        }
-    }
-
-    /** 落一条同步状态记录，并顺带清理 3 天前的旧记录（异步失败不阻断主流程）。 */
-    private void persistSyncRecord(MemosSyncLog record, long start) {
-        try {
-            record.setDurationMs(System.currentTimeMillis() - start);
-            record.setCreateTime(LocalDateTime.now());
-            memosSyncLogMapper.insert(record);
-            trimOldSyncLogs();
-        } catch (Exception e) {
-            log.error("[备忘同步] 同步状态落库失败 triggerType={}: {}", record.getTriggerType(), e.getMessage(), e);
-        }
-    }
-
-    /** 清理 3 天前的同步状态记录（随每次同步执行，异常仅告警）。 */
-    private void trimOldSyncLogs() {
-        try {
-            LocalDateTime cutoff = LocalDateTime.now().minusDays(SYNC_LOG_KEEP_DAYS);
-            int removed = memosSyncLogMapper.delete(new LambdaQueryWrapper<MemosSyncLog>()
-                    .lt(MemosSyncLog::getCreateTime, cutoff));
-            if (removed > 0) {
-                log.info("[备忘同步] 清理 {} 天前旧同步状态记录 {} 条", SYNC_LOG_KEEP_DAYS, removed);
-            }
-        } catch (Exception e) {
-            log.warn("[备忘同步] 清理旧同步状态记录失败: {}", e.getMessage());
-        }
-    }
-
-    /** 抢占同步互斥锁；Redis 异常时放行（不因锁故障阻塞同步）。 */
-    private boolean acquireSyncLock() {
-        try {
-            Boolean first = redisTemplate.opsForValue().setIfAbsent(SYNC_LOCK_KEY, "1", SYNC_LOCK_TTL);
-            return Boolean.TRUE.equals(first);
-        } catch (Exception e) {
-            log.warn("[备忘同步] 同步互斥锁 Redis 异常，放行执行: {}", e.getMessage());
-            return true;
-        }
-    }
-
-    private void releaseSyncLock() {
-        try {
-            redisTemplate.delete(SYNC_LOCK_KEY);
-        } catch (Exception e) {
-            log.warn("[备忘同步] 释放同步互斥锁失败: {}", e.getMessage());
+            redisMutex.release(SYNC_LOCK_KEY);
         }
     }
 
@@ -482,8 +358,8 @@ public class MemosService {
     private void insertMemo(MemosApiClient.MemosRemoteMemo rm, LocalDateTime now) {
         MemosNote note = new MemosNote();
         note.setUid(rm.uid());
-        note.setContent(stripTrailingTagBlock(rm.content()));
-        note.setTags(joinTags(rm.tags()));
+        note.setContent(MemosTagCodec.stripTrailingTagBlock(rm.content()));
+        note.setTags(MemosTagCodec.joinTags(rm.tags()));
         note.setTagsSynced(1);
         note.setRemoteDeleted(0);
         note.setRemoteCreateTime(rm.createTime());
@@ -516,10 +392,10 @@ public class MemosService {
      * 返回是否有变化（需更新）。
      */
     private boolean mergeRemote(MemosNote local, MemosApiClient.MemosRemoteMemo rm, LocalDateTime now) {
-        String cleanContent = stripTrailingTagBlock(rm.content());
+        String cleanContent = MemosTagCodec.stripTrailingTagBlock(rm.content());
         Set<String> remoteTags = new LinkedHashSet<>(rm.tags());
         // 本地已有标签（可能是 AI 生成未写回）与远端并集，避免同步丢失待写回标签
-        Set<String> localTags = splitTags(local.getTags());
+        Set<String> localTags = MemosTagCodec.splitTags(local.getTags());
         Set<String> merged = new LinkedHashSet<>(remoteTags);
         merged.addAll(localTags);
         // 若本地存在远端没有的标签 → 仍未写回，tags_synced=0；否则远端已含全部 → 1
@@ -527,14 +403,14 @@ public class MemosService {
 
         boolean changed = local.getRemoteDeleted() != null && local.getRemoteDeleted() == 1
                 || !cleanContent.equals(local.getContent())
-                || !joinTags(merged).equals(local.getTags())
+                || !MemosTagCodec.joinTags(merged).equals(local.getTags())
                 || (local.getRemoteUpdateTime() == null ? rm.updateTime() != null
                     : !local.getRemoteUpdateTime().equals(rm.updateTime()));
         if (!changed) {
             return false;
         }
         local.setContent(cleanContent);
-        local.setTags(joinTags(merged));
+        local.setTags(MemosTagCodec.joinTags(merged));
         // 远端内容与本地一致、且远端已含全部标签时仍按远端状态（避免残留 pending）
         local.setTagsSynced(hasPending ? 0 : 1);
         local.setRemoteDeleted(0);
@@ -579,9 +455,9 @@ public class MemosService {
                     log.warn("[备忘同步] AI 标签为空 uid={} id={}", note.getUid(), note.getId());
                     continue;
                 }
-                Set<String> merged = splitTags(note.getTags());
+                Set<String> merged = MemosTagCodec.splitTags(note.getTags());
                 merged.addAll(newTags);
-                note.setTags(joinTags(merged));
+                note.setTags(MemosTagCodec.joinTags(merged));
                 note.setTagsSynced(0);
                 note.setUpdateTime(LocalDateTime.now());
                 memosNoteMapper.updateById(note);
@@ -618,7 +494,7 @@ public class MemosService {
         externalCallLogger.success("备忘同步AI打标签", cfg.baseUrl(),
                 "uid=" + note.getUid() + ", contentLen=" + content.length() + ", modelId=" + modelId,
                 System.currentTimeMillis() - start);
-        return parseTagsFromText(llmResult);
+        return tagCodec.parseTagsFromText(llmResult);
     }
 
     // ===== 同步标签到 Memos（写回）=====
@@ -658,9 +534,9 @@ public class MemosService {
      * 追加缺失标签并调 UpdateMemo，成功返回 true。失败抛异常（由调用方统计并保留待写回）。
      */
     private boolean pushTagsForNote(CheckConfig cfg, MemosNote note) {
-        List<String> tags = splitTags(note.getTags()).stream().toList();
+        List<String> tags = MemosTagCodec.splitTags(note.getTags()).stream().toList();
         // 已在 content 中的 #标签不重复追加
-        Set<String> presentInContent = collectTagsInContent(note.getContent());
+        Set<String> presentInContent = MemosTagCodec.collectTagsInContent(note.getContent());
         List<String> toPush = tags.stream().filter(t -> !presentInContent.contains(t)).toList();
         if (toPush.isEmpty()) {
             // 无新增内容标签：远端已含，视为已同步
@@ -669,7 +545,7 @@ public class MemosService {
             memosNoteMapper.updateById(note);
             return false;
         }
-        String newContent = buildContentWithTags(note.getContent(), toPush);
+        String newContent = MemosTagCodec.buildContentWithTags(note.getContent(), toPush);
         memosApiClient.updateContent(cfg.baseUrl(), cfg.token(), note.getUid(), newContent);
         note.setTagsSynced(1);
         note.setUpdateTime(LocalDateTime.now());
@@ -721,44 +597,14 @@ public class MemosService {
         return vo;
     }
 
-    /** 同步状态记录分页（仅按时间倒序，查询窗口限最近 3 天）。 */
+    /** 同步状态记录分页（委托 {@link MemosSyncLogStore}）。 */
     public Page<MemosSyncLogVO> pageSyncLog(MemosQueryDTO query) {
-        Page<MemosSyncLog> page = memosSyncLogMapper.selectPage(
-                new Page<>(query.getPageNum(), query.getPageSize()),
-                new LambdaQueryWrapper<MemosSyncLog>()
-                        .ge(MemosSyncLog::getCreateTime, LocalDateTime.now().minusDays(SYNC_LOG_KEEP_DAYS))
-                        .orderByDesc(MemosSyncLog::getCreateTime)
-                        .orderByDesc(MemosSyncLog::getId));
-        Page<MemosSyncLogVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
-        voPage.setRecords(page.getRecords().stream().map(this::toSyncLogVO).collect(Collectors.toList()));
-        return voPage;
+        return syncLogStore.page(query);
     }
 
     /** 最近一次同步状态（空记录返回 null）。 */
     public MemosSyncLogVO latestSyncLog() {
-        Page<MemosSyncLog> page = memosSyncLogMapper.selectPage(
-                new Page<>(1, 1),
-                new LambdaQueryWrapper<MemosSyncLog>()
-                        .ge(MemosSyncLog::getCreateTime, LocalDateTime.now().minusDays(SYNC_LOG_KEEP_DAYS))
-                        .orderByDesc(MemosSyncLog::getCreateTime)
-                        .orderByDesc(MemosSyncLog::getId));
-        return page.getRecords().isEmpty() ? null : toSyncLogVO(page.getRecords().get(0));
-    }
-
-    private MemosSyncLogVO toSyncLogVO(MemosSyncLog l) {
-        MemosSyncLogVO vo = new MemosSyncLogVO();
-        vo.setId(l.getId());
-        vo.setTriggerType(l.getTriggerType());
-        vo.setStatus(l.getStatus());
-        vo.setFetched(l.getFetched());
-        vo.setCreated(l.getCreated());
-        vo.setUpdated(l.getUpdated());
-        vo.setMarkedDeleted(l.getMarkedDeleted());
-        vo.setErrors(l.getErrors());
-        vo.setDurationMs(l.getDurationMs());
-        vo.setErrorMessage(l.getErrorMessage());
-        vo.setCreateTime(l.getCreateTime());
-        return vo;
+        return syncLogStore.latest();
     }
 
     // ===== 私有 helper =====
@@ -768,7 +614,7 @@ public class MemosService {
         vo.setId(n.getId());
         vo.setUid(n.getUid());
         vo.setContent(n.getContent());
-        vo.setTags(splitTags(n.getTags()).stream().toList());
+        vo.setTags(MemosTagCodec.splitTags(n.getTags()).stream().toList());
         vo.setTagsSynced(n.getTagsSynced());
         vo.setRemoteDeleted(n.getRemoteDeleted());
         vo.setRemoteCreateTime(n.getRemoteCreateTime());
@@ -790,110 +636,6 @@ public class MemosService {
     }
 
     private record CheckConfig(String baseUrl, String token) {
-    }
-
-    /** 剥离 content 末尾的 #标签 块，保持备份原文纯净。 */
-    static String stripTrailingTagBlock(String content) {
-        if (content == null || content.isBlank()) {
-            return content == null ? "" : content;
-        }
-        Matcher m = TRAILING_TAG_BLOCK.matcher(content);
-        if (m.find()) {
-            String stripped = m.replaceFirst("");
-            return stripped.isBlank() ? "" : stripped;
-        }
-        return content;
-    }
-
-    /** 解析 LLM 输出为标签列表（按标点/空白分隔，去 #、去空、去重）。 */
-    List<String> parseTagsFromText(String text) {
-        if (text == null || text.isBlank()) {
-            return List.of();
-        }
-        // 兼容纯 JSON 数组输出（如 ["a","b"]）
-        String cleaned = text.trim();
-        if (cleaned.startsWith("[") && cleaned.endsWith("]")) {
-            try {
-                List<String> arr = objectMapper.readValue(cleaned,
-                        new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {
-                        });
-                return arr.stream().map(MemosService::sanitizeTag).filter(StringUtils::hasText)
-                        .distinct().limit(8).toList();
-            } catch (Exception ignored) {
-                // 非 JSON 按分隔符解析
-            }
-        }
-        return Arrays.stream(cleaned.split("[,，、;；\\n\\r\\t ]+"))
-                .map(MemosService::sanitizeTag)
-                .filter(StringUtils::hasText)
-                .distinct()
-                .limit(8)
-                .toList();
-    }
-
-    /** 标签规范化：去 # 前缀、内部空白转下划线、截断。 */
-    static String sanitizeTag(String tag) {
-        if (tag == null) {
-            return "";
-        }
-        String t = tag.trim().replaceAll("^#+", "").trim();
-        if (t.isEmpty()) {
-            return "";
-        }
-        t = t.replaceAll("[\\s]+", "_");
-        return t.length() > 30 ? t.substring(0, 30) : t;
-    }
-
-    /** tags 逗号串 → 有序去重集合。 */
-    static Set<String> splitTags(String tags) {
-        if (!StringUtils.hasText(tags)) {
-            return new LinkedHashSet<>();
-        }
-        return Arrays.stream(tags.split(","))
-                .map(MemosService::sanitizeTag)
-                .filter(StringUtils::hasText)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-    }
-
-    static String joinTags(java.util.Collection<String> tags) {
-        return tags.stream().map(MemosService::sanitizeTag).filter(StringUtils::hasText)
-                .distinct().collect(Collectors.joining(","));
-    }
-
-    /** 收集 content 中已有的 #标签（去 # 规范化。）。 */
-    private Set<String> collectTagsInContent(String content) {
-        Set<String> tags = new HashSet<>();
-        if (!StringUtils.hasText(content)) {
-            return tags;
-        }
-        Matcher m = Pattern.compile("#([^\\s#]+)").matcher(content);
-        while (m.find()) {
-            String t = sanitizeTag(m.group(1));
-            if (!t.isEmpty()) {
-                tags.add(t);
-            }
-        }
-        return tags;
-    }
-
-    /** 在原文末尾追加 #标签（不重复列上已存在的）。 */
-    static String buildContentWithTags(String content, List<String> tags) {
-        StringBuilder sb = new StringBuilder();
-        for (String t : tags) {
-            if (t.startsWith("#")) {
-                sb.append(t).append(' ');
-            } else {
-                sb.append('#').append(t).append(' ');
-            }
-        }
-        String block = sb.toString().trim();
-        if (block.isEmpty()) {
-            return content == null ? "" : content;
-        }
-        if (content == null || content.isBlank()) {
-            return block;
-        }
-        return content + (content.endsWith("\n") ? "" : "\n\n") + block;
     }
 
     private long countActiveWithNoTags() {

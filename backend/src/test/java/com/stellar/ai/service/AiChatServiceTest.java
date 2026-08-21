@@ -43,20 +43,24 @@ class AiChatServiceTest {
     private AiChatToolService aiChatToolService;
     private ExternalCallLogger externalCallLogger;
     private HttpClient mockHttpClient;
+    private com.stellar.ai.protocol.OpenAiHttpChatClient llmClient;
     private AiChatService service;
+    private AiUsageRecorder aiUsageRecorder;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         aiModelService = mock(AiModelService.class);
         objectMapper = new ObjectMapper();
         sysAiUsageService = mock(SysAiUsageService.class);
         aiTaskService = mock(AiTaskService.class);
         aiChatToolService = mock(AiChatToolService.class);
         externalCallLogger = mock(ExternalCallLogger.class);
-        service = new AiChatService(aiModelService, objectMapper, sysAiUsageService,
-                aiTaskService, aiChatToolService, externalCallLogger);
+        aiUsageRecorder = new AiUsageRecorder(sysAiUsageService, aiTaskService);
+        llmClient = new com.stellar.ai.protocol.OpenAiHttpChatClient(objectMapper);
+        service = new AiChatService(aiModelService, objectMapper, aiUsageRecorder,
+                aiChatToolService, externalCallLogger, llmClient);
         mockHttpClient = mock(HttpClient.class);
-        ReflectUtil.setFinalField(service, "httpClient", mockHttpClient);
+        ReflectUtil.setFinalField(llmClient, "httpClient", mockHttpClient);
     }
 
     // ===== 同步非流式 chatCompletion =====
@@ -201,13 +205,12 @@ class AiChatServiceTest {
         verify(aiModelService).resolveDefaultConfig("TEXT");
     }
 
-    // ===== chatCompletionsUrl 两分支 =====
+    // ===== chatCompletionsUrl 两分支（OpenAiHttpChatClient）=====
 
     @Test
-    void chatCompletionsUrl_有providerId_去尾斜杠() throws Exception {
+    void chatCompletionsUrl_有providerId_去尾斜杠() {
         AiResolvedConfig cfg = new AiResolvedConfig(1L, 1L, "https://api.openai.com/", "k", "gpt", "TEXT");
-        Object r = invoke("chatCompletionsUrl", new Class[]{AiResolvedConfig.class}, cfg);
-        assertEquals("https://api.openai.com/v1/chat/completions", r);
+        assertEquals("https://api.openai.com/v1/chat/completions", llmClient.chatCompletionsUrl(cfg));
     }
 
     @Test
@@ -218,46 +221,44 @@ class AiChatServiceTest {
                     .thenReturn(new InetAddress[]{publicIp});
 
             AiResolvedConfig cfg = new AiResolvedConfig(null, null, "https://example.com/", "k", "m", "TEXT");
-            Object r = invoke("chatCompletionsUrl", new Class[]{AiResolvedConfig.class}, cfg);
-            assertEquals("https://example.com/v1/chat/completions", r);
+            assertEquals("https://example.com/v1/chat/completions", llmClient.chatCompletionsUrl(cfg));
         }
     }
 
-    // ===== parseUsage =====
+    // ===== parseUsage（OpenAiHttpChatClient）=====
 
     @Test
     void parseUsage_空节点返回null() throws Exception {
-        assertNull(invoke("parseUsage", new Class[]{JsonNode.class}, (Object) null));
+        assertNull(llmClient.parseUsage(null));
         JsonNode missing = objectMapper.readTree("{}").path("usage");
-        assertNull(invoke("parseUsage", new Class[]{JsonNode.class}, missing));
+        assertNull(llmClient.parseUsage(missing));
     }
 
     @Test
     void parseUsage_有total_tokens返回数组() throws Exception {
         JsonNode node = objectMapper.readTree(
                 "{\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}").path("usage");
-        int[] r = (int[]) invoke("parseUsage", new Class[]{JsonNode.class}, node);
-        assertArrayEquals(new int[]{1, 2, 3}, r);
+        assertArrayEquals(new int[]{1, 2, 3}, llmClient.parseUsage(node));
     }
 
-    // ===== estimateTokens =====
+    // ===== estimateTokens（AiUsageRecorder）=====
 
     @Test
-    void estimateTokens_空文本返回0() throws Exception {
-        assertEquals(0, invoke("estimateTokens", new Class[]{String.class}, (Object) null));
-        assertEquals(0, invoke("estimateTokens", new Class[]{String.class}, ""));
+    void estimateTokens_空文本返回0() {
+        assertEquals(0, aiUsageRecorder.estimateTokens(null));
+        assertEquals(0, aiUsageRecorder.estimateTokens(""));
     }
 
     @Test
-    void estimateTokens_纯CJK按15字符每token() throws Exception {
+    void estimateTokens_纯CJK按15字符每token() {
         // 4 CJK → ceil(4/1.5 + 0)=3
-        assertEquals(3, invoke("estimateTokens", new Class[]{String.class}, "你好世界"));
+        assertEquals(3, aiUsageRecorder.estimateTokens("你好世界"));
     }
 
     @Test
-    void estimateTokens_混合中英() throws Exception {
+    void estimateTokens_混合中英() {
         // "hi你好": cjk=2→2/1.5=1.333, latin=2→2/4=0.5, 先求和再 ceil(1.833)=2
-        assertEquals(2, invoke("estimateTokens", new Class[]{String.class}, "hi你好"));
+        assertEquals(2, aiUsageRecorder.estimateTokens("hi你好"));
     }
 
     // ===== truncate (static) =====
@@ -295,17 +296,15 @@ class AiChatServiceTest {
         assertFalse((Boolean) invoke("isClientDisconnect", new Class[]{Throwable.class}, new RuntimeException("ok")));
     }
 
-    // ===== recordTokenUsageForMessages =====
+    // ===== recordTokenUsageForMessages（AiUsageRecorder）=====
 
     @Test
-    void recordTokenUsageForMessages_委托记录usage() throws Exception {
+    void recordTokenUsageForMessages_委托记录usage() {
         AiResolvedConfig cfg = new AiResolvedConfig(1L, 3L, "e", "k", "m", "TEXT");
         List<Map<String, Object>> msgs = List.of(Map.of("role", "user", "content", "你好abc"));
 
-        invoke("recordTokenUsageForMessages",
-                new Class[]{AiResolvedConfig.class, String.class, List.class, String.class,
-                        boolean.class, int[].class, String.class, String.class},
-                cfg, "m", msgs, "结果", true, new int[]{1, 2, 3}, "account", "1");
+        aiUsageRecorder.recordTokenUsageForMessages(cfg, "m", msgs, "结果", true,
+                new int[]{1, 2, 3}, "account", "1");
 
         verify(sysAiUsageService).record(eq("account"), eq("1"), eq(3L), eq("m"), eq("TEXT"),
                 anyInt(), anyInt(), anyInt(), eq("usage"));

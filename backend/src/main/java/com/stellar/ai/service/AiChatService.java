@@ -16,12 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.BufferedReader;
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -31,24 +26,21 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import com.stellar.infra.ExternalCallLogger;
 import com.stellar.infra.SafeUrlValidator;
+import com.stellar.ai.protocol.LlmChatClient;
 import jakarta.annotation.Resource;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.Executor;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 /**
  * AI 聊天服务：流式（SseEmitter）+ 非流式，按 modelId 解析供应商配置发起请求。
  * <p>配置解析优先级：用户自带 key（endpoint+apiKey+model）> modelId > TEXT 默认模型。
  * 请求加 stream_options.include_usage 以获取 token 用量；LLM 不返回则字符估算兜底。
  * 每次调用记录 token 消费（主体：登录按账号，游客按 IP）。
- * <p>重构点（去重）：SSE 流式解析 {@link #parseStream}、主体判定 {@link #currentSubject}、
- * URL 拼接 {@link #chatCompletionsUrl}、token 记录 {@link #recordTokenUsage} 统一为私有 helper，
- * 消除原先 4 处解析循环 / 8 处主体判定 / 6 处 URL 拼接 / 3 套 token 记录的复制。
+ * <p>关注点拆分：本类只做编排（配置解析/SSE 生命周期/流式循环/工具二段流）；
+ * token 计费与历史落库在 {@link AiUsageRecorder}，SSE 写通道在 {@link SseEmitterChannel}，
+ * 传输层（URL 拼接/HTTP 发送/流解析）在此，待 A7 协议抽象。
  */
 @Slf4j
 @Service
@@ -57,10 +49,10 @@ public class AiChatService {
 
     private final AiModelService aiModelService;
     private final ObjectMapper objectMapper;
-    private final SysAiUsageService sysAiUsageService;
-    private final AiTaskService aiTaskService;
+    private final AiUsageRecorder aiUsageRecorder;
     private final AiChatToolService aiChatToolService;
     private final ExternalCallLogger externalCallLogger;
+    private final LlmChatClient llmClient;
 
     @Resource(name = "aiToolExecutor")
     private Executor aiToolExecutor;
@@ -69,15 +61,8 @@ public class AiChatService {
      * 后续 send() 抛 "already completed" 被 isClientDisconnect 误判为客户端断开而静默 return，导致漏计费、漏落历史。 */
     private static final long CHAT_SSE_TIMEOUT = Duration.ofMinutes(5).toMillis();
 
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
-
     /** 当前请求主体：登录按账号，游客按 IP（同步阶段解析，避免异步线程无 web 上下文）。 */
     private record Subject(String type, String id) {}
-
-    /** SSE 流式解析结果：累积的完整文本 + 用量 + 是否来自 LLM usage。 */
-    private record StreamResult(String content, int[] usage, boolean hasUsage) {}
 
     /**
      * 流式聊天（按 ChatRequest 解析配置）。
@@ -128,7 +113,7 @@ public class AiChatService {
     }
 
     private SseEmitter doStreamChat(AiResolvedConfig cfg, String prompt) {
-        String url = chatCompletionsUrl(cfg);
+        String url = llmClient.chatCompletionsUrl(cfg);
         String model = cfg.model();
         Subject subject = currentSubject();
 
@@ -142,15 +127,7 @@ public class AiChatService {
             body.put("stream", true);
             // 请求 LLM 在流式末帧返回 usage（OpenAI 兼容）
             body.put("stream_options", Map.of("include_usage", true));
-            String bodyJson = objectMapper.writeValueAsString(body);
-
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofMinutes(5))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + cfg.apiKey())
-                    .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
-                    .build();
+            HttpRequest httpRequest = llmClient.buildRequest(cfg, body, Duration.ofMinutes(5));
 
             log.info("AI 流式请求: model={}, type={}, providerId={}, promptLen={}, subject={}:{}",
                     model, cfg.modelType(), cfg.providerId(), prompt.length(), subject.type(), subject.id());
@@ -167,23 +144,24 @@ public class AiChatService {
             final String callParams = "model=" + finalModel + ", providerId=" + providerId
                     + ", promptLen=" + prompt.length() + ", subject=" + operator;
 
-            httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
+            llmClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
                     .thenAccept(response -> {
                         if (response.statusCode() != 200) {
                             String errMsg = "LLM 返回错误: HTTP " + response.statusCode();
-                            recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
+                            aiUsageRecorder.recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
                                     prompt, null, "failed", errMsg, requestTime, requestTimeMillis);
                             externalCallLogger.failure("LLM流式", url, callParams, errMsg,
                                     System.currentTimeMillis() - requestTimeMillis, operator);
                             sendError(emitter, errMsg);
                             return;
                         }
-                        SseSender sender = new SseSender(emitter);
+                        SseEmitterChannel sender = new SseEmitterChannel(emitter);
                         try (InputStream is = response.body()) {
-                            StreamResult sr = parseStream(is, sender);
-                            recordTokenUsage(cfg, finalModel, prompt, sr.content(),
+                            LlmChatClient.ChatStreamReply sr = llmClient.parseStream(is,
+                                    delta -> sender.send(Map.of("content", delta)));
+                            aiUsageRecorder.recordTokenUsage(cfg, finalModel, prompt, sr.content(),
                                     sr.hasUsage(), sr.usage(), finalSubjectType, finalSubjectId);
-                            recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
+                            aiUsageRecorder.recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
                                     prompt, sr.content(), "success", null, requestTime, requestTimeMillis);
                             externalCallLogger.success("LLM流式", url, callParams + ", resultLen=" + sr.content().length(),
                                     System.currentTimeMillis() - requestTimeMillis, operator);
@@ -198,7 +176,7 @@ public class AiChatService {
                             }
                             log.error("AI 流式响应中断 model={} subject={}:{}: {}",
                                     finalModel, finalSubjectType, finalSubjectId, e.getMessage(), e);
-                            recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
+                            aiUsageRecorder.recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
                                     prompt, null, "failed", e.getMessage(), requestTime, requestTimeMillis);
                             externalCallLogger.failure("LLM流式", url, callParams, e.getMessage(),
                                     System.currentTimeMillis() - requestTimeMillis, operator);
@@ -209,7 +187,7 @@ public class AiChatService {
                     })
                     .exceptionally(e -> {
                         log.error("调用 LLM 失败: {}", e.getMessage(), e);
-                        recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
+                        aiUsageRecorder.recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
                                 prompt, null, "failed", e.getMessage(), requestTime, requestTimeMillis);
                         externalCallLogger.failure("LLM流式", url, callParams, e.getMessage(),
                                 System.currentTimeMillis() - requestTimeMillis, operator);
@@ -224,7 +202,7 @@ public class AiChatService {
     }
 
     private String doChatCompletion(AiResolvedConfig cfg, String prompt) {
-        String url = chatCompletionsUrl(cfg);
+        String url = llmClient.chatCompletionsUrl(cfg);
         String model = cfg.model();
         Subject subject = currentSubject();
         long start = System.currentTimeMillis();
@@ -239,20 +217,12 @@ public class AiChatService {
             // 海螺只需短 JSON（top-3 id），限制输出加速生成；低温更确定
             body.put("max_tokens", 100);
             body.put("temperature", 0.3);
-            String bodyJson = objectMapper.writeValueAsString(body);
-
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofMinutes(2))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + cfg.apiKey())
-                    .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
-                    .build();
+            HttpRequest httpRequest = llmClient.buildRequest(cfg, body, Duration.ofMinutes(2));
 
             log.info("AI 非流式请求: model={}, type={}, providerId={}, promptLen={}, subject={}:{}",
                     model, cfg.modelType(), cfg.providerId(), prompt.length(), subject.type(), subject.id());
 
-            HttpResponse<String> response = httpClient.send(httpRequest,
+            HttpResponse<String> response = llmClient.send(httpRequest,
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() != 200) {
                 throw new BusinessException("LLM 返回错误: HTTP " + response.statusCode());
@@ -261,8 +231,8 @@ public class AiChatService {
             JsonNode json = objectMapper.readTree(response.body());
             String content = json.path("choices").path(0)
                     .path("message").path("content").asText("");
-            int[] usage = parseUsage(json.path("usage"));
-            recordTokenUsage(cfg, model, prompt, content, usage != null, usage,
+            int[] usage = llmClient.parseUsage(json.path("usage"));
+            aiUsageRecorder.recordTokenUsage(cfg, model, prompt, content, usage != null, usage,
                     subject.type(), subject.id());
 
             externalCallLogger.success("LLM非流式", url, callParams + ", resultLen=" + content.length(),
@@ -283,28 +253,6 @@ public class AiChatService {
         }
     }
 
-    /**
-     * 字符估算 token（仅当 LLM 不返回 usage 时兜底）。
-     * <p>中文约 1.5 字符/token，英文与数字约 4 字符/token（与 tiktoken 量级近似）；
-     * 原实现直接取字符数，对英文严重高估、污染 sys_ai_usage 统计，故按语种区分。
-     */
-    private int estimateTokens(String text) {
-        if (text == null || text.isEmpty()) {
-            return 0;
-        }
-        int cjk = 0, latin = 0;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c >= 0x4E00 && c <= 0x9FFF) {
-                cjk++;                         // CJK 统一表意文字
-            } else if (Character.isLetterOrDigit(c)) {
-                latin++;
-            }
-            // 标点/空白不计入 token 估算
-        }
-        return (int) Math.ceil(cjk / 1.5 + latin / 4.0);
-    }
-
     private void sendError(SseEmitter emitter, String message) {
         try {
             // 前端 fetch+ReadableStream 只解析默认 message 事件的 data；
@@ -315,36 +263,6 @@ public class AiChatService {
         } catch (Exception e) {
             emitter.completeWithError(e);
         }
-    }
-
-    /**
-     * 落库一次文本生成历史（幂等守卫：每条请求只记一次，避免异常路径重复落库）。
-     * <p>历史落库异常仅记日志，不影响流式主流程。
-     */
-    private void recordHistory(boolean[] recorded, String subjectType, String subjectId,
-                               Long providerId, String model, String prompt, String result,
-                               String status, String errorMsg,
-                               LocalDateTime requestTime, long requestTimeMillis) {
-        if (recorded[0]) {
-            return;
-        }
-        recorded[0] = true;
-        LocalDateTime responseTime = LocalDateTime.now();
-        long durationMs = System.currentTimeMillis() - requestTimeMillis;
-        com.stellar.ai.entity.AiTask task = new com.stellar.ai.entity.AiTask();
-        task.setTaskType("text");
-        task.setSubjectType(subjectType);
-        task.setSubjectId(subjectId);
-        task.setProviderId(providerId);
-        task.setModel(model);
-        task.setPrompt(prompt);
-        task.setResult(result);
-        task.setStatus(status);
-        task.setErrorMsg(errorMsg);
-        task.setRequestTime(requestTime);
-        task.setResponseTime(responseTime);
-        task.setDurationMs(durationMs);
-        aiTaskService.record(task);
     }
 
     // ===== 多轮聊天（AI 聊天模块用）=====
@@ -422,7 +340,7 @@ public class AiChatService {
 
     private SseEmitter doStreamChatMulti(SseEmitter emitter, List<Map<String, String>> messages,
                                          AiResolvedConfig cfg, Consumer<String> onComplete, Subject subject) {
-        String url = chatCompletionsUrl(cfg);
+        String url = llmClient.chatCompletionsUrl(cfg);
         String model = cfg.model();
         try {
             Map<String, Object> body = new HashMap<>();
@@ -430,15 +348,7 @@ public class AiChatService {
             body.put("messages", messages);
             body.put("stream", true);
             body.put("stream_options", Map.of("include_usage", true));
-            String bodyJson = objectMapper.writeValueAsString(body);
-
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofMinutes(5))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + cfg.apiKey())
-                    .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
-                    .build();
+            HttpRequest httpRequest = llmClient.buildRequest(cfg, body, Duration.ofMinutes(5));
 
             log.info("AI 多轮流式: model={}, msgCount={}, subject={}:{}", model, messages.size(), subject.type(), subject.id());
 
@@ -447,7 +357,7 @@ public class AiChatService {
             String callParams = "model=" + model + ", providerId=" + cfg.providerId()
                     + ", msgCount=" + messages.size() + ", subject=" + operator;
 
-            httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
+            llmClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
                     .thenAccept(response -> {
                         if (response.statusCode() != 200) {
                             String errMsg = "LLM 返回错误: HTTP " + response.statusCode();
@@ -456,10 +366,11 @@ public class AiChatService {
                             sendError(emitter, errMsg);
                             return;
                         }
-                        SseSender sender = new SseSender(emitter);
+                        SseEmitterChannel sender = new SseEmitterChannel(emitter);
                         try (InputStream is = response.body()) {
-                            StreamResult sr = parseStream(is, sender);
-                            recordTokenUsageForMessages(cfg, model, messages, sr.content(),
+                            LlmChatClient.ChatStreamReply sr = llmClient.parseStream(is,
+                                    delta -> sender.send(Map.of("content", delta)));
+                            aiUsageRecorder.recordTokenUsageForMessages(cfg, model, messages, sr.content(),
                                     sr.hasUsage(), sr.usage(), subject.type(), subject.id());
                             if (onComplete != null) {
                                 try {
@@ -499,7 +410,7 @@ public class AiChatService {
     }
 
     private String doChatCompletionMessages(List<Map<String, String>> messages, AiResolvedConfig cfg) {
-        String url = chatCompletionsUrl(cfg);
+        String url = llmClient.chatCompletionsUrl(cfg);
         String model = cfg.model();
         Subject subject = currentSubject();
         long start = System.currentTimeMillis();
@@ -510,26 +421,18 @@ public class AiChatService {
             body.put("model", model);
             body.put("messages", messages);
             body.put("stream", false);
-            String bodyJson = objectMapper.writeValueAsString(body);
-
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofMinutes(5))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + cfg.apiKey())
-                    .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
-                    .build();
+            HttpRequest httpRequest = llmClient.buildRequest(cfg, body, Duration.ofMinutes(5));
 
             log.info("AI 非流式多消息: model={}, msgCount={}, subject={}:{}", model, messages.size(), subject.type(), subject.id());
-            HttpResponse<String> response = httpClient.send(httpRequest,
+            HttpResponse<String> response = llmClient.send(httpRequest,
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() != 200) {
                 throw new BusinessException("LLM 返回错误: HTTP " + response.statusCode());
             }
             JsonNode json = objectMapper.readTree(response.body());
             String content = json.path("choices").path(0).path("message").path("content").asText("");
-            int[] usage = parseUsage(json.path("usage"));
-            recordTokenUsageForMessages(cfg, model, messages, content, usage != null, usage,
+            int[] usage = llmClient.parseUsage(json.path("usage"));
+            aiUsageRecorder.recordTokenUsageForMessages(cfg, model, messages, content, usage != null, usage,
                     subject.type(), subject.id());
             externalCallLogger.success("LLM非流式多消息", url, callParams + ", resultLen=" + content.length(),
                     System.currentTimeMillis() - start);
@@ -565,7 +468,7 @@ public class AiChatService {
 
     private JsonNode doChatCompletionWithTools(List<Map<String, Object>> messages,
                                                List<Map<String, Object>> tools, AiResolvedConfig cfg) {
-        String url = chatCompletionsUrl(cfg);
+        String url = llmClient.chatCompletionsUrl(cfg);
         String model = cfg.model();
         Subject subject = currentSubject();
         long start = System.currentTimeMillis();
@@ -581,20 +484,12 @@ public class AiChatService {
                 body.put("tools", tools);
                 body.put("tool_choice", "auto");
             }
-            String bodyJson = objectMapper.writeValueAsString(body);
-
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofMinutes(2))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + cfg.apiKey())
-                    .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
-                    .build();
+            HttpRequest httpRequest = llmClient.buildRequest(cfg, body, Duration.ofMinutes(2));
 
             log.info("AI 工具判定(非流式): model={}, msgCount={}, tools={}, subject={}:{}",
                     model, messages.size(), tools != null ? tools.size() : 0, subject.type(), subject.id());
 
-            HttpResponse<String> response = httpClient.send(httpRequest,
+            HttpResponse<String> response = llmClient.send(httpRequest,
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() != 200) {
                 // 上游错误体可能含用户内容，截断后记录，避免日志泄露
@@ -603,8 +498,8 @@ public class AiChatService {
             }
             JsonNode json = objectMapper.readTree(response.body());
             JsonNode msgNode = json.path("choices").path(0).path("message");
-            int[] usage = parseUsage(json.path("usage"));
-            recordTokenUsageForMessages(cfg, model, messages, msgNode.path("content").asText(""),
+            int[] usage = llmClient.parseUsage(json.path("usage"));
+            aiUsageRecorder.recordTokenUsageForMessages(cfg, model, messages, msgNode.path("content").asText(""),
                     usage != null, usage, subject.type(), subject.id());
             externalCallLogger.success("LLM工具判定(非流式)", url, callParams
                             + ", hasToolCalls=" + msgNode.path("tool_calls").isArray(),
@@ -661,7 +556,7 @@ public class AiChatService {
     private SseEmitter doStreamChatWithTools(SseEmitter emitter, List<Map<String, Object>> messages,
                                              AiResolvedConfig cfg, List<Map<String, Object>> tools,
                                              String voice, Consumer<AiChatResult> onComplete, Subject subject) {
-        String url = chatCompletionsUrl(cfg);
+        String url = llmClient.chatCompletionsUrl(cfg);
         String model = cfg.model();
 
         try {
@@ -674,15 +569,7 @@ public class AiChatService {
                 firstBody.put("tools", tools);
                 firstBody.put("tool_choice", "auto");
             }
-            String firstBodyJson = objectMapper.writeValueAsString(firstBody);
-
-            HttpRequest firstRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofMinutes(2))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + cfg.apiKey())
-                    .POST(HttpRequest.BodyPublishers.ofString(firstBodyJson, StandardCharsets.UTF_8))
-                    .build();
+            HttpRequest firstRequest = llmClient.buildRequest(cfg, firstBody, Duration.ofMinutes(2));
 
             log.info("AI 聊天工具判定: model={}, msgCount={}, tools={}, subject={}:{}",
                     model, messages.size(), tools != null ? tools.size() : 0, subject.type(), subject.id());
@@ -698,7 +585,7 @@ public class AiChatService {
                     + ", msgCount=" + messages.size() + ", tools=" + (tools != null ? tools.size() : 0)
                     + ", subject=" + operator;
 
-            httpClient.sendAsync(firstRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+            llmClient.sendAsync(firstRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                     .thenAccept(firstResponse -> {
                         if (firstResponse.statusCode() != 200) {
                             // 上游错误体可能含用户内容，截断后记录，避免日志泄露
@@ -728,8 +615,8 @@ public class AiChatService {
                                     System.currentTimeMillis() - firstStart, operator);
 
                             // 记第一次 token
-                            int[] usage1 = parseUsage(firstJson.path("usage"));
-                            recordTokenUsageForMessages(cfg, model, messages, firstMsg.path("content").asText(""),
+                            int[] usage1 = llmClient.parseUsage(firstJson.path("usage"));
+                            aiUsageRecorder.recordTokenUsageForMessages(cfg, model, messages, firstMsg.path("content").asText(""),
                                     usage1 != null, usage1, subject.type(), subject.id());
 
                             if (!toolCallsNode.isArray() || toolCallsNode.isEmpty()) {
@@ -785,15 +672,7 @@ public class AiChatService {
             body.put("messages", messages);
             body.put("stream", true);
             body.put("stream_options", Map.of("include_usage", true));
-            String bodyJson = objectMapper.writeValueAsString(body);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofMinutes(5))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + cfg.apiKey())
-                    .POST(HttpRequest.BodyPublishers.ofString(bodyJson, StandardCharsets.UTF_8))
-                    .build();
+            HttpRequest request = llmClient.buildRequest(cfg, body, Duration.ofMinutes(5));
 
             log.info("AI 聊天第二次流式(工具后): model={}, msgCount={}", model, messages.size());
 
@@ -802,7 +681,7 @@ public class AiChatService {
             String callParams = "model=" + model + ", providerId=" + cfg.providerId()
                     + ", msgCount=" + messages.size() + ", subject=" + operator;
 
-            httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
+            llmClient.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
                     .thenAccept(response -> {
                         if (response.statusCode() != 200) {
                             log.error("AI 聊天第二次流式失败: HTTP {}", response.statusCode());
@@ -812,10 +691,11 @@ public class AiChatService {
                             safeOnComplete(onComplete, new AiChatResult(null, toolResult.attachmentType(), toolResult.attachmentFileId()));
                             return;
                         }
-                        SseSender sender = new SseSender(emitter);
+                        SseEmitterChannel sender = new SseEmitterChannel(emitter);
                         try (InputStream is = response.body()) {
-                            StreamResult sr = parseStream(is, sender);
-                            recordTokenUsageForMessages(cfg, model, messages, sr.content(),
+                            LlmChatClient.ChatStreamReply sr = llmClient.parseStream(is,
+                                    delta -> sender.send(Map.of("content", delta)));
+                            aiUsageRecorder.recordTokenUsageForMessages(cfg, model, messages, sr.content(),
                                     sr.hasUsage(), sr.usage(), subjectType, subjectId);
                             externalCallLogger.success("LLM工具后流式", url, callParams + ", resultLen=" + sr.content().length(),
                                     System.currentTimeMillis() - start, operator);
@@ -851,14 +731,6 @@ public class AiChatService {
 
     // ===== 私有 helper（去重核心）=====
 
-    /** 拼接 OpenAI 兼容的 chat/completions 端点（去除 endpoint 末尾斜杠）。 */
-    private String chatCompletionsUrl(AiResolvedConfig cfg) {
-        String base = cfg.providerId() == null
-                ? SafeUrlValidator.normalizePublicBaseUrl(cfg.endpoint(), "自定义 AI endpoint")
-                : cfg.endpoint().replaceAll("/+$", "");
-        return base + "/v1/chat/completions";
-    }
-
     /** 解析当前请求主体：登录按账号，游客按 IP（同步阶段调用，保证 web 上下文可用）。 */
     private Subject currentSubject() {
         if (StpUtil.isLogin()) {
@@ -867,113 +739,10 @@ public class AiChatService {
         return new Subject("ip", WebUtils.getClientIp());
     }
 
-    /**
-     * 解析 SSE 流式响应：逐行读取 data 分片，累加文本内容并经 {@link SseSender} 转发 content 事件，提取末帧 usage。
-     * <p>抽取自原先 3 处完全一致的解析循环（doStreamChat/doStreamChatMulti/doSecondStream）。
-     */
-    private StreamResult parseStream(InputStream is, SseSender sender) throws IOException {
-        StringBuilder buf = new StringBuilder();
-        int[] usage = {0, 0, 0};
-        boolean[] hasUsage = {false};
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (!line.startsWith("data:")) {
-                    continue;
-                }
-                String data = line.substring(5).trim();
-                if (data.equals("[DONE]")) {
-                    break;
-                }
-                try {
-                    JsonNode json = objectMapper.readTree(data);
-                    String delta = json.path("choices").path(0)
-                            .path("delta").path("content").asText("");
-                    if (!delta.isEmpty()) {
-                        buf.append(delta);
-                        sender.send(Map.of("content", delta));
-                    }
-                    JsonNode usageNode = json.path("usage");
-                    if (!usageNode.isMissingNode() && usageNode.has("total_tokens")) {
-                        usage[0] = usageNode.path("prompt_tokens").asInt(0);
-                        usage[1] = usageNode.path("completion_tokens").asInt(0);
-                        usage[2] = usageNode.path("total_tokens").asInt(0);
-                        hasUsage[0] = true;
-                    }
-                } catch (Exception e) {
-                    if (e instanceof ClientDisconnectedException disconnected) {
-                        throw disconnected;
-                    }
-                    log.debug("解析 LLM 响应分片失败: {}", data);
-                }
-            }
-        }
-        return new StreamResult(buf.toString(), usage, hasUsage[0]);
-    }
-
-    /** 从 usage JsonNode 提取 [prompt, completion, total]，无 total_tokens 返回 null。 */
-    private int[] parseUsage(JsonNode usageNode) {
-        if (usageNode == null || usageNode.isMissingNode() || !usageNode.has("total_tokens")) {
-            return null;
-        }
-        return new int[]{
-                usageNode.path("prompt_tokens").asInt(0),
-                usageNode.path("completion_tokens").asInt(0),
-                usageNode.path("total_tokens").asInt(0)
-        };
-    }
-
-    /**
-     * 统一记录 token 消费：有 usage 用精确值，否则用 prompt/result 估算兜底。
-     * <p>抽取自原先 doStreamChat/doChatCompletion 内联逻辑与 recordUsage/recordUsageObject 三套实现。
-     */
-    private void recordTokenUsage(AiResolvedConfig cfg, String model, String promptEstimateText,
-                                  String result, boolean hasUsage, int[] usage,
-                                  String subjectType, String subjectId) {
-        int promptTokens;
-        int completionTokens;
-        int totalTokens;
-        String source;
-        if (hasUsage && usage != null) {
-            promptTokens = usage[0];
-            completionTokens = usage[1];
-            totalTokens = usage[2];
-            source = "usage";
-        } else {
-            promptTokens = estimateTokens(promptEstimateText);
-            completionTokens = estimateTokens(result);
-            totalTokens = promptTokens + completionTokens;
-            source = "estimate";
-        }
-        try {
-            sysAiUsageService.record(subjectType, subjectId, cfg.providerId(), model, cfg.modelType(),
-                    promptTokens, completionTokens, totalTokens, source);
-        } catch (Exception e) {
-            log.warn("记录 token usage 失败（不影响主流程）: {}", e.getMessage());
-        }
-    }
-
-    /** 多轮场景按 messages 实际 content 拼接估算 prompt token，再委托 {@link #recordTokenUsage}。 */
-    private void recordTokenUsageForMessages(AiResolvedConfig cfg, String model, List<?> messages,
-                                              String result, boolean hasUsage, int[] usage,
-                                              String subjectType, String subjectId) {
-        StringBuilder promptText = new StringBuilder();
-        for (Object m : messages) {
-            if (m instanceof Map<?, ?> map) {
-                Object content = map.get("content");
-                if (content != null) {
-                    promptText.append(content);
-                }
-            }
-        }
-        recordTokenUsage(cfg, model, promptText.toString(), result, hasUsage, usage, subjectType, subjectId);
-    }
-
-    /**
-     * 注册 SSE 生命周期回调：超时/完成/错误时记日志，便于排查连接泄漏。
-     * <p>不手动调 emitter.complete()——Spring 在 onTimeout/onError 回调后会自动 complete。
-     */
+/**
+      * 注册 SSE 生命周期回调：超时/完成/错误时记日志，便于排查连接泄漏。
+      * <p>不手动调 emitter.complete()——Spring 在 onTimeout/onError 回调后会自动 complete。
+      */
     private void registerEmitterLifecycle(SseEmitter emitter, String subjectType, String subjectId) {
         emitter.onTimeout(() -> log.warn("SSE 超时断开 subject={}:{}", subjectType, subjectId));
         emitter.onCompletion(() -> log.debug("SSE 连接关闭 subject={}:{}", subjectType, subjectId));
@@ -1042,7 +811,7 @@ public class AiChatService {
     private boolean isClientDisconnect(Throwable error) {
         Throwable current = error;
         while (current != null) {
-            if (current instanceof ClientDisconnectedException) {
+            if (current instanceof SseEmitterChannel.ClientDisconnectedException) {
                 return true;
             }
             String message = current.getMessage();
@@ -1059,77 +828,4 @@ public class AiChatService {
         return false;
     }
 
-    private static final class ClientDisconnectedException extends IOException {
-        private ClientDisconnectedException(Throwable cause) {
-            super(cause.getMessage(), cause);
-        }
-    }
-
-    /**
-     * SSE 发送通道：独立写线程 + 有界队列，解耦慢客户端 socket 写阻塞与 HttpClient 响应读取线程
-     * （慢客户端会占满 HttpClient worker 拖慢所有 AI 请求）。
-     * <p>内容分片与终态 done 都经同一单线程队列串行写出，保证先后顺序；
-     * 队列满时提交方按 CallerRunsPolicy 内联执行（背压：限速读取上游，防内存无界增长）；
-     * 分片发送失败置 disconnected 标记，生产者下次 send 抛 {@link ClientDisconnectedException} 提前终止读取。
-     */
-    private static final class SseSender {
-        private final SseEmitter emitter;
-        private final ThreadPoolExecutor executor;
-        private volatile boolean disconnected;
-
-        SseSender(SseEmitter emitter) {
-            this.emitter = emitter;
-            this.executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
-                    new ArrayBlockingQueue<>(512),
-                    r -> {
-                        Thread t = new Thread(r, "sse-sender");
-                        t.setDaemon(true);
-                        return t;
-                    },
-                    new ThreadPoolExecutor.CallerRunsPolicy());
-        }
-
-        /** 发送事件（内容分片），客户端已断开则抛 {@link ClientDisconnectedException}。 */
-        void send(Map<String, Object> data) throws ClientDisconnectedException {
-            if (disconnected) {
-                throw new ClientDisconnectedException(new IOException("SSE 客户端已断开"));
-            }
-            try {
-                executor.execute(() -> doSend(data));
-            } catch (RejectedExecutionException e) {
-                // 执行器已关闭（终态后仍被调用）→ 连接已结束，按客户端断开处理
-                throw new ClientDisconnectedException(e);
-            }
-        }
-
-        /** 发送终态事件并 complete emitter，保证排在所有已入队分片之后。 */
-        void sendAndComplete(Map<String, Object> data) {
-            try {
-                executor.execute(() -> {
-                    doSend(data);
-                    try {
-                        emitter.complete();
-                    } catch (Exception e) {
-                        log.warn("SSE complete 失败: {}", e.getMessage());
-                    }
-                });
-            } catch (RejectedExecutionException e) {
-                log.warn("SSE 终态发送被拒绝（连接可能已关闭）: {}", e.getMessage());
-            }
-        }
-
-        private void doSend(Map<String, Object> data) {
-            try {
-                emitter.send(SseEmitter.event().data(data, MediaType.APPLICATION_JSON));
-            } catch (Exception e) {
-                disconnected = true;   // 客户端断开/连接已完成 → 通知生产者提前终止读取
-                log.debug("SSE 分片发送失败（视为客户端断开）: {}", e.getMessage());
-            }
-        }
-
-        /** 关闭写线程：已入队任务（含终态）执行完，不再接受新任务。 */
-        void shutdown() {
-            executor.shutdown();
-        }
-    }
 }

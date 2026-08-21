@@ -76,13 +76,20 @@ class MemosServiceTest {
     @Mock
     private MemosSyncLogMapper memosSyncLogMapper;
 
+    private MemosTagCodec tagCodec;
     private MemosService service;
 
     @BeforeEach
     void setUp() {
+        tagCodec = new MemosTagCodec(new ObjectMapper());
+        // 真实包装组件 + 底层 mock：既有 redis/sysSetting/mapper 桩与 verify 全部保持有效
+        MemosWebhookGuard webhookGuard = new MemosWebhookGuard(redisTemplate, sysSettingService,
+                new com.stellar.infra.HmacWebhookVerifier());
+        com.stellar.infra.RedisMutex redisMutex = new com.stellar.infra.RedisMutex(redisTemplate);
+        MemosSyncLogStore syncLogStore = new MemosSyncLogStore(memosSyncLogMapper);
         service = new MemosService(memosNoteMapper, memosApiClient, sysSettingService,
-                aiChatService, externalCallLogger, new ObjectMapper(), redisTemplate, memosRagService,
-                memosSyncLogMapper);
+                aiChatService, externalCallLogger, memosRagService, webhookGuard, redisMutex,
+                syncLogStore, tagCodec, new ObjectMapper());
     }
 
     private void mockConfig(String baseUrl, String token) {
@@ -1004,43 +1011,39 @@ class MemosServiceTest {
 
     @Test
     void stripTrailingTagBlock_剥离尾部标签块_无标签原样() {
-        assertEquals("hello", MemosService.stripTrailingTagBlock("hello\n\n#a #b"));
-        assertEquals("hello", MemosService.stripTrailingTagBlock("hello #x"));
-        assertEquals("正文", MemosService.stripTrailingTagBlock("正文"));
-        assertEquals("", MemosService.stripTrailingTagBlock("#onlytag"));
-        assertEquals("", MemosService.stripTrailingTagBlock(null));
+        assertEquals("hello", MemosTagCodec.stripTrailingTagBlock("hello\n\n#a #b"));
+        assertEquals("hello", MemosTagCodec.stripTrailingTagBlock("hello #x"));
+        assertEquals("正文", MemosTagCodec.stripTrailingTagBlock("正文"));
+        assertEquals("", MemosTagCodec.stripTrailingTagBlock("#onlytag"));
+        assertEquals("", MemosTagCodec.stripTrailingTagBlock(null));
     }
 
     @Test
     void sanitizeTag_去井号去空白截断() {
-        assertEquals("Foo_Bar", MemosService.sanitizeTag("#Foo Bar"));
-        assertEquals("a_b", MemosService.sanitizeTag("a\tb"));
-        assertEquals("", MemosService.sanitizeTag("  ##  "));
-        assertEquals("", MemosService.sanitizeTag(null));
+        assertEquals("Foo_Bar", MemosTagCodec.sanitizeTag("#Foo Bar"));
+        assertEquals("a_b", MemosTagCodec.sanitizeTag("a\tb"));
+        assertEquals("", MemosTagCodec.sanitizeTag("  ##  "));
+        assertEquals("", MemosTagCodec.sanitizeTag(null));
     }
 
     @Test
     void splitTags_joinTags_往返去重() {
-        assertEquals(Set.of("a", "b"), MemosService.splitTags(" a, b ,,a"));
-        assertEquals("x,y", MemosService.joinTags(List.of("x", "#y", "x")));
+        assertEquals(Set.of("a", "b"), MemosTagCodec.splitTags(" a, b ,,a"));
+        assertEquals("x,y", MemosTagCodec.joinTags(List.of("x", "#y", "x")));
     }
 
     @Test
     void buildContentWithTags_追加块() {
-        assertEquals("正文\n\n#a #b", MemosService.buildContentWithTags("正文", List.of("a", "b")));
-        assertEquals("#a", MemosService.buildContentWithTags("", List.of("a")));
-        assertEquals("正文", MemosService.buildContentWithTags("正文", List.of()));
+        assertEquals("正文\n\n#a #b", MemosTagCodec.buildContentWithTags("正文", List.of("a", "b")));
+        assertEquals("#a", MemosTagCodec.buildContentWithTags("", List.of("a")));
+        assertEquals("正文", MemosTagCodec.buildContentWithTags("正文", List.of()));
     }
 
     @Test
     void parseTagsFromText_分隔符与JSON数组() {
-        assertEquals(List.of("编程", "后端"), MemosServiceTest.parseTagsVia(service, "编程、后端"));
-        assertEquals(List.of("a", "b"), MemosServiceTest.parseTagsVia(service, "[\"a\",\"b\"]"));
-        assertEquals(List.of(), MemosServiceTest.parseTagsVia(service, "   "));
-        assertEquals(List.of("a", "b"), MemosServiceTest.parseTagsVia(service, "a,b,a"));
-    }
-
-    static List<String> parseTagsVia(MemosService s, String text) {
-        return s.parseTagsFromText(text);
+        assertEquals(List.of("编程", "后端"), tagCodec.parseTagsFromText("编程、后端"));
+        assertEquals(List.of("a", "b"), tagCodec.parseTagsFromText("[\"a\",\"b\"]"));
+        assertEquals(List.of(), tagCodec.parseTagsFromText("   "));
+        assertEquals(List.of("a", "b"), tagCodec.parseTagsFromText("a,b,a"));
     }
 }
