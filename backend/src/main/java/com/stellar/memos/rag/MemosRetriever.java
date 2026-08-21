@@ -1,5 +1,7 @@
-package com.stellar.ai.service.rag;
+package com.stellar.memos.rag;
 
+import com.stellar.ai.service.rag.ExternalRetriever;
+import com.stellar.ai.service.rag.RagHit;
 import com.stellar.memos.service.MemosRagService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,18 +10,18 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * 备忘笔记检索器：语义检索备份笔记（仅登录用户启用），复用 {@link MemosRagService}。
- * <p>向量化用 EMBEDDING 默认模型；qvec 由 {@link RagSearchService} 统一计算（与 KB 默认模型共享，避免重复向量化）；
+ * 备忘笔记检索器：实现 ai RAG 管线的外部知识源缝 {@link ExternalRetriever}（仅登录用户启用），
+ * 复用 {@link MemosRagService}。qvec 由管线统一计算（与 KB 默认模型共享，避免重复向量化）；
  * 召回失败返回空列表（不打断管线）。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class MemosRetriever {
+public class MemosRetriever implements ExternalRetriever {
 
     private final MemosRagService memosRagService;
 
-    /** 稠密向量通道：qvec 必须用默认 EMBEDDING 模型计算（null 则不检索）。 */
+    @Override
     public List<RagHit> retrieve(float[] qvec, int topK) {
         if (qvec == null) {
             return List.of();
@@ -36,7 +38,7 @@ public class MemosRetriever {
         }
     }
 
-    /** 关键词通道（BM25）：精确词/标签/编号召回，与向量通道经 RRF 融合（混合检索）。 */
+    @Override
     public List<RagHit> retrieveKeyword(String query, int topK) {
         try {
             return memosRagService.searchKeyword(query, topK).stream()

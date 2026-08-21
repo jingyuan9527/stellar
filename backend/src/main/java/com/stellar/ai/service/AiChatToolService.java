@@ -3,7 +3,6 @@ package com.stellar.ai.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.system.entity.SysFile;
-import com.stellar.system.mapper.SysFileMapper;
 import com.stellar.ai.vo.AiResolvedConfig;
 import com.stellar.ai.vo.ToolResult;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +14,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import com.stellar.system.service.FileService;
 import com.stellar.system.service.SysSettingService;
 import com.stellar.tts.service.AiTtsService;
 import com.stellar.tts.service.TtsRecordService;
@@ -41,7 +41,7 @@ public class AiChatToolService {
     private final TtsRecordService ttsRecordService;
     private final AiModelService aiModelService;
     private final SysSettingService sysSettingService;
-    private final SysFileMapper fileMapper;
+    private final FileService fileService;
     private final ObjectMapper objectMapper;
 
     private static final String EDGE_DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural";
@@ -209,7 +209,7 @@ public class AiChatToolService {
         file.setSize((long) audio.length);
         file.setData(audio);
         file.setCreateTime(LocalDateTime.now());
-        fileMapper.insert(file);
+        fileService.create(file);
         ttsRecordService.saveChatTts(text, voice, audio, ext, subjectType, subjectId);
         return file.getId();
     }

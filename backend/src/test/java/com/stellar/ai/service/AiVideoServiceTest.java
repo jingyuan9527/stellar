@@ -13,7 +13,7 @@ import com.stellar.ai.vo.AiVideoHistoryVO;
 import com.stellar.common.BusinessException;
 import com.stellar.system.entity.SysFile;
 import com.stellar.infra.ExternalCallLogger;
-import com.stellar.system.mapper.SysFileMapper;
+import com.stellar.system.service.FileService;
 import com.stellar.test.ReflectUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,7 +47,7 @@ class AiVideoServiceTest {
     @Mock
     AiModelService aiModelService;
     @Mock
-    SysFileMapper fileMapper;
+    com.stellar.system.service.FileService fileService;
     @Mock
     SysAiUsageService sysAiUsageService;
     @Mock
@@ -60,7 +60,7 @@ class AiVideoServiceTest {
 
     @BeforeEach
     void setup() {
-        service = new AiVideoService(aiModelService, fileMapper, sysAiUsageService, aiTaskMapper,
+        service = new AiVideoService(aiModelService, fileService, sysAiUsageService, aiTaskMapper,
                 new com.fasterxml.jackson.databind.ObjectMapper(), externalCallLogger);
         mockHttpClient = mock(HttpClient.class);
         ReflectUtil.setFinalField(service, "httpClient", mockHttpClient);
@@ -170,7 +170,7 @@ class AiVideoServiceTest {
         when(aiTaskMapper.selectVideoTaskByVideoId("vid1")).thenReturn(local);
         var vo = service.getTask(1L, "vid1");
         assertEquals("/file/99", vo.getVideoUrl());
-        verify(fileMapper, never()).insert((SysFile) any());
+        verify(fileService, never()).create((SysFile) any());
     }
 
     @Test
@@ -205,7 +205,7 @@ class AiVideoServiceTest {
                     .thenReturn(new java.net.InetAddress[]{publicIp});
 
             var vo = service.getTask(1L, "vid1");
-            verify(fileMapper).insert((SysFile) any());
+            verify(fileService).create((SysFile) any());
             assertTrue(vo.getVideoUrl().startsWith("/file/"));
         }
     }
@@ -250,7 +250,7 @@ class AiVideoServiceTest {
         t.setFileId(9L);
         when(aiTaskMapper.selectById(1L)).thenReturn(t);
         service.deleteTask(1L, "account", "1");
-        verify(fileMapper).deleteById(9L);
+        verify(fileService).deleteById(9L);
         verify(aiTaskMapper).deleteById(1L);
     }
 

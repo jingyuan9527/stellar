@@ -15,8 +15,6 @@ import com.stellar.ai.service.AiChatToolService;
 import com.stellar.ai.service.AiMemoryService;
 import com.stellar.ai.service.rag.RagSearchService;
 import com.stellar.common.BusinessException;
-import com.stellar.system.entity.SysUser;
-import com.stellar.system.mapper.SysUserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -54,7 +52,7 @@ class AiChatSessionServiceTest {
     @Mock
     AiPersonaMapper personaMapper;
     @Mock
-    SysUserMapper userMapper;
+    com.stellar.system.service.UserService userService;
     @Mock
     AiMemoryService memoryService;
     @Mock
@@ -70,7 +68,7 @@ class AiChatSessionServiceTest {
 
     @BeforeEach
     void setup() {
-        service = new AiChatSessionService(sessionMapper, messageMapper, personaMapper, userMapper,
+        service = new AiChatSessionService(sessionMapper, messageMapper, personaMapper, userService,
                 memoryService, aiChatService, aiChatToolService, ragSearchService, ragFeedbackMapper);
         // 异步编排线程池注入同步 executor：测试里异步变同步，可确定性断言
         ReflectionTestUtils.setField(service, "ragExecutor", (Executor) Runnable::run);
@@ -133,10 +131,7 @@ class AiChatSessionServiceTest {
         Page<AiChatSession> page = new Page<>(1, 10, 1);
         page.setRecords(List.of(s));
         when(sessionMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(page);
-        SysUser u = new SysUser();
-        u.setId(7L);
-        u.setUsername("alice");
-        when(userMapper.selectBatchIds(any())).thenReturn(List.of(u));
+        when(userService.getUsernameMap(any())).thenReturn(Map.of(7L, "alice"));
 
         Page<Map<String, Object>> r = service.pageAllSessions(1, 10);
         assertEquals(1, r.getRecords().size());

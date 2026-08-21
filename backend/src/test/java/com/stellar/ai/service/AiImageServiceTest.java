@@ -15,7 +15,6 @@ import com.stellar.ai.vo.AiImageTaskVO;
 import com.stellar.ai.vo.AiResolvedConfig;
 import com.stellar.common.BusinessException;
 import com.stellar.system.entity.SysFile;
-import com.stellar.system.mapper.SysFileMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,7 +42,7 @@ class AiImageServiceTest {
     @Mock
     AiTaskMapper aiTaskMapper;
     @Mock
-    SysFileMapper fileMapper;
+    com.stellar.system.service.FileService fileService;
     @Mock
     AiImageTaskWorker worker;
     @Mock
@@ -53,7 +52,7 @@ class AiImageServiceTest {
 
     @BeforeEach
     void setup() {
-        service = new AiImageService(aiModelService, aiTaskMapper, fileMapper, worker, sysAiUsageService, new ObjectMapper());
+        service = new AiImageService(aiModelService, aiTaskMapper, fileService, worker, sysAiUsageService, new ObjectMapper());
     }
 
     private AiTask task(Long id, String type, String subjectType, String subjectId, String status, Long fileId, String extra) {
@@ -112,7 +111,7 @@ class AiImageServiceTest {
     void deleteTask_正常_删关联文件() {
         when(aiTaskMapper.selectById(1L)).thenReturn(task(1L, "image", "account", "u1", "completed", 9L, null));
         service.deleteTask(1L, "account", "u1");
-        verify(fileMapper).deleteById(9L);
+        verify(fileService).deleteById(9L);
         verify(aiTaskMapper).deleteById(1L);
     }
 
@@ -162,7 +161,7 @@ class AiImageServiceTest {
         when(worker.generateImageBytes(any(), anyString(), anyString(), anyString())).thenReturn(new byte[]{1, 2, 3});
         service.generateImageSync("p", "account", "u1");
         verify(aiTaskMapper).insert(any(AiTask.class));
-        verify(fileMapper).insert(any(SysFile.class));
+        verify(fileService).create(any(SysFile.class));
         verify(sysAiUsageService).record(eq("account"), eq("u1"), anyLong(), anyString(), eq("IMAGE"), anyInt(), anyInt(), anyInt(), anyString());
     }
 

@@ -9,18 +9,17 @@ import com.stellar.ai.entity.AiChatMessage;
 import com.stellar.ai.entity.AiChatSession;
 import com.stellar.ai.entity.AiPersona;
 import com.stellar.ai.entity.RagFeedback;
-import com.stellar.system.entity.SysUser;
 import com.stellar.ai.mapper.AiChatMessageMapper;
 import com.stellar.ai.mapper.AiChatSessionMapper;
 import com.stellar.ai.mapper.AiPersonaMapper;
 import com.stellar.ai.mapper.RagFeedbackMapper;
-import com.stellar.system.mapper.SysUserMapper;
 import com.stellar.ai.service.rag.RagHit;
 import com.stellar.ai.service.rag.RagSearchService;
 import com.stellar.ai.service.rag.RetrievalResult;
 import com.stellar.ai.vo.AiChatResult;
 import com.stellar.ai.vo.RagSource;
 import com.stellar.interceptor.WebUtils;
+import com.stellar.system.service.UserService;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,7 +51,7 @@ public class AiChatSessionService {
     private final AiChatSessionMapper sessionMapper;
     private final AiChatMessageMapper messageMapper;
     private final AiPersonaMapper personaMapper;
-    private final SysUserMapper userMapper;
+    private final UserService userService;
     private final AiMemoryService memoryService;
     private final AiChatService aiChatService;
     private final AiChatToolService aiChatToolService;
@@ -535,9 +534,7 @@ public class AiChatSessionService {
                     .filter(java.util.Objects::nonNull)
                     .distinct()
                     .collect(Collectors.toList());
-            if (!userIds.isEmpty()) {
-                userMapper.selectBatchIds(userIds).forEach(u -> nameMap.put(u.getId(), u.getUsername()));
-            }
+            nameMap.putAll(userService.getUsernameMap(userIds));
         }
         Page<Map<String, Object>> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         List<Map<String, Object>> records = new ArrayList<>();

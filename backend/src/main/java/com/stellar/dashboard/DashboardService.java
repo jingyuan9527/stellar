@@ -1,12 +1,11 @@
-package com.stellar.system.service;
+package com.stellar.dashboard;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.stellar.ai.mapper.AiTaskMapper;
+import com.stellar.ai.service.AiTaskService;
 import com.stellar.ai.service.SysAiUsageService;
 import com.stellar.common.FileConstants;
 import com.stellar.system.entity.SysFile;
 import com.stellar.system.mapper.SysFileMapper;
-import com.stellar.system.vo.DashboardStatsVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,7 +23,7 @@ import java.util.Map;
 public class DashboardService {
 
     private final SysAiUsageService aiUsageService;
-    private final AiTaskMapper aiTaskMapper;
+    private final AiTaskService aiTaskService;
     private final SysFileMapper fileMapper;
 
     public DashboardStatsVO stats() {
@@ -67,8 +66,8 @@ public class DashboardService {
         LocalDateTime weekStart = LocalDate.now().minusDays(6).atStartOfDay();
         LocalDateTime prevWeekStart = LocalDate.now().minusDays(13).atStartOfDay();
         // 聚合下推 SQL，避免全表拉进 JVM（ai_task 随调用量无限增长）
-        Map<String, Object> totals = aiTaskMapper.selectTaskStatTotals(taskType, successStatus);
-        Map<String, Object> recent = aiTaskMapper.selectTaskStatRecent(taskType, todayStart, weekStart, prevWeekStart);
+        Map<String, Object> totals = aiTaskService.taskStatTotals(taskType, successStatus);
+        Map<String, Object> recent = aiTaskService.taskStatRecent(taskType, todayStart, weekStart, prevWeekStart);
         return buildTaskStat(toLong(totals.get("total")),
                 toLong(recent.get("today")),
                 toLong(totals.get("success")),
@@ -139,7 +138,7 @@ public class DashboardService {
 
     private DashboardStatsVO.TtsStat buildTtsStat() {
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
-        Map<String, Object> stat = aiTaskMapper.selectTtsStat(todayStart);
+        Map<String, Object> stat = aiTaskService.ttsStat(todayStart);
         DashboardStatsVO.TtsStat result = new DashboardStatsVO.TtsStat();
         result.setTotal(toLong(stat.get("total")));
         result.setToday(toLong(stat.get("today")));

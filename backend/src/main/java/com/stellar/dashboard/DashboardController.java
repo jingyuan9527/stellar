@@ -1,10 +1,8 @@
-package com.stellar.system.controller;
+package com.stellar.dashboard;
 
 import com.stellar.annotation.Log;
 import com.stellar.common.Result;
 import com.stellar.enums.OperationType;
-import com.stellar.system.service.DashboardService;
-import com.stellar.system.vo.DashboardStatsVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;

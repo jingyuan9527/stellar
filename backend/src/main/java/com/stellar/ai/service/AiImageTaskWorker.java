@@ -8,7 +8,6 @@ import com.stellar.infra.SafeUrlValidator;
 import com.stellar.ai.entity.AiTask;
 import com.stellar.system.entity.SysFile;
 import com.stellar.ai.mapper.AiTaskMapper;
-import com.stellar.system.mapper.SysFileMapper;
 import com.stellar.ai.vo.AiNotifyMessage;
 import com.stellar.ai.vo.AiResolvedConfig;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +30,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import com.stellar.infra.ExternalCallLogger;
+import com.stellar.system.service.FileService;
 
 /**
  * AI 图片生成异步 worker：@Async 线程调供应商生成 + 下载存库 + 更新任务记录。
@@ -43,7 +43,7 @@ public class AiImageTaskWorker {
 
     private final AiModelService aiModelService;
     private final AiTaskMapper aiTaskMapper;
-    private final SysFileMapper fileMapper;
+    private final FileService fileService;
     private final SysAiUsageService sysAiUsageService;
     private final ObjectMapper objectMapper;
     private final AiNotifyPublisher publisher;
@@ -92,7 +92,7 @@ public class AiImageTaskWorker {
                 file.setSize((long) imageBytes.length);
                 file.setData(imageBytes);
                 file.setCreateTime(LocalDateTime.now());
-                fileMapper.insert(file);
+                fileService.create(file);
 
                 task.setStatus("completed");
                 task.setFileId(file.getId());

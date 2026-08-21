@@ -8,7 +8,6 @@ import com.stellar.ai.service.AiModelService;
 import com.stellar.ai.vo.AiResolvedConfig;
 import com.stellar.ai.vo.ToolResult;
 import com.stellar.common.BusinessException;
-import com.stellar.system.mapper.SysFileMapper;
 import com.stellar.system.service.SysSettingService;
 import com.stellar.tts.service.AiTtsService;
 import com.stellar.tts.service.TtsRecordService;
@@ -47,7 +46,7 @@ class AiChatToolServiceTest {
     @Mock
     SysSettingService sysSettingService;
     @Mock
-    SysFileMapper fileMapper;
+    com.stellar.system.service.FileService fileService;
 
     AiChatToolService service;
     final ObjectMapper objectMapper = new ObjectMapper();
@@ -55,7 +54,7 @@ class AiChatToolServiceTest {
     @BeforeEach
     void setup() {
         service = new AiChatToolService(aiImageService, aiTtsService, ttsService, ttsRecordService,
-                aiModelService, sysSettingService, fileMapper, objectMapper);
+                aiModelService, sysSettingService, fileService, objectMapper);
     }
 
     private JsonNode toolCall(String name, String argsJson) {

@@ -6,7 +6,7 @@ import com.stellar.game.dto.GameScoreSubmitDTO;
 import com.stellar.game.entity.SysGameScore;
 import com.stellar.system.entity.SysUser;
 import com.stellar.game.mapper.SysGameScoreMapper;
-import com.stellar.system.mapper.SysUserMapper;
+import com.stellar.system.service.UserService;
 import com.stellar.game.vo.GameScoreVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 public class GameScoreService {
 
     private final SysGameScoreMapper scoreMapper;
-    private final SysUserMapper sysUserMapper;
+    private final UserService userService;
 
     /**
      * 提交一局成绩。
@@ -49,7 +49,7 @@ public class GameScoreService {
                 Long userId = StpUtil.getLoginIdAsLong();
                 score.setUserId(userId);
                 // 登录用户若未填名称，兜底用昵称
-                SysUser user = sysUserMapper.selectById(userId);
+                SysUser user = userService.getById(userId);
                 if (user != null && (score.getPlayerName() == null || score.getPlayerName().isBlank())) {
                     score.setPlayerName(user.getNickname() != null ? user.getNickname() : user.getUsername());
                 }

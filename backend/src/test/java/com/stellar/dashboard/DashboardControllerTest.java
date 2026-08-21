@@ -1,7 +1,5 @@
-package com.stellar.system.controller;
+package com.stellar.dashboard;
 
-import com.stellar.system.service.DashboardService;
-import com.stellar.system.vo.DashboardStatsVO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

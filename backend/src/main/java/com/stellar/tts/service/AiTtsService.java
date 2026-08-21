@@ -4,7 +4,6 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stellar.common.BusinessException;
-import com.stellar.ai.vo.AiResolvedConfig;
 import com.stellar.interceptor.WebUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,25 +20,24 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import com.stellar.ai.service.AiModelService;
-import com.stellar.ai.service.SysAiUsageService;
 import com.stellar.infra.ExternalCallLogger;
+import com.stellar.tts.port.SpeechModelConfig;
+import com.stellar.tts.port.SpeechModelPort;
 
 /**
  * AI 语音合成服务：基于 OpenAI 兼容的 chat completions + audio 参数。
  * <p>当前对接 MiMo-V2.5-TTS 预置音色模式：合成文本放 role=assistant 消息，
  * 风格指令放 role=user 消息（可空），audio.voice 指定预置音色，audio.format=wav。
  * 非流式调用，响应 message.audio.data 为 base64 wav，解码后返回。
- * <p>配置按 modelId 解析 AUDIO 类型模型（ai/config 配置供应商+模型），记 token 消费。
+ * <p>配置按 modelId 经 {@link SpeechModelPort} 解析 AUDIO 类型模型（ai/config 配置供应商+模型），记 token 消费。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AiTtsService {
 
-    private final AiModelService aiModelService;
+    private final SpeechModelPort speechModelPort;
     private final ObjectMapper objectMapper;
-    private final SysAiUsageService sysAiUsageService;
     private final ExternalCallLogger externalCallLogger;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -63,10 +61,7 @@ public class AiTtsService {
             throw new BusinessException("音色不能为空");
         }
 
-        AiResolvedConfig cfg = aiModelService.resolveConfig(modelId);
-        if (!"AUDIO".equals(cfg.modelType())) {
-            throw new BusinessException("该模型不是语音合成类型，请选择 AUDIO 类型模型");
-        }
+        SpeechModelConfig cfg = speechModelPort.resolveAudioModel(modelId);
 
         String url = cfg.endpoint().replaceAll("/+$", "") + "/v1/chat/completions";
         String model = cfg.model();
@@ -150,8 +145,8 @@ public class AiTtsService {
                 totalTokens = promptTokens;
                 source = "estimate";
             }
-            sysAiUsageService.record(subjectType, subjectId,
-                    cfg.providerId(), model, cfg.modelType(),
+            speechModelPort.recordUsage(subjectType, subjectId,
+                    cfg.providerId(), model,
                     promptTokens, completionTokens, totalTokens, source);
 
             externalCallLogger.success("AI TTS", url, callParams + ", resultBytes=" + audio.length

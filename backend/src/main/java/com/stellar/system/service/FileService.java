@@ -81,6 +81,31 @@ public class FileService {
     }
 
     /**
+     * 跨模块落文件入口：调用方自建实体（含二进制）直接入库，返回后 id 已回填。
+     */
+    public SysFile create(SysFile file) {
+        fileMapper.insert(file);
+        return file;
+    }
+
+    /**
+     * 文件是否存在（供引用方挂载前校验）。
+     */
+    public boolean exists(Long id) {
+        return id != null && fileMapper.selectById(id) != null;
+    }
+
+    /**
+     * 静默硬删除（引用方清理产物用）：不存在时不动、不报错，区别于 remove 的强校验语义。
+     */
+    public void deleteById(Long id) {
+        if (id == null || fileMapper.selectById(id) == null) {
+            return;
+        }
+        fileMapper.deleteById(id);
+    }
+
+    /**
      * 分页查询（不含 data），联查上传者用户名。
      */
     public Page<SysFileVO> page(SysFileQueryDTO query) {

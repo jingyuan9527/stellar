@@ -8,7 +8,6 @@ import com.stellar.ai.vo.AiResolvedConfig;
 import com.stellar.common.BusinessException;
 import com.stellar.infra.ExternalCallLogger;
 import com.stellar.system.entity.SysFile;
-import com.stellar.system.mapper.SysFileMapper;
 import com.stellar.test.ReflectUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,7 +36,7 @@ class AiImageTaskWorkerTest {
 
     private AiModelService aiModelService;
     private AiTaskMapper aiTaskMapper;
-    private SysFileMapper fileMapper;
+    private com.stellar.system.service.FileService fileService;
     private SysAiUsageService sysAiUsageService;
     private AiNotifyPublisher publisher;
     private ExternalCallLogger externalCallLogger;
@@ -49,7 +48,7 @@ class AiImageTaskWorkerTest {
     void setUp() {
         aiModelService = mock(AiModelService.class);
         aiTaskMapper = mock(AiTaskMapper.class);
-        fileMapper = mock(SysFileMapper.class);
+        fileService = mock(com.stellar.system.service.FileService.class);
         sysAiUsageService = mock(SysAiUsageService.class);
         publisher = mock(AiNotifyPublisher.class);
         externalCallLogger = mock(ExternalCallLogger.class);
@@ -57,7 +56,7 @@ class AiImageTaskWorkerTest {
         TransactionStatus status = mock(TransactionStatus.class);
         // 事务管理器在事务路径测试中用，generateImageBytes/任务不存在等用例不触达，故 lenient
         lenient().when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(status);
-        worker = new AiImageTaskWorker(aiModelService, aiTaskMapper, fileMapper,
+        worker = new AiImageTaskWorker(aiModelService, aiTaskMapper, fileService,
                 sysAiUsageService, new ObjectMapper(), publisher, externalCallLogger, transactionManager);
         mockHttpClient = mock(HttpClient.class);
         ReflectUtil.setFinalField(worker, "httpClient", mockHttpClient);
@@ -191,18 +190,16 @@ class AiImageTaskWorkerTest {
         when(aiModelService.resolveConfig(1L)).thenReturn(imageCfg());
         String b64 = Base64.getEncoder().encodeToString("img".getBytes(StandardCharsets.UTF_8));
         stubImageSend(200, "{\"data\":[{\"b64_json\":\"" + b64 + "\"}]}");
-        SysFile saved = new SysFile();
-        saved.setId(99L);
-        when(fileMapper.insert(any(SysFile.class))).thenAnswer(inv -> {
+        when(fileService.create(any(SysFile.class))).thenAnswer(inv -> {
             SysFile f = inv.getArgument(0);
             f.setId(99L);
-            return 1;
+            return f;
         });
 
         worker.doGenerateAsync(1L);
 
         ArgumentCaptor<SysFile> fileCap = ArgumentCaptor.forClass(SysFile.class);
-        verify(fileMapper).insert(fileCap.capture());
+        verify(fileService).create(fileCap.capture());
         assertEquals("png", fileCap.getValue().getExt());
         assertArrayEquals("img".getBytes(StandardCharsets.UTF_8), fileCap.getValue().getData());
 
@@ -242,11 +239,9 @@ class AiImageTaskWorkerTest {
         when(aiModelService.resolveConfig(any())).thenReturn(imageCfg());
         String b64 = Base64.getEncoder().encodeToString("x".getBytes(StandardCharsets.UTF_8));
         stubImageSend(200, "{\"data\":[{\"b64_json\":\"" + b64 + "\"}]}");
-        SysFile saved = new SysFile();
-        saved.setId(5L);
-        when(fileMapper.insert(any(SysFile.class))).thenAnswer(inv -> {
+        when(fileService.create(any(SysFile.class))).thenAnswer(inv -> {
             inv.getArgument(0, SysFile.class).setId(5L);
-            return 1;
+            return inv.getArgument(0, SysFile.class);
         });
 
         worker.doGenerateAsync(3L);

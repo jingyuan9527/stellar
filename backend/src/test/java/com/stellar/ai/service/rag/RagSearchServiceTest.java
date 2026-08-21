@@ -30,7 +30,7 @@ import static org.mockito.Mockito.when;
 class RagSearchServiceTest {
 
     private KbRetriever kbRetriever;
-    private MemosRetriever memosRetriever;
+    private ExternalRetriever externalRetriever;
     private QueryRewriter queryRewriter;
     private Reranker reranker;
     private Judger judger;
@@ -41,13 +41,13 @@ class RagSearchServiceTest {
     @BeforeEach
     void setUp() {
         kbRetriever = mock(KbRetriever.class);
-        memosRetriever = mock(MemosRetriever.class);
+        externalRetriever = mock(ExternalRetriever.class);
         queryRewriter = mock(QueryRewriter.class);
         reranker = mock(Reranker.class);
         judger = mock(Judger.class);
         router = mock(QueryRouter.class);
         embeddingService = mock(AiEmbeddingService.class);
-        service = new RagSearchService(kbRetriever, memosRetriever, queryRewriter, reranker, judger, router,
+        service = new RagSearchService(kbRetriever, externalRetriever, queryRewriter, reranker, judger, router,
                 embeddingService);
         service.topK = 3;
         service.poolSize = 5;
@@ -80,7 +80,7 @@ class RagSearchServiceTest {
     void search_仅备忘源_不改写不重排_RRF截断topK() {
         service.loopEnabled = false;
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("改:q");
-        when(memosRetriever.retrieve(any(), eqK(5)))
+        when(externalRetriever.retrieve(any(), eqK(5)))
                 .thenReturn(List.of(hit("memos", "1", "a", 0.9), hit("memos", "2", "b", 0.8),
                         hit("memos", "3", "c", 0.7), hit("memos", "4", "d", 0.6)));
 
@@ -98,7 +98,7 @@ class RagSearchServiceTest {
         service.loopEnabled = false;
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q");
         when(kbRetriever.getKbContext(7L)).thenReturn(kb(7L, null));
-        when(memosRetriever.retrieve(any(), eqK(5)))
+        when(externalRetriever.retrieve(any(), eqK(5)))
                 .thenReturn(List.of(hit("memos", "mC", "nc", 0.5), hit("memos", "mD", "nd", 0.99)));
         when(kbRetriever.retrieve(any(), any(), eqK(5)))
                 .thenReturn(List.of(hit("kb", "kbA", "na", 0.9), hit("kb", "kbB", "nb", 0.2)));
@@ -117,7 +117,7 @@ class RagSearchServiceTest {
         service.scoreThreshold = 0.03; // RRF: rank1=1/61≈0.016，都低于阈值
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q");
         when(kbRetriever.getKbContext(7L)).thenReturn(kb(7L, null));
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
         when(kbRetriever.retrieve(any(), any(), eqK(5))).thenReturn(List.of(hit("kb", "B", "nb", 0.8)));
 
         RetrievalResult r = service.search("q", 7L, true, null);
@@ -131,7 +131,7 @@ class RagSearchServiceTest {
         RetrievalResult r = service.search("q", null, true, null);
         assertEquals(0, r.hits().size());
         verify(queryRewriter, never()).rewrite(any(), any(), any(), any());
-        verify(memosRetriever, never()).retrieve(any(), anyInt());
+        verify(externalRetriever, never()).retrieve(any(), anyInt());
         verify(kbRetriever, never()).retrieve(any(), any(), anyInt());
     }
 
@@ -139,7 +139,7 @@ class RagSearchServiceTest {
     void search_改写抛异常_降级原查询继续() {
         service.loopEnabled = false;
         when(queryRewriter.rewrite(any(), any(), any(), any())).thenThrow(new RuntimeException("boom"));
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
 
         RetrievalResult r = service.search("q", null, true, null);
 
@@ -154,14 +154,14 @@ class RagSearchServiceTest {
         service.loopEnabled = false;
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q");
         when(kbRetriever.getKbContext(7L)).thenReturn(kb(7L, null));
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
         when(kbRetriever.retrieve(any(), any(), eqK(5))).thenReturn(List.of(hit("kb", "b", "nb", 0.8)));
 
         service.search("q", 7L, true, null);
 
         // 默认模型 query 向量只 embed 一次（KB 与 memos 共享）
         verify(embeddingService, times(1)).embed(any(), isNull());
-        verify(memosRetriever).retrieve(any(), eqK(5));
+        verify(externalRetriever).retrieve(any(), eqK(5));
     }
 
     @Test
@@ -169,7 +169,7 @@ class RagSearchServiceTest {
         service.loopEnabled = false;
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q");
         when(kbRetriever.getKbContext(7L)).thenReturn(kb(7L, 99L));
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
         when(kbRetriever.retrieve(any(), any(), eqK(5))).thenReturn(List.of(hit("kb", "b", "nb", 0.8)));
 
         service.search("q", 7L, true, null);
@@ -191,7 +191,7 @@ class RagSearchServiceTest {
         service.search("q", 7L, false, null);
 
         verify(embeddingService, times(1)).embed(any(), isNull());
-        verify(memosRetriever, never()).retrieve(any(), anyInt());
+        verify(externalRetriever, never()).retrieve(any(), anyInt());
     }
 
     // ===== 相关性闸门（P1）=====
@@ -206,7 +206,7 @@ class RagSearchServiceTest {
         assertEquals(0, r.hits().size());
         assertEquals(0, r.rounds());
         verify(queryRewriter, never()).rewrite(any(), any(), any(), any());
-        verify(memosRetriever, never()).retrieve(any(), anyInt());
+        verify(externalRetriever, never()).retrieve(any(), anyInt());
         verify(kbRetriever, never()).getKbContext(any());
     }
 
@@ -216,7 +216,7 @@ class RagSearchServiceTest {
         service.loopEnabled = false;
         when(router.needsRetrieval("q")).thenReturn(true);
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q");
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
 
         RetrievalResult r = service.search("q", null, true, null);
 
@@ -229,13 +229,13 @@ class RagSearchServiceTest {
         service.loopEnabled = false;
         when(router.needsRetrieval("q")).thenReturn(false);
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q");
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
 
         RetrievalResult r = service.searchFull("q", null, true, null);
 
         assertEquals(1, r.hits().size());
         assertEquals(1, r.rounds());
-        verify(memosRetriever).retrieve(any(), eqK(5));
+        verify(externalRetriever).retrieve(any(), eqK(5));
     }
 
     // ===== 混合检索（P4：BM25 关键词通道）=====
@@ -246,9 +246,9 @@ class RagSearchServiceTest {
         service.loopEnabled = false;
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q");
         when(kbRetriever.getKbContext(7L)).thenReturn(kb(7L, null));
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
         // 关键词通道命中向量通道没召回的精确词
-        when(memosRetriever.retrieveKeyword("q", 5)).thenReturn(List.of(hit("memos", "2", "b", 12.0)));
+        when(externalRetriever.retrieveKeyword("q", 5)).thenReturn(List.of(hit("memos", "2", "b", 12.0)));
         when(kbRetriever.retrieveKeyword(any(), eq("q"), eqK(5))).thenReturn(List.of(hit("kb", "9", "c", 8.0)));
 
         RetrievalResult r = service.search("q", 7L, true, null);
@@ -257,7 +257,7 @@ class RagSearchServiceTest {
         assertEquals(3, r.hits().size());
         assertTrue(r.hits().stream().anyMatch(h -> "2".equals(h.sourceKey())), "关键词通道命中应进入融合结果");
         assertEquals(Map.of("kb", 1, "memos", 2), r.sourceCounts());
-        verify(memosRetriever).retrieveKeyword("q", 5);
+        verify(externalRetriever).retrieveKeyword("q", 5);
         verify(kbRetriever).retrieveKeyword(any(), eq("q"), eqK(5));
     }
 
@@ -267,11 +267,11 @@ class RagSearchServiceTest {
         service.loopEnabled = false;
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q");
         when(kbRetriever.getKbContext(7L)).thenReturn(kb(7L, null));
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
 
         service.search("q", 7L, true, null);
 
-        verify(memosRetriever, never()).retrieveKeyword(any(), anyInt());
+        verify(externalRetriever, never()).retrieveKeyword(any(), anyInt());
         verify(kbRetriever, never()).retrieveKeyword(any(), any(), anyInt());
     }
 
@@ -280,7 +280,7 @@ class RagSearchServiceTest {
     @Test
     void loop_第一轮判定足够_结束迭代() {
         when(queryRewriter.rewrite(any(), any(), any(), any())).thenReturn("q");
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
         when(judger.judge(any(), any(), any())).thenReturn(Judgement.ok());
 
         RetrievalResult r = service.search("q", null, true, null);
@@ -288,14 +288,14 @@ class RagSearchServiceTest {
         assertEquals(1, r.rounds());
         assertEquals(1, r.hits().size());
         verify(judger).judge(any(), any(), any());
-        verify(memosRetriever).retrieve(any(), anyInt());
+        verify(externalRetriever).retrieve(any(), anyInt());
     }
 
     @Test
     void loop_判定不足_带gap补查_第二轮足够() {
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q1");
         when(queryRewriter.rewrite("q", "缺A", null, null)).thenReturn("q2");
-        when(memosRetriever.retrieve(any(), eqK(5)))
+        when(externalRetriever.retrieve(any(), eqK(5)))
                 .thenReturn(List.of(hit("memos", "1", "a", 0.9)))
                 .thenReturn(List.of(hit("memos", "2", "b", 0.8)));
         when(judger.judge(any(), any(), any()))
@@ -314,7 +314,7 @@ class RagSearchServiceTest {
         service.topK = 3;
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q1");
         when(queryRewriter.rewrite("q", "缺B", null, null)).thenReturn("q2");
-        when(memosRetriever.retrieve(any(), eqK(5)))
+        when(externalRetriever.retrieve(any(), eqK(5)))
                 .thenReturn(List.of(
                         hit("memos", "r1a", "a", 0.9), hit("memos", "r1b", "b", 0.8),
                         hit("memos", "r1c", "c", 0.7), hit("memos", "r1d", "d", 0.6)))
@@ -334,7 +334,7 @@ class RagSearchServiceTest {
     void loop_始终不足_到轮数上限兜底返回() {
         service.loopMaxRounds = 2;
         when(queryRewriter.rewrite(any(), any(), any(), any())).thenReturn("q");
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
         when(judger.judge(any(), any(), any())).thenReturn(new Judgement(false, "一直缺"));
 
         RetrievalResult r = service.search("q", null, true, null);
@@ -348,7 +348,7 @@ class RagSearchServiceTest {
     void loop_路由器判简单_单轮无判定() {
         when(router.needsLoop(any())).thenReturn(false);
         when(queryRewriter.rewrite("q", null, null, null)).thenReturn("q");
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
 
         RetrievalResult r = service.search("q", null, true, null);
 
@@ -360,7 +360,7 @@ class RagSearchServiceTest {
     void loop_判定抛异常_保守放行不卡死() {
         service.loopMaxRounds = 2;
         when(queryRewriter.rewrite(any(), any(), any(), any())).thenReturn("q");
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
         when(judger.judge(any(), any(), any())).thenThrow(new RuntimeException("judger down"));
 
         RetrievalResult r = service.search("q", null, true, null);
@@ -373,7 +373,7 @@ class RagSearchServiceTest {
     void loop_改写关停_退化为单轮() {
         service.rewriteEnabled = false;
         service.loopMaxRounds = 3;
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
 
         RetrievalResult r = service.search("qq", null, true, null);
 
@@ -386,7 +386,7 @@ class RagSearchServiceTest {
         service.loopEnabled = false;
         List<Map<String, String>> history = List.of(Map.of("role", "user", "content", "上次说的图床方案"));
         when(queryRewriter.rewrite("q", null, null, history)).thenReturn("改:q");
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(hit("memos", "1", "a", 0.9)));
 
         RetrievalResult r = service.search("q", null, true, null, history);
 
@@ -398,7 +398,7 @@ class RagSearchServiceTest {
 
     @Test
     void searchTopK_直检不触发改写重排判定() {
-        when(memosRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(
+        when(externalRetriever.retrieve(any(), eqK(5))).thenReturn(List.of(
                 hit("memos", "1", "a", 0.9), hit("memos", "2", "b", 0.7),
                 hit("memos", "3", "c", 0.6), hit("memos", "4", "d", 0.5), hit("memos", "5", "e", 0.4)));
 

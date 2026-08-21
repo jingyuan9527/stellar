@@ -14,7 +14,6 @@ import com.stellar.game.entity.ConchRecord;
 import com.stellar.system.entity.SysFile;
 import com.stellar.game.mapper.ConchAnswerMapper;
 import com.stellar.game.mapper.ConchRecordMapper;
-import com.stellar.system.mapper.SysFileMapper;
 import com.stellar.game.vo.ConchAnswerVO;
 import com.stellar.game.vo.ConchAskResultVO;
 import com.stellar.game.vo.ConchRecordVO;
@@ -34,6 +33,7 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import com.stellar.ai.service.AiChatService;
+import com.stellar.system.service.FileService;
 import com.stellar.system.service.SysSettingService;
 
 /**
@@ -47,7 +47,7 @@ public class ConchService {
 
     private final ConchAnswerMapper answerMapper;
     private final ConchRecordMapper recordMapper;
-    private final SysFileMapper fileMapper;
+    private final FileService fileService;
     private final AiChatService aiChatService;
     private final SysSettingService sysSettingService;
     private final ObjectMapper objectMapper;
@@ -134,7 +134,7 @@ public class ConchService {
         if (answer == null) {
             throw new BusinessException("预设回答不存在");
         }
-        SysFile file = fileMapper.selectFullById(answer.getFileId());
+        SysFile file = fileService.getFull(answer.getFileId());
         if (file == null || file.getData() == null) {
             throw new BusinessException("音频文件不存在");
         }
@@ -166,7 +166,7 @@ public class ConchService {
      * 新增预设回答（校验音频文件存在）。
      */
     public void createAnswer(ConchAnswerDTO dto) {
-        if (fileMapper.selectById(dto.getFileId()) == null) {
+        if (!fileService.exists(dto.getFileId())) {
             throw new BusinessException("音频文件不存在，请先上传");
         }
         ConchAnswer answer = new ConchAnswer();
@@ -190,7 +190,7 @@ public class ConchService {
             throw new BusinessException("预设回答不存在");
         }
         if (dto.getFileId() != null && !dto.getFileId().equals(exist.getFileId())) {
-            if (fileMapper.selectById(dto.getFileId()) == null) {
+            if (!fileService.exists(dto.getFileId())) {
                 throw new BusinessException("音频文件不存在");
             }
             exist.setFileId(dto.getFileId());

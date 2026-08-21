@@ -9,10 +9,10 @@ import com.stellar.ai.dto.AiImageHistoryQueryDTO;
 import com.stellar.ai.entity.AiTask;
 import com.stellar.system.entity.SysFile;
 import com.stellar.ai.mapper.AiTaskMapper;
-import com.stellar.system.mapper.SysFileMapper;
 import com.stellar.ai.vo.AiImageTaskVO;
 import com.stellar.ai.vo.AiResolvedConfig;
 import com.stellar.interceptor.WebUtils;
+import com.stellar.system.service.FileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,7 +29,7 @@ public class AiImageService {
 
     private final AiModelService aiModelService;
     private final AiTaskMapper aiTaskMapper;
-    private final SysFileMapper fileMapper;
+    private final FileService fileService;
     private final AiImageTaskWorker worker;
     private final SysAiUsageService sysAiUsageService;
     private final ObjectMapper objectMapper;
@@ -86,7 +86,7 @@ public class AiImageService {
             file.setSize((long) imageBytes.length);
             file.setData(imageBytes);
             file.setCreateTime(LocalDateTime.now());
-            fileMapper.insert(file);
+            fileService.create(file);
 
             task.setStatus("completed");
             task.setFileId(file.getId());
@@ -144,7 +144,7 @@ public class AiImageService {
             throw new BusinessException("无权删除该记录");
         }
         if (task.getFileId() != null) {
-            fileMapper.deleteById(task.getFileId());
+            fileService.deleteById(task.getFileId());
         }
         aiTaskMapper.deleteById(taskId);
         log.info("[AI图片] 删除历史记录 taskId={} fileId={}", taskId, task.getFileId());

@@ -1,4 +1,4 @@
-package com.stellar.system.vo;
+package com.stellar.dashboard;
 
 import lombok.Data;
 

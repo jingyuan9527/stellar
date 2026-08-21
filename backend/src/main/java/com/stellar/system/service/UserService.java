@@ -11,7 +11,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -57,5 +60,26 @@ public class UserService {
      */
     public List<SysUser> listAll() {
         return sysUserMapper.selectList(null);
+    }
+
+    /**
+     * 按 id 查用户，不存在返回 null（跨模块只读入口，调用方自行决定缺失语义）。
+     */
+    public SysUser getById(Long userId) {
+        return userId == null ? null : sysUserMapper.selectById(userId);
+    }
+
+    /**
+     * 批量取 userId → username 映射（空入参直接返回空 map），供列表页联查操作人名称。
+     */
+    public Map<Long, String> getUsernameMap(Collection<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> nameMap = new HashMap<>();
+        for (SysUser u : sysUserMapper.selectBatchIds(userIds)) {
+            nameMap.put(u.getId(), u.getUsername());
+        }
+        return nameMap;
     }
 }

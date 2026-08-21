@@ -32,7 +32,7 @@ import java.util.Map;
 public class RagSearchService {
 
     private final KbRetriever kbRetriever;
-    private final MemosRetriever memosRetriever;
+    private final ExternalRetriever externalRetriever;
     private final QueryRewriter queryRewriter;
     private final Reranker reranker;
     private final Judger judger;
@@ -248,14 +248,14 @@ public class RagSearchService {
                 : (kbNeedsDefaultVec ? sharedVec : safeEmbed(query, kb.getEmbeddingModelId()));
 
         List<RagHit> kbHits = kbRetriever.retrieve(kb, kbVec, poolSize);
-        List<RagHit> memosHits = memosOn ? memosRetriever.retrieve(sharedVec, poolSize) : List.of();
+        List<RagHit> memosHits = memosOn ? externalRetriever.retrieve(sharedVec, poolSize) : List.of();
         List<List<RagHit>> lists = new ArrayList<>();
         lists.add(kbHits);
         lists.add(memosHits);
         int kbKwCount = 0, memosKwCount = 0;
         if (hybridEnabled) {
             List<RagHit> kbKw = kbRetriever.retrieveKeyword(kb, query, poolSize);
-            List<RagHit> memosKw = memosOn ? memosRetriever.retrieveKeyword(query, poolSize) : List.of();
+            List<RagHit> memosKw = memosOn ? externalRetriever.retrieveKeyword(query, poolSize) : List.of();
             kbKwCount = kbKw.size();
             memosKwCount = memosKw.size();
             lists.add(kbKw);

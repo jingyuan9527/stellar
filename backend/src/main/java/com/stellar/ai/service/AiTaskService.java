@@ -7,8 +7,10 @@ import com.stellar.ai.mapper.AiTaskMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -77,5 +79,43 @@ public class AiTaskService {
         task.setResponseTime(LocalDateTime.now());
         task.setUpdateTime(LocalDateTime.now());
         aiTaskMapper.updateById(task);
+    }
+
+    /**
+     * 按任务类型分页（文本模糊 + 时间范围过滤），供跨模块历史查询（如 TTS 记录页）。
+     */
+    public Page<AiTask> pageByType(String taskType, String promptLike,
+                                   LocalDateTime startTime, LocalDateTime endTime,
+                                   int pageNum, int pageSize) {
+        Page<AiTask> page = new Page<>(pageNum, pageSize);
+        return aiTaskMapper.selectPage(page, new LambdaQueryWrapper<AiTask>()
+                .eq(AiTask::getTaskType, taskType)
+                .like(StringUtils.hasText(promptLike), AiTask::getPrompt, promptLike)
+                .ge(startTime != null, AiTask::getCreateTime, startTime)
+                .le(endTime != null, AiTask::getCreateTime, endTime)
+                .orderByDesc(AiTask::getCreateTime));
+    }
+
+    /**
+     * 无归属校验的硬删除，仅供管理后台清理（用户侧删除走 delete 的归属校验）。
+     */
+    public void deleteById(Long id) {
+        aiTaskMapper.deleteById(id);
+    }
+
+    /** 任务总量/成功数/耗时聚合（SQL 下推），供仪表盘。 */
+    public Map<String, Object> taskStatTotals(String taskType, String successStatus) {
+        return aiTaskMapper.selectTaskStatTotals(taskType, successStatus);
+    }
+
+    /** 今/本周/上周期数量聚合（SQL 下推），供仪表盘。 */
+    public Map<String, Object> taskStatRecent(String taskType, LocalDateTime todayStart,
+                                              LocalDateTime weekStart, LocalDateTime prevWeekStart) {
+        return aiTaskMapper.selectTaskStatRecent(taskType, todayStart, weekStart, prevWeekStart);
+    }
+
+    /** TTS 总量/今日/总大小聚合（SQL 下推），供仪表盘。 */
+    public Map<String, Object> ttsStat(LocalDateTime todayStart) {
+        return aiTaskMapper.selectTtsStat(todayStart);
     }
 }

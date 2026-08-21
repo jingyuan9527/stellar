@@ -11,7 +11,7 @@ import com.stellar.game.entity.ConchAnswer;
 import com.stellar.game.entity.ConchRecord;
 import com.stellar.game.mapper.ConchAnswerMapper;
 import com.stellar.game.mapper.ConchRecordMapper;
-import com.stellar.system.mapper.SysFileMapper;
+import com.stellar.system.service.FileService;
 import com.stellar.game.vo.ConchAskResultVO;
 import com.stellar.game.vo.ConchRecordVO;
 import com.stellar.system.entity.SysFile;
@@ -44,7 +44,7 @@ class ConchServiceTest {
     @Mock
     private ConchRecordMapper recordMapper;
     @Mock
-    private SysFileMapper fileMapper;
+    private com.stellar.system.service.FileService fileService;
     @Mock
     private AiChatService aiChatService;
     @Mock
@@ -55,7 +55,7 @@ class ConchServiceTest {
 
     @BeforeEach
     void setUp() {
-        conchService = new ConchService(answerMapper, recordMapper, fileMapper,
+        conchService = new ConchService(answerMapper, recordMapper, fileService,
                 aiChatService, sysSettingService, objectMapper);
     }
 
@@ -165,7 +165,7 @@ class ConchServiceTest {
     @Test
     void getAnswerFile_音频不存在_抛异常() {
         when(answerMapper.selectById(1L)).thenReturn(answer(1L, "x", 1, 0));
-        when(fileMapper.selectFullById(100L)).thenReturn(null);
+        when(fileService.getFull(100L)).thenReturn(null);
         assertThrows(BusinessException.class, () -> conchService.getAnswerFile(1L));
     }
 
@@ -174,7 +174,7 @@ class ConchServiceTest {
         when(answerMapper.selectById(1L)).thenReturn(answer(1L, "x", 1, 0));
         SysFile f = mock(SysFile.class);
         when(f.getData()).thenReturn(new byte[]{1, 2, 3});
-        when(fileMapper.selectFullById(100L)).thenReturn(f);
+        when(fileService.getFull(100L)).thenReturn(f);
         assertSame(f, conchService.getAnswerFile(1L));
     }
 
@@ -182,7 +182,7 @@ class ConchServiceTest {
 
     @Test
     void createAnswer_音频不存在_抛异常() {
-        when(fileMapper.selectById(99L)).thenReturn(null);
+        when(fileService.exists(99L)).thenReturn(false);
         ConchAnswerDTO dto = new ConchAnswerDTO();
         dto.setAnswerText("text");
         dto.setFileId(99L);
@@ -191,7 +191,7 @@ class ConchServiceTest {
 
     @Test
     void createAnswer_正常_插入且默认启用() {
-        when(fileMapper.selectById(99L)).thenReturn(mock(SysFile.class));
+        when(fileService.exists(99L)).thenReturn(true);
         ConchAnswerDTO dto = new ConchAnswerDTO();
         dto.setAnswerText("text");
         dto.setFileId(99L);
@@ -255,7 +255,7 @@ class ConchServiceTest {
     @Test
     void updateAnswer_更换文件但文件不存在_抛异常() {
         when(answerMapper.selectById(2L)).thenReturn(answer(2L, "旧", 1, 0));
-        when(fileMapper.selectById(99L)).thenReturn(null);
+        when(fileService.exists(99L)).thenReturn(false);
         ConchAnswerDTO dto = new ConchAnswerDTO();
         dto.setId(2L);
         dto.setAnswerText("新");

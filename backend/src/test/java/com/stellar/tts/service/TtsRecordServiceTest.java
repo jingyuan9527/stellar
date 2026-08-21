@@ -1,20 +1,20 @@
 package com.stellar.tts.service;
 
-import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.stellar.ai.entity.AiTask;
-import com.stellar.ai.mapper.AiTaskMapper;
 import com.stellar.common.BusinessException;
 import com.stellar.tts.dto.TtsRecordQueryDTO;
 import com.stellar.tts.dto.TtsRequest;
 import com.stellar.tts.entity.TtsRecord;
+import com.stellar.tts.port.TtsHistoryEntry;
+import com.stellar.tts.port.TtsHistoryStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -24,15 +24,16 @@ import static org.mockito.Mockito.*;
 /**
  * {@link TtsRecordService} 单测：save/saveAiTts/saveChatTts 三种落库格式、
  * page 转 VO、getAudio 不存在抛、deleteById、extra 序列化与解析。
+ * 落 ai_task 的映射见 ai 侧 {@code TtsHistoryStoreAdapter} 单测。
  */
 @ExtendWith(MockitoExtension.class)
 class TtsRecordServiceTest {
 
     @Mock
-    AiTaskMapper aiTaskMapper;
+    TtsHistoryStore ttsHistoryStore;
 
     private TtsRecordService service() {
-        return new TtsRecordService(aiTaskMapper, new ObjectMapper());
+        return new TtsRecordService(ttsHistoryStore, new ObjectMapper());
     }
 
     @Test
@@ -43,15 +44,17 @@ class TtsRecordServiceTest {
         req.setVoice("zh-CN-XiaoxiaoNeural");
         service.save(req, new byte[]{1, 2}, "ip", "1.2.3.4");
 
-        ArgumentCaptor<AiTask> cap = ArgumentCaptor.forClass(AiTask.class);
-        verify(aiTaskMapper).insert(cap.capture());
-        AiTask t = cap.getValue();
-        assertEquals("tts", t.getTaskType());
-        assertEquals("mp3", t.getAudioFormat());
-        assertEquals("hello", t.getPrompt());
-        assertArrayEquals(new byte[]{1, 2}, t.getFileData());
-        assertEquals(2L, t.getFileSize());
-        assertTrue(t.getExtra().contains("\"voice\":\"zh-CN-XiaoxiaoNeural\""));
+        ArgumentCaptor<TtsHistoryEntry> cap = ArgumentCaptor.forClass(TtsHistoryEntry.class);
+        verify(ttsHistoryStore).record(cap.capture());
+        TtsHistoryEntry e = cap.getValue();
+        assertEquals("mp3", e.audioFormat());
+        assertEquals("hello", e.text());
+        assertArrayEquals(new byte[]{1, 2}, e.audioData());
+        assertEquals(2L, e.fileSize());
+        assertEquals("ip", e.subjectType());
+        assertTrue(e.extra().contains("\"voice\":\"zh-CN-XiaoxiaoNeural\""));
+        assertNotNull(e.requestTime());
+        assertNotNull(e.createTime());
     }
 
     @Test
@@ -59,36 +62,32 @@ class TtsRecordServiceTest {
         TtsRecordService service = service();
         service.saveAiTts("hi", "mimo-1", new byte[]{9}, "account", "u1");
 
-        ArgumentCaptor<AiTask> cap = ArgumentCaptor.forClass(AiTask.class);
-        verify(aiTaskMapper).insert(cap.capture());
-        assertEquals("wav", cap.getValue().getAudioFormat());
-        assertEquals("account", cap.getValue().getSubjectType());
+        ArgumentCaptor<TtsHistoryEntry> cap = ArgumentCaptor.forClass(TtsHistoryEntry.class);
+        verify(ttsHistoryStore).record(cap.capture());
+        assertEquals("wav", cap.getValue().audioFormat());
+        assertEquals("account", cap.getValue().subjectType());
     }
 
     @Test
     void saveChatTts_自定义格式() {
         TtsRecordService service = service();
         service.saveChatTts("t", "v", new byte[]{3}, "mp3", "ip", "9.9.9.9");
-        ArgumentCaptor<AiTask> cap = ArgumentCaptor.forClass(AiTask.class);
-        verify(aiTaskMapper).insert(cap.capture());
-        assertEquals("mp3", cap.getValue().getAudioFormat());
+        ArgumentCaptor<TtsHistoryEntry> cap = ArgumentCaptor.forClass(TtsHistoryEntry.class);
+        verify(ttsHistoryStore).record(cap.capture());
+        assertEquals("mp3", cap.getValue().audioFormat());
     }
 
     @Test
     void page_转VO解析voice() {
         TtsRecordService service = service();
-        AiTask task = new AiTask();
-        task.setId(1L);
-        task.setTaskType("tts");
-        task.setPrompt("text");
-        task.setFileSize(10L);
-        task.setAudioFormat("mp3");
-        task.setSubjectId("u1");
-        task.setExtra("{\"voice\":\"zh-CN-XiaoxiaoNeural\",\"rate\":1.0}");
-        Page<AiTask> page = new Page<>(1, 10, 1);
-        page.setRecords(List.of(task));
+        TtsHistoryEntry entry = new TtsHistoryEntry(1L, "text", new byte[]{1},
+                10L, "mp3", "{\"voice\":\"zh-CN-XiaoxiaoNeural\",\"rate\":1.0}",
+                "account", "u1", LocalDateTime.now(), LocalDateTime.now());
+        Page<TtsHistoryEntry> page = new Page<>(1, 10, 1);
+        page.setPages(1);
+        page.setRecords(List.of(entry));
 
-        when(aiTaskMapper.selectPage(any(Page.class), any(Wrapper.class))).thenReturn(page);
+        when(ttsHistoryStore.page(any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
         TtsRecordQueryDTO q = new TtsRecordQueryDTO();
         Page<TtsRecord> result = service.page(q);
@@ -103,27 +102,25 @@ class TtsRecordServiceTest {
     @Test
     void getAudio_不存在_抛() {
         TtsRecordService service = service();
-        when(aiTaskMapper.selectById(1L)).thenReturn(null);
+        when(ttsHistoryStore.findById(1L)).thenReturn(null);
         assertThrows(BusinessException.class, () -> service.getAudio(1L));
     }
 
     @Test
     void getAudio_无音频数据_抛() {
         TtsRecordService service = service();
-        AiTask task = new AiTask();
-        task.setId(1L);
-        when(aiTaskMapper.selectById(1L)).thenReturn(task);
+        TtsHistoryEntry entry = new TtsHistoryEntry(1L, "t", null, null, "wav",
+                null, "account", "u1", null, null);
+        when(ttsHistoryStore.findById(1L)).thenReturn(entry);
         assertThrows(BusinessException.class, () -> service.getAudio(1L));
     }
 
     @Test
     void getAudio_正常_返回音频与格式() {
         TtsRecordService service = service();
-        AiTask task = new AiTask();
-        task.setId(1L);
-        task.setFileData(new byte[]{7, 8});
-        task.setAudioFormat("wav");
-        when(aiTaskMapper.selectById(1L)).thenReturn(task);
+        TtsHistoryEntry entry = new TtsHistoryEntry(1L, "t", new byte[]{7, 8}, 2L, "wav",
+                null, "account", "u1", null, null);
+        when(ttsHistoryStore.findById(1L)).thenReturn(entry);
 
         TtsRecord r = service.getAudio(1L);
         assertArrayEquals(new byte[]{7, 8}, r.getAudioData());
@@ -134,6 +131,6 @@ class TtsRecordServiceTest {
     void deleteById_删除() {
         TtsRecordService service = service();
         service.deleteById(1L);
-        verify(aiTaskMapper).deleteById(1L);
+        verify(ttsHistoryStore).deleteById(1L);
     }
 }

@@ -6,11 +6,9 @@ import com.stellar.common.BusinessException;
 import com.stellar.ai.entity.AiChatMessage;
 import com.stellar.ai.entity.AiChatSession;
 import com.stellar.ai.entity.AiMemory;
-import com.stellar.system.entity.SysUser;
 import com.stellar.ai.mapper.AiChatMessageMapper;
 import com.stellar.ai.mapper.AiChatSessionMapper;
 import com.stellar.ai.mapper.AiMemoryMapper;
-import com.stellar.system.mapper.SysUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,6 +16,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import com.stellar.system.service.UserService;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -38,7 +37,7 @@ public class AiMemoryService {
     private final AiMemoryMapper memoryMapper;
     private final AiChatMessageMapper messageMapper;
     private final AiChatSessionMapper sessionMapper;
-    private final SysUserMapper userMapper;
+    private final UserService userService;
     private final AiChatService aiChatService;
     private final JdbcTemplate jdbcTemplate;
     private final PlatformTransactionManager transactionManager;
@@ -100,7 +99,7 @@ public class AiMemoryService {
      * 手动新增一条长期记忆（管理员指定用户与内容）。
      */
     public void create(Long userId, String content) {
-        if (userMapper.selectById(userId) == null) {
+        if (userService.getById(userId) == null) {
             throw new BusinessException("用户不存在");
         }
         if (content == null || content.isBlank()) {
@@ -225,9 +224,7 @@ public class AiMemoryService {
         Map<Long, String> nameMap = new HashMap<>();
         if (!page.getRecords().isEmpty()) {
             List<Long> userIds = page.getRecords().stream().map(AiMemory::getUserId).distinct().toList();
-            if (!userIds.isEmpty()) {
-                userMapper.selectBatchIds(userIds).forEach(u -> nameMap.put(u.getId(), u.getUsername()));
-            }
+            nameMap.putAll(userService.getUsernameMap(userIds));
         }
         Page<Map<String, Object>> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         List<Map<String, Object>> records = new ArrayList<>();

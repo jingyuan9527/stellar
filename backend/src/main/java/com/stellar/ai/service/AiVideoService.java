@@ -13,7 +13,6 @@ import com.stellar.ai.dto.AiVideoHistoryQueryDTO;
 import com.stellar.ai.entity.AiTask;
 import com.stellar.system.entity.SysFile;
 import com.stellar.ai.mapper.AiTaskMapper;
-import com.stellar.system.mapper.SysFileMapper;
 import com.stellar.ai.vo.AiResolvedConfig;
 import com.stellar.ai.vo.AiVideoHistoryVO;
 import com.stellar.ai.vo.AiVideoStatusVO;
@@ -36,6 +35,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import com.stellar.infra.ExternalCallLogger;
+import com.stellar.system.service.FileService;
 
 /**
  * AI 视频生成服务：异步任务模式（创建任务 → 后端 worker 轮询结果 → SSE 通知）。
@@ -50,7 +50,7 @@ import com.stellar.infra.ExternalCallLogger;
 public class AiVideoService {
 
     private final AiModelService aiModelService;
-    private final SysFileMapper fileMapper;
+    private final FileService fileService;
     private final SysAiUsageService sysAiUsageService;
     private final AiTaskMapper aiTaskMapper;
     private final ObjectMapper objectMapper;
@@ -211,7 +211,7 @@ public class AiVideoService {
                         file.setSize((long) videoBytes.length);
                         file.setData(videoBytes);
                         file.setCreateTime(LocalDateTime.now());
-                        fileMapper.insert(file);
+                        fileService.create(file);
                         vo.setVideoUrl("/file/" + file.getId());
                         log.info("AI 视频已生成: videoId={}, fileId={}, size={}", videoId, file.getId(), videoBytes.length);
                         updateLocalCompleted(videoId, file.getId());
@@ -265,7 +265,7 @@ public class AiVideoService {
             throw new BusinessException("无权删除该记录");
         }
         if (task.getFileId() != null) {
-            fileMapper.deleteById(task.getFileId());
+            fileService.deleteById(task.getFileId());
         }
         aiTaskMapper.deleteById(taskId);
         log.info("[AI视频] 删除历史记录 taskId={} fileId={}", taskId, task.getFileId());

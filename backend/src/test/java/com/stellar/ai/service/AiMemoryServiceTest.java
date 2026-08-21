@@ -12,7 +12,7 @@ import com.stellar.ai.service.AiChatService;
 import com.stellar.ai.service.AiMemoryService;
 import com.stellar.common.BusinessException;
 import com.stellar.system.entity.SysUser;
-import com.stellar.system.mapper.SysUserMapper;
+import com.stellar.system.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,6 +24,7 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -45,7 +46,7 @@ class AiMemoryServiceTest {
     @Mock
     AiChatSessionMapper sessionMapper;
     @Mock
-    SysUserMapper userMapper;
+    UserService userService;
     @Mock
     AiChatService aiChatService;
     @Mock
@@ -57,7 +58,7 @@ class AiMemoryServiceTest {
 
     @BeforeEach
     void setup() {
-        service = new AiMemoryService(memoryMapper, messageMapper, sessionMapper, userMapper,
+        service = new AiMemoryService(memoryMapper, messageMapper, sessionMapper, userService,
                 aiChatService, jdbcTemplate, transactionManager);
     }
 
@@ -86,10 +87,7 @@ class AiMemoryServiceTest {
         Page<AiMemory> page = new Page<>(1, 10, 1);
         page.setRecords(List.of(m));
         when(memoryMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(page);
-        SysUser u = new SysUser();
-        u.setId(7L);
-        u.setUsername("alice");
-        when(userMapper.selectBatchIds(any())).thenReturn(List.of(u));
+        when(userService.getUsernameMap(any())).thenReturn(Map.of(7L, "alice"));
 
         var r = service.pageAll(1, 10);
         assertEquals(1, r.getRecords().size());
@@ -104,7 +102,7 @@ class AiMemoryServiceTest {
         Page<AiMemory> page = new Page<>(1, 10, 1);
         page.setRecords(List.of(m));
         when(memoryMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(page);
-        when(userMapper.selectBatchIds(any())).thenReturn(List.of());
+        when(userService.getUsernameMap(any())).thenReturn(Map.of());
         var r = service.pageByUser(7L, 1, 10);
         assertEquals(1, r.getRecords().size());
     }
@@ -139,19 +137,19 @@ class AiMemoryServiceTest {
 
     @Test
     void create_用户不存在_抛() {
-        when(userMapper.selectById(9L)).thenReturn(null);
+        when(userService.getById(9L)).thenReturn(null);
         assertThrows(BusinessException.class, () -> service.create(9L, "c"));
     }
 
     @Test
     void create_内容空_抛() {
-        when(userMapper.selectById(9L)).thenReturn(new SysUser());
+        when(userService.getById(9L)).thenReturn(new SysUser());
         assertThrows(BusinessException.class, () -> service.create(9L, "   "));
     }
 
     @Test
     void create_正常_插入() {
-        when(userMapper.selectById(9L)).thenReturn(new SysUser());
+        when(userService.getById(9L)).thenReturn(new SysUser());
         service.create(9L, "  fact  ");
         verify(memoryMapper).insert(any(AiMemory.class));
     }
