@@ -9,7 +9,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
-import com.stellar.ai.service.AiNotifyListener;
 
 /**
  * SSE 连接管理器：按 subject（account:userId / ip:ip）分组管理 emitter，
