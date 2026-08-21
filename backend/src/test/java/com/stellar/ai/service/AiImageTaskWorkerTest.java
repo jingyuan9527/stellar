@@ -13,6 +13,9 @@ import com.stellar.test.ReflectUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 
 import java.net.InetAddress;
 import java.net.http.HttpClient;
@@ -38,6 +41,7 @@ class AiImageTaskWorkerTest {
     private SysAiUsageService sysAiUsageService;
     private AiNotifyPublisher publisher;
     private ExternalCallLogger externalCallLogger;
+    private PlatformTransactionManager transactionManager;
     private HttpClient mockHttpClient;
     private AiImageTaskWorker worker;
 
@@ -49,8 +53,12 @@ class AiImageTaskWorkerTest {
         sysAiUsageService = mock(SysAiUsageService.class);
         publisher = mock(AiNotifyPublisher.class);
         externalCallLogger = mock(ExternalCallLogger.class);
+        transactionManager = mock(PlatformTransactionManager.class);
+        TransactionStatus status = mock(TransactionStatus.class);
+        // 事务管理器在事务路径测试中用，generateImageBytes/任务不存在等用例不触达，故 lenient
+        lenient().when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(status);
         worker = new AiImageTaskWorker(aiModelService, aiTaskMapper, fileMapper,
-                sysAiUsageService, new ObjectMapper(), publisher, externalCallLogger);
+                sysAiUsageService, new ObjectMapper(), publisher, externalCallLogger, transactionManager);
         mockHttpClient = mock(HttpClient.class);
         ReflectUtil.setFinalField(worker, "httpClient", mockHttpClient);
     }

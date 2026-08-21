@@ -86,7 +86,6 @@
 | 中 | **CORS `allowCredentials(true)` + `addAllowedOriginPattern("*")`** | `SaTokenConfig.corsFilter()` | 限定前端域名白名单（`List.of("https://...")`），避免任意源带凭据访问 |
 | 中 | **Redis `GenericJackson2JsonRedisSerializer.defaultTyping(true)`** | `RedisConfig.cacheManager()` | 关闭 defaultTyping，改用 `Jackson2JsonRedisSerializer` 指定具体类型或 `RedisSerializer.json()`；缓存对象仅放可信配置 |
 | 中 | **默认管理员密码 `123456`（DataInitializer）** | `config/DataInitializer.java:32` | 首次登录强制改密；或生成随机密码打印到日志 |
-| 低 | **本地明文弱口令（`application-local.yml`）** | `application-local.yml:3-9` | 已 gitignore（不入库），但建议用环境变量 `${DB_PASSWORD}`/`${REDIS_URL}`，与 `application.yml` 一致 |
 | 低 | **MyBatis-Plus 缺 `BlockAttackInnerInterceptor`** | `MyBatisPlusConfig` | 增加防全表更新/删除拦截器，防止 `update()` 无 WHERE 误伤全表 |
 | 低 | **`/actuator/health` 公开** | `SaTokenConfig` exclude | 仅 health 暴露可接受；JvmHealthIndicator 含堆信息，属低风险 |
 
@@ -106,7 +105,6 @@
 | 🟡 中 | S3 | 默认弱口令 | 账户安全 |
 | 🟡 中 | P7 | HikariCP 连接池偏小 | 并发瓶颈 |
 | 🟢 低 | P2 | WebUtils 无用 import | 编译告警/循环依赖 |
-| 🟢 低 | S4 | 本地明文密码 | 本地安全 |
 | 🟢 低 | S5 | 缺 BlockAttack 拦截器 | 全表误更新 |
 | 🟢 低 | P8 | SSE 超时 24h | 长连接资源 |
 | 🟢 低 | P10 | 根目录散落 class | 产物污染 |

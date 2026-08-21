@@ -146,7 +146,7 @@ public class TtsService {
         CompletableFuture<byte[]> audioFuture = new CompletableFuture<>();
         String muid = generateMuid();
 
-        httpClient.newWebSocketBuilder()
+        CompletableFuture<WebSocket> wsFuture = httpClient.newWebSocketBuilder()
                 .header("Origin", ORIGIN)
                 .header("User-Agent", USER_AGENT)
                 .header("Pragma", "no-cache")
@@ -160,19 +160,44 @@ public class TtsService {
                 });
 
         try {
+            // 正常路径：turn.end 已 sendClose 主动收尾，无需再关；异常/超时路径才 abort
             return audioFuture.get(30, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
+            abortIfOpen(wsFuture);
             throw new BusinessException("语音合成超时，请稍后重试");
         } catch (InterruptedException e) {
+            abortIfOpen(wsFuture);
             Thread.currentThread().interrupt();
             throw new BusinessException("语音合成被中断");
         } catch (ExecutionException e) {
+            abortIfOpen(wsFuture);
             Throwable cause = e.getCause();
             if (cause instanceof BusinessException be) {
                 throw be;
             }
             throw new BusinessException("语音合成失败: "
                     + (cause != null ? cause.getMessage() : "未知错误"));
+        }
+    }
+
+    /**
+     * 异常/超时路径显式关闭连接，避免 WebSocket 句柄泄漏。
+     * <p>仅在连接已建立（buildAsync 成功完成）时 abort；若连接建立本身失败则 wsFuture
+     * 已 completed exceptionally（audioFuture 已由 exceptionally 回调补错），此处跳过。
+     */
+    private void abortIfOpen(CompletableFuture<WebSocket> wsFuture) {
+        if (wsFuture == null) {
+            return;
+        }
+        try {
+            if (wsFuture.isDone() && !wsFuture.isCompletedExceptionally()) {
+                WebSocket ws = wsFuture.get(1, TimeUnit.SECONDS);
+                if (ws != null) {
+                    ws.abort();
+                }
+            }
+        } catch (Exception e) {
+            log.debug("[Edge TTS] 异常路径关闭 WebSocket 失败: {}", e.getMessage());
         }
     }
 

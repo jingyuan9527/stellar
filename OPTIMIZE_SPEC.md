@@ -20,7 +20,7 @@
   - ✅ **S5** `MyBatisPlusConfig` 挂 `BlockAttackInnerInterceptor`，无 WHERE 的 update/delete 直接拦截。
   - ✅ **P7** HikariCP `maximum-pool-size` 8→15、`minimum-idle` 2→5，缓解异步 AI worker 并发持连接打满。
   - ✅ **P8** `SseEmitterManager` `EMITTER_TIMEOUT` 24h→1h（30s 心跳保活下不影响长期存活）。
-- **待办（下一轮，本轮新研究项）**：**P9** AiChatService SSE 编排（P9-1 单轮超时 2min→5min 对齐 / P9-2 背压隔离 / P9-5 补集成测试）/ **P11** 仪表盘 ai_task 全量扫描下推 SQL / **P12** memos 检索前导通配 LIKE（规模化时改 pg_trgm）/ S1 CORS 白名单 / S4 本地密码改环境变量 / P10 散落 class。
+- **待办（下一轮，本轮新研究项）**：**P9** AiChatService SSE 编排（~~P9-1 单轮超时 2min→5min 对齐 ✅已修复~~ / P9-2 背压隔离 / P9-5 补集成测试）/ **P11** 仪表盘 ai_task 全量扫描下推 SQL / **P12** memos 检索前导通配 LIKE（规模化时改 pg_trgm）/ S1 CORS 白名单 / P10 散落 class。
 
 ---
 
@@ -150,14 +150,6 @@
 
 ---
 
-## 🟢 S4 — 本地明文密码改用环境变量
-
-- **问题**：`application-local.yml` 明文写远程 PG/Redis 弱口令（已被 gitignore 不入库，本地仍建议改造）。
-- **位置**：`backend/src/main/resources/application-local.yml`（`application.yml` 已用 `${...}` 占位）
-- **做法**：与 `application.yml` 保持一致，改为 `${DB_PASSWORD}` / `${REDIS_URL}` 等环境变量占位，本地用 `.env` 或运行参数注入。
-
----
-
 ## 🟢 S5 — 增加 MyBatis-Plus 防全表拦截器
 
 - **问题**：`MyBatisPlusConfig` 缺 `BlockAttackInnerInterceptor`，无 WHERE 的 `update()/delete()` 可能误伤全表。
@@ -185,12 +177,13 @@
 
 > 已读实码（1059 行）逐方法分析。整体**设计良好**：生命周期回调干净无泄漏、客户端断开优雅处理、计费有 usage 兜底、日志隐私意识强（截断、不落响应体）。但发现以下实质问题。
 
-### P9-1（高）单轮流式 emitter 超时(2min) < HTTP 请求超时(5min) → 慢模型被掐断 + 漏计费
-- **位置**：`ai/service/AiChatService.java:127`（`new SseEmitter(120000L)`）vs `:141`（`.timeout(Duration.ofMinutes(5))`）。
-- **问题**：`doStreamChat` 的 SSE emitter 超时仅 **2 分钟**，但上游 LLM HTTP 请求超时是 **5 分钟**。若模型 3 分钟才出完，`onTimeout` 触发、Spring 自动 complete；此时 HTTP 仍在进行，`parseStream` 后续 `emitter.send()` 抛 `ResponseBodyEmitter has already completed` → 被 `isClientDisconnect()` 判为客户端断开**静默 return**，**不再执行 `recordTokenUsage`/`recordHistory`**。结果：用户 2 分钟被掐断、且这次调用**不计费、不落历史**。
+### P9-1（✅ 已修复，保留分析备查）单轮流式 emitter 超时 2min < HTTP 5min → 慢模型被掐断 + 漏计费
+> **核验结论（2026-08-20 复看最新代码）**：该项**已修复**。`AiChatService.java:70` 现为 `private static final long CHAT_SSE_TIMEOUT = Duration.ofMinutes(5).toMillis();`，第 135 行 `new SseEmitter(CHAT_SSE_TIMEOUT)` 与第 149 行上游 HTTP `.timeout(Duration.ofMinutes(5))` 已对齐。原 2min 硬编码已不存在，慢模型不再被掐断、计费不再漏。下方为原始分析，仅供追溯。
+- **位置（历史）**：`ai/service/AiChatService.java:127`（`new SseEmitter(120000L)`）vs `:141`（`.timeout(Duration.ofMinutes(5))`）。
+- **问题（历史）**：`doStreamChat` 的 SSE emitter 超时仅 **2 分钟**，但上游 LLM HTTP 请求超时是 **5 分钟**。若模型 3 分钟才出完，`onTimeout` 触发、Spring 自动 complete；此时 HTTP 仍在进行，`parseStream` 后续 `emitter.send()` 抛 `ResponseBodyEmitter has already completed` → 被 `isClientDisconnect()` 判为客户端断开**静默 return**，**不再执行 `recordTokenUsage`/`recordHistory`**。结果：用户 2 分钟被掐断、且这次调用**不计费、不落历史**。
 - **对比**：多轮/工具链路走 `createChatEmitter()`（`:365` 用 5 分钟），与 HTTP 超时一致，无此问题——**单轮与多轮超时不一致本身就是 bug 信号**。
-- **做法**：
-  1. 抽常量 `CHAT_SSE_TIMEOUT = Duration.ofMinutes(5).toMillis()`，`doStreamChat` 与 `createChatEmitter` 统一用它（≥ 最坏 HTTP 超时）。
+- **做法（已实施）**：
+  1. ✅ 抽常量 `CHAT_SSE_TIMEOUT = Duration.ofMinutes(5).toMillis()`，`doStreamChat` 与 `createChatEmitter` 统一用它（≥ 最坏 HTTP 超时）。
   2. **顺带提醒**：`SseEmitterManager.EMITTER_TIMEOUT` 已改 1h，但聊天 emitter 是 `new SseEmitter(...)` 自建、不进 manager，P8 对聊天无效。若要统一，聊天 emitter 也应引用同一常量（或挂到 manager）。
   3. 修复后 `isClientDisconnect` 对"已 complete 后 send"的静默 return 仍合理（真断开），无需改。
 
@@ -242,4 +235,4 @@
 - ✅ **第一轮（已完成 commit `82157b7`）**：P1 + P2 + P3 + P4 + P5 + P6
 - ✅ **第二轮（安全与连接池，已完成）**：S2 全部收尾（cacheManager + redisTemplate 关 typing，pub/sub 改类型化序列化）+ S3 硬阻断（登录会话标记 + AuthInterceptor 拦截 + 改密清标记）+ S5 BlockAttack 拦截器 + P7 HikariCP 连接池上调 + P8 SSE 超时收紧
 - ⬜ **第三轮（性能深挖，本轮新研究）**：**P9-1** 单轮流式 emitter 超时 2min→5min 对齐（防慢模型掐断+漏计费）→ **P11** 仪表盘 ai_task 全量扫描下推 SQL 聚合 → **P9-2** SSE 发送背压隔离（规模化）→ **P9-5** 补流式编排集成测试 → **P12** memos 检索前导通配 LIKE（规模化时改 pg_trgm）
-- ⬜ **第四轮（清理）**：S1 CORS 白名单 → S4 本地密码改环境变量 → P10 散落 class 清理
+- ⬜ **第四轮（清理）**：S1 CORS 白名单 → P10 散落 class 清理

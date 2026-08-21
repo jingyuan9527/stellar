@@ -15,6 +15,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.net.URI;
@@ -46,6 +48,7 @@ public class AiImageTaskWorker {
     private final ObjectMapper objectMapper;
     private final AiNotifyPublisher publisher;
     private final ExternalCallLogger externalCallLogger;
+    private final PlatformTransactionManager transactionManager;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -78,22 +81,27 @@ public class AiImageTaskWorker {
             log.info("[AI图片] 异步生成开始 taskId={} model={}", taskId, cfg.model());
             byte[] imageBytes = generateImageBytes(cfg, task.getPrompt(), size, ratio);
 
-            SysFile file = new SysFile();
-            String name = task.getPrompt().length() > 20 ? task.getPrompt().substring(0, 20) : task.getPrompt();
-            file.setOriginalName(name + ".png");
-            file.setExt("png");
-            file.setContentType("image/png");
-            file.setSize((long) imageBytes.length);
-            file.setData(imageBytes);
-            file.setCreateTime(LocalDateTime.now());
-            fileMapper.insert(file);
+            // 文件落库 + 任务状态更新包进同一事务（@Async 方法内用编程式事务，避免自调用失效）：
+            // 任一步失败整段回滚，杜绝"孤儿文件或任务永不终态"的中间态。
+            Long fileId = new TransactionTemplate(transactionManager).execute(tx -> {
+                SysFile file = new SysFile();
+                String name = task.getPrompt().length() > 20 ? task.getPrompt().substring(0, 20) : task.getPrompt();
+                file.setOriginalName(name + ".png");
+                file.setExt("png");
+                file.setContentType("image/png");
+                file.setSize((long) imageBytes.length);
+                file.setData(imageBytes);
+                file.setCreateTime(LocalDateTime.now());
+                fileMapper.insert(file);
 
-            task.setStatus("completed");
-            task.setFileId(file.getId());
-            task.setResponseTime(LocalDateTime.now());
-            task.setDurationMs(Duration.between(task.getRequestTime(), LocalDateTime.now()).toMillis());
-            task.setUpdateTime(LocalDateTime.now());
-            aiTaskMapper.updateById(task);
+                task.setStatus("completed");
+                task.setFileId(file.getId());
+                task.setResponseTime(LocalDateTime.now());
+                task.setDurationMs(Duration.between(task.getRequestTime(), LocalDateTime.now()).toMillis());
+                task.setUpdateTime(LocalDateTime.now());
+                aiTaskMapper.updateById(task);
+                return file.getId();
+            });
 
             int promptTokens = task.getPrompt().length();
             sysAiUsageService.record(task.getSubjectType(), task.getSubjectId(),
@@ -103,7 +111,7 @@ public class AiImageTaskWorker {
             publisher.publish(new AiNotifyMessage(
                     task.getSubjectType() + ":" + task.getSubjectId(),
                     "image", taskId, "completed"));
-            log.info("[AI图片] 异步生成完成 taskId={} fileId={} size={}", taskId, file.getId(), imageBytes.length);
+            log.info("[AI图片] 异步生成完成 taskId={} fileId={} size={}", taskId, fileId, imageBytes.length);
         } catch (Exception e) {
             log.error("[AI图片] 异步生成失败 taskId={}: {}", taskId, e.getMessage(), e);
             markFailed(taskId, e instanceof BusinessException ? e.getMessage() : "图片生成失败: " + e.getMessage());
