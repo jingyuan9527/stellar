@@ -30,7 +30,7 @@
 
 ### 2.3 异步与缓存 ✅ 良好
 - `AsyncConfig` 三池隔离：`logTaskExecutor`(2/8/500) / `aiTaskExecutor`(2/4/50) / `aiToolExecutor`(2/4/20)，回压策略合理（`CallerRunsPolicy` / `AbortPolicy`）。**注意已规避 `@Async` 自调用**：图片/视频 worker 独立成 Service 拆分自 `AiImageService`，注释明确说明 AOP 代理限制——工程纪律好。
-- Spring Cache 用于配置型数据（`ai-model`/`ai-provider`/`setting`/`ai-persona`/`dict`/`profile`/`menu-visibility`/`profile-project`），变更用 `@CacheEvict(allEntries=true)` 即时失效，`disableCachingNullValues()` 防穿透。`saveLog` 已 `@Async("logTaskExecutor")` 异步落库。
+- Spring Cache 用于配置型数据（`ai-model`/`ai-provider`/`setting`/`ai-persona`/`dict`/`menu-visibility`/`profile-project`），变更用 `@CacheEvict(allEntries=true)` 即时失效，`disableCachingNullValues()` 防穿透。`saveLog` 已 `@Async("logTaskExecutor")` 异步落库。（注：`profile` 单 POJO 缓存会因关 typing 致 `ClassCastException`，已摘缓存直查库，见 Redis 基础设施坑。）
 
 ### 2.4 可观测性 ✅ 优秀（亮点）
 - `MonitorService` 对 **CPU/磁盘/文件句柄等慢变量后台 2s 定时采样 + `volatile` 缓存**，overview 只读缓存，避免轮询阻塞请求线程；JVM 参数启动采样一次。`JvmHealthIndicator` 比例式告警（堆>90% DOWN），优雅降级（Windows 文件句柄 N/A）。`HttpRequestMetrics` 用原子计数并排除 `/monitor/**`、`/actuator/**` 自污染。设计质量高。

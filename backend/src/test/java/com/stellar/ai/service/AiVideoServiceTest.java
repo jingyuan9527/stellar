@@ -6,7 +6,6 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.stellar.ai.dto.AiVideoCreateDTO;
 import com.stellar.ai.dto.AiVideoHistoryQueryDTO;
 import com.stellar.ai.entity.AiTask;
-import com.stellar.ai.event.VideoTaskCreatedEvent;
 import com.stellar.ai.mapper.AiTaskMapper;
 import com.stellar.ai.service.SysAiUsageService;
 import com.stellar.ai.vo.AiResolvedConfig;
@@ -23,7 +22,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -55,8 +53,6 @@ class AiVideoServiceTest {
     @Mock
     AiTaskMapper aiTaskMapper;
     @Mock
-    ApplicationEventPublisher eventPublisher;
-    @Mock
     ExternalCallLogger externalCallLogger;
 
     HttpClient mockHttpClient;
@@ -65,7 +61,7 @@ class AiVideoServiceTest {
     @BeforeEach
     void setup() {
         service = new AiVideoService(aiModelService, fileMapper, sysAiUsageService, aiTaskMapper,
-                new com.fasterxml.jackson.databind.ObjectMapper(), eventPublisher, externalCallLogger);
+                new com.fasterxml.jackson.databind.ObjectMapper(), externalCallLogger);
         mockHttpClient = mock(HttpClient.class);
         ReflectUtil.setFinalField(service, "httpClient", mockHttpClient);
     }
@@ -137,7 +133,7 @@ class AiVideoServiceTest {
     }
 
     @Test
-    void createTask_成功_记录用量并落痕发事件() throws Exception {
+    void createTask_成功_记录用量并落痕() throws Exception {
         when(aiModelService.resolveConfig(anyLong())).thenReturn(videoConfig());
         stubSend(jsonResponse(200, "{\"video_id\":\"vid1\",\"status\":\"queued\"}"));
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
@@ -147,7 +143,6 @@ class AiVideoServiceTest {
             assertEquals("vid1", vo.getVideoId());
             verify(sysAiUsageService).record(any(), any(), any(), any(), any(), anyInt(), anyInt(), anyInt(), any());
             verify(aiTaskMapper).insert(any(AiTask.class));
-            verify(eventPublisher).publishEvent(any(VideoTaskCreatedEvent.class));
         }
     }
 

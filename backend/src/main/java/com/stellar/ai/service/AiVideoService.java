@@ -12,7 +12,6 @@ import com.stellar.ai.dto.AiVideoCreateDTO;
 import com.stellar.ai.dto.AiVideoHistoryQueryDTO;
 import com.stellar.ai.entity.AiTask;
 import com.stellar.system.entity.SysFile;
-import com.stellar.ai.event.VideoTaskCreatedEvent;
 import com.stellar.ai.mapper.AiTaskMapper;
 import com.stellar.system.mapper.SysFileMapper;
 import com.stellar.ai.vo.AiResolvedConfig;
@@ -22,7 +21,6 @@ import com.stellar.ai.vo.AiVideoTaskVO;
 import com.stellar.interceptor.WebUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -56,7 +54,6 @@ public class AiVideoService {
     private final SysAiUsageService sysAiUsageService;
     private final AiTaskMapper aiTaskMapper;
     private final ObjectMapper objectMapper;
-    private final ApplicationEventPublisher eventPublisher;
     private final ExternalCallLogger externalCallLogger;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -138,7 +135,6 @@ public class AiVideoService {
                 task.setCreateTime(LocalDateTime.now());
                 task.setUpdateTime(LocalDateTime.now());
                 aiTaskMapper.insert(task);
-                eventPublisher.publishEvent(new VideoTaskCreatedEvent(task.getId(), modelId, vo.getVideoId()));
             } catch (Exception e) {
                 log.warn("视频任务本地留痕失败: {}", e.getMessage(), e);
             }

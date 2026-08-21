@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 public interface AiTaskMapper extends BaseMapper<AiTask> {
@@ -15,6 +16,17 @@ public interface AiTaskMapper extends BaseMapper<AiTask> {
             + "AND extra ->> 'video_id' = #{videoId} "
             + "ORDER BY id DESC LIMIT 1")
     AiTask selectVideoTaskByVideoId(@Param("videoId") String videoId);
+
+    /**
+     * 待轮询视频任务：状态仍 generating 且距上次轮询超过一个间隔。
+     * <p>单调度线程（AiVideoTaskWorker @Scheduled）按此清单统一轮询，避免每任务独占线程。
+     * update_time 由 worker 在每次 generating 轮询后推进，作为节流门槛。
+     */
+    @Select("SELECT * FROM ai_task "
+            + "WHERE task_type = 'video' AND deleted = 0 AND status = 'generating' "
+            + "AND update_time <= #{lastPollBefore} "
+            + "ORDER BY id ASC")
+    List<AiTask> selectPendingVideoTasks(@Param("lastPollBefore") LocalDateTime lastPollBefore);
 
     /**
      * 任务全量聚合（排除进行中/null 状态）：总数 / 成功数 / 成功任务耗时和 / 成功任务耗时条数。

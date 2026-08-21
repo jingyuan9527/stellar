@@ -25,7 +25,7 @@ public class RedisCacheBootstrap implements CommandLineRunner {
     /** 与各 Service {@code @Cacheable(cacheNames=...)} 的 cacheName 一一对应 */
     private static final List<String> CACHE_NAMES = List.of(
             "ai-model", "ai-provider", "ai-persona", "setting", "setting-bool",
-            "dict", "profile", "profile-project", "menu-visibility");
+            "dict", "profile-project", "menu-visibility");
 
     private final CacheManager cacheManager;
 
