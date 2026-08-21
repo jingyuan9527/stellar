@@ -48,3 +48,6 @@ desktop.ini
 
 # ===== 本地应用数据库（.freebuff 桌面端会话数据，勿提交）=====
 .freebuff/
+
+# ===== AI 中间态文档（本地计划单/草稿，不提交不污染 README）=====
+work/
