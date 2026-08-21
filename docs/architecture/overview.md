@@ -27,7 +27,7 @@ stellar/
 └─ README.md / RULES.md / AGENTS.md
 ```
 
-- 后端包：`com.stellar.{ai,tts,game,system,memos}` + `infra` + 公共 `common/config/interceptor/aspect`
+- 后端包：`com.stellar.{ai,tts,game,system,memos,dashboard}` + `infra` + 公共 `common/config/interceptor/aspect/protocol/port`
 - Mappers 扫描：`com.stellar.{ai,tts,game,system,memos}.mapper`
 - 前后端独立进程，无根构建
 
