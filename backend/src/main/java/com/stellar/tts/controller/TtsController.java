@@ -87,7 +87,7 @@ public class TtsController {
     @PublicAccess
     @GetMapping("/record/page")
     @Log(title = "合成历史", type = OperationType.QUERY)
-    public Result<Page<TtsRecord>> recordPage(@ModelAttribute TtsRecordQueryDTO query) {
+    public Result<Page<TtsRecord>> recordPage(@Valid @ModelAttribute TtsRecordQueryDTO query) {
         return Result.success(ttsRecordService.page(query));
     }
 

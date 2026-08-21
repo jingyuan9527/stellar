@@ -21,8 +21,8 @@ import static org.mockito.Mockito.*;
 
 /**
  * {@link RateLimitInterceptor} 单测：隔离 {@link RateLimitService} 与 {@link StpUtil} 静态调用，
- * 验证注解识别、登录跳过、游客计数、超限抛 429（BusinessException(TOO_MANY_REQUESTS)）的流程。
- * IP 解析复用真实 {@link WebUtils#getClientIp(HttpServletRequest)}（读取 mock 请求的代理头）。
+ * 验证注解识别、游客按 IP 计数、登录用户按 userId 计数、超限抛 429（BusinessException(TOO_MANY_REQUESTS)）。
+ * IP 解析复用真实 {@link WebUtils#getClientIp(HttpServletRequest)}（mock 可信代理 remoteAddr + XFF）。
  */
 @ExtendWith(MockitoExtension.class)
 class RateLimitInterceptorTest {
@@ -44,6 +44,12 @@ class RateLimitInterceptorTest {
         interceptor = new RateLimitInterceptor(rateLimitService);
     }
 
+    /** mock 可信反代来源（remoteAddr=回环），XFF 头才会被采信 */
+    private void stubTrustedProxyWithXff(String xff) {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(request.getHeader("X-Forwarded-For")).thenReturn(xff);
+    }
+
     @Test
     void preHandle_非HandlerMethod_直接放行() {
         assertTrue(interceptor.preHandle(request, response, new Object()));
@@ -62,14 +68,30 @@ class RateLimitInterceptorTest {
     }
 
     @Test
-    void preHandle_已登录_跳过限流不计数() {
-        // 已登录时即使带 @RateLimit 也直接放行，不触发计数（daily 不会被读取）
+    void preHandle_已登录_按userId计数() {
         RateLimit rl = mock(RateLimit.class);
+        when(rl.loginDaily()).thenReturn(50);
         when(handlerMethod.getMethodAnnotation(RateLimit.class)).thenReturn(rl);
+        when(rateLimitService.tryIncr("user:42", 50)).thenReturn(1);
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(true);
+            stp.when(StpUtil::getLoginIdAsLong).thenReturn(42L);
             assertTrue(interceptor.preHandle(request, response, handlerMethod));
-            verify(rateLimitService, never()).tryIncr(anyString(), anyInt());
+        }
+    }
+
+    @Test
+    void preHandle_已登录_超限同样429() {
+        RateLimit rl = mock(RateLimit.class);
+        when(rl.loginDaily()).thenReturn(-1); // 用默认用户档
+        when(handlerMethod.getMethodAnnotation(RateLimit.class)).thenReturn(rl);
+        when(rateLimitService.tryIncr(eq("user:42"), anyInt())).thenReturn(-1);
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::isLogin).thenReturn(true);
+            stp.when(StpUtil::getLoginIdAsLong).thenReturn(42L);
+            BusinessException ex = assertThrows(BusinessException.class,
+                    () -> interceptor.preHandle(request, response, handlerMethod));
+            assertEquals(ResultCode.TOO_MANY_REQUESTS.getCode(), ex.getCode());
         }
     }
 
@@ -78,8 +100,8 @@ class RateLimitInterceptorTest {
         RateLimit rl = mock(RateLimit.class);
         when(rl.daily()).thenReturn(5);
         when(handlerMethod.getMethodAnnotation(RateLimit.class)).thenReturn(rl);
-        when(request.getHeader("X-Forwarded-For")).thenReturn("9.9.9.9");
-        when(rateLimitService.tryIncr("9.9.9.9", 5)).thenReturn(3);
+        stubTrustedProxyWithXff("9.9.9.9");
+        when(rateLimitService.tryIncr("ip:9.9.9.9", 5)).thenReturn(3);
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(false);
             assertTrue(interceptor.preHandle(request, response, handlerMethod));
@@ -91,8 +113,8 @@ class RateLimitInterceptorTest {
         RateLimit rl = mock(RateLimit.class);
         when(rl.daily()).thenReturn(5);
         when(handlerMethod.getMethodAnnotation(RateLimit.class)).thenReturn(rl);
-        when(request.getHeader("X-Forwarded-For")).thenReturn("9.9.9.9");
-        when(rateLimitService.tryIncr("9.9.9.9", 5)).thenReturn(-1);
+        stubTrustedProxyWithXff("9.9.9.9");
+        when(rateLimitService.tryIncr("ip:9.9.9.9", 5)).thenReturn(-1);
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(false);
             BusinessException ex = assertThrows(BusinessException.class,

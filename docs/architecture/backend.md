@@ -12,7 +12,7 @@ Lettuce + `sa-token-redis-jackson` + Spring Cache。`RedisConfig`：`RedisTempla
 
 - 密码 BCrypt；响应 `Result<T>` + `GlobalExceptionHandler` + MDC `traceId`
 - MyBatis-Plus：`sys_user.deleted` 逻辑删除，`BlockAttackInnerInterceptor` 防全表
-- 操作日志：`@Log` + `LogAspect` `@Async("logTaskExecutor")` 异步落 `sys_log`，脱敏 `password/token/apiKey`
+- 操作日志：`@Log` + `LogAspect` `@Async("logTaskExecutor")` 异步落 `sys_log`，脱敏 `password/oldPassword/newPassword/confirmPassword/token/apiKey/secretKey`
 - 外部调用：`ExternalCallLogger`（infra，只做上下文捕获/截断）+ `CallLogSink` 缝，system 侧 `SysLogCallLogSink` 落 `sys_log` module=外部调用
 - 运行日志：`logback-spring.xml`，`stellar.log` 归档，`LOG_LEVEL` 控制，MDC traceId
 
@@ -24,8 +24,10 @@ Lettuce + `sa-token-redis-jackson` + Spring Cache。`RedisConfig`：`RedisTempla
 - 计费：`sys_ai_usage`，`stream_options.include_usage` 精确否则估算，仪表盘聚合
 - 任务通知：`SseEmitterManager` + `AiNotify` Redis pub/sub，30s 心跳，前端 `store/aiNotify` 重连
 - RAG 缓存：Caffeine + `CacheInvalidation` 广播
-- 文件：`sys_file` BYTEA，`POST /file/upload` 白名单，`GET /file/{id}` 公开
-- 限流：`@RateLimit` + `RateLimitInterceptor` + Redis Lua 原子化，登录跳过
+- 文件：`sys_file` BYTEA，`POST /file/upload` 白名单（`isPublic` 参数标记游客可见）；`GET /file/{id}` 免登录但仅 `is_public=1` 游客可读，私有文件仅上传者本人可读（防 IDOR 枚举下载），存量头像/海螺预设音频由 schema.sql 幂等回填
+- 限流：`@RateLimit(daily, loginDaily)` + `RateLimitInterceptor` + Redis Lua 原子化；游客按 IP、登录用户按 userId 双档计数（默认 50/200，`rate-limit.default-daily/default-user-daily`）
+- IP 解析：`WebUtils.getClientIp` 唯一实现，仅当 remoteAddr 命中可信代理白名单（`stellar.security.trusted-proxies`，精确 IP 或 IPv4 CIDR）才采信 XFF/X-Real-IP，防伪造头绕过限流
+- CORS：`stellar.cors.allowed-origins` 显式域名白名单（逗号分隔，凭据型跨域禁止通配，启动时校验）
 - 游戏/海螺/健康/备忘/Memos/Webhook/监控/TTS：见源码分包 `com.stellar.{ai,tts,game,system,memos,monitor,infra,dashboard}`，`ai_task` 统一历史，`WebUtils.getClientIp` 唯一 IP 解析
 - 模块依赖方向（单向，禁环）：`infra` 不依赖任何特性模块；特性模块间经 service/端口缝访问（如 `ai→tts` 走 `tts.port`、RAG 外部检索走 `ExternalRetriever` 缝），不直连他模块 Mapper；`dashboard` 为聚合包可依赖各特性模块；跨模块文件落库走 `FileService.create/deleteById`
 - Memos：验签在 infra `HmacWebhookVerifier` + `MemosWebhookGuard`（去重），同步互斥 `RedisMutex`，状态记录 `MemosSyncLogStore`，标签文本处理 `MemosTagCodec`

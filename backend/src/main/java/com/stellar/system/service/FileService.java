@@ -41,8 +41,10 @@ public class FileService {
 
     /**
      * 上传文件（图片/音频），二进制存库，返回相对 URL 如 /file/123。
+     *
+     * @param isPublic 游客可见（头像/海螺预设等落地页素材传 true；默认私有仅本人可读）
      */
-    public String upload(MultipartFile file) {
+    public String upload(MultipartFile file, boolean isPublic) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException("上传文件为空");
         }
@@ -66,10 +68,12 @@ public class FileService {
             throw new BusinessException("文件读取失败");
         }
         entity.setUserId(StpUtil.getLoginIdAsLong());
+        entity.setIsPublic(isPublic);
         entity.setCreateTime(LocalDateTime.now());
         fileMapper.insert(entity);
         String url = "/file/" + entity.getId();
-        log.info("[文件上传] 成功 orig={} size={} user={} -> {}", original, file.getSize(), entity.getUserId(), url);
+        log.info("[文件上传] 成功 orig={} size={} user={} public={} -> {}",
+                original, file.getSize(), entity.getUserId(), isPublic, url);
         return url;
     }
 
@@ -146,6 +150,7 @@ public class FileService {
             vo.setSize(f.getSize());
             vo.setUserId(f.getUserId());
             vo.setUploaderName(f.getUserId() != null ? nameMap.get(f.getUserId()) : null);
+            vo.setIsPublic(Boolean.TRUE.equals(f.getIsPublic()));
             vo.setCreateTime(f.getCreateTime());
             return vo;
         }).collect(Collectors.toList()));

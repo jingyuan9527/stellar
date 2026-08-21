@@ -63,7 +63,7 @@ class FileServiceTest {
     @Test
     void upload_null_抛异常() {
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
-            assertThrows(BusinessException.class, () -> fileService.upload(null));
+            assertThrows(BusinessException.class, () -> fileService.upload(null, false));
         }
     }
 
@@ -72,7 +72,7 @@ class FileServiceTest {
         MultipartFile f = mock(MultipartFile.class);
         when(f.isEmpty()).thenReturn(true);
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
-            BusinessException ex = assertThrows(BusinessException.class, () -> fileService.upload(f));
+            BusinessException ex = assertThrows(BusinessException.class, () -> fileService.upload(f, false));
             assertTrue(ex.getMessage().contains("为空"));
         }
     }
@@ -81,7 +81,7 @@ class FileServiceTest {
     void upload_非法扩展名_抛异常() {
         MultipartFile f = mockFile("malware.exe", "application/octet-stream", 10, new byte[10]);
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
-            BusinessException ex = assertThrows(BusinessException.class, () -> fileService.upload(f));
+            BusinessException ex = assertThrows(BusinessException.class, () -> fileService.upload(f, false));
             assertTrue(ex.getMessage().contains("不支持的文件类型"));
         }
         verify(fileMapper, never()).insert(any(SysFile.class));
@@ -98,7 +98,7 @@ class FileServiceTest {
         } catch (java.io.IOException ignored) {
         }
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
-            BusinessException ex = assertThrows(BusinessException.class, () -> fileService.upload(f));
+            BusinessException ex = assertThrows(BusinessException.class, () -> fileService.upload(f, false));
             assertTrue(ex.getMessage().contains("文件读取失败"));
         }
     }
@@ -108,7 +108,7 @@ class FileServiceTest {
         MultipartFile f = mockFile("photo.JPG", "image/jpeg", 1024, new byte[1024]);
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::getLoginIdAsLong).thenReturn(7L);
-            String url = fileService.upload(f);
+            String url = fileService.upload(f, false);
             assertTrue(url.startsWith("/file/"));
         }
         verify(fileMapper).insert(any(SysFile.class));
@@ -119,9 +119,19 @@ class FileServiceTest {
         MultipartFile f = mockFile("voice.mp3", "audio/mpeg", 2048, new byte[2048]);
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-            assertDoesNotThrow(() -> fileService.upload(f));
+            assertDoesNotThrow(() -> fileService.upload(f, false));
         }
         verify(fileMapper).insert(any(SysFile.class));
+    }
+
+    @Test
+    void upload_公开标记_写入isPublic() {
+        MultipartFile f = mockFile("avatar.png", "image/png", 100, new byte[100]);
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getLoginIdAsLong).thenReturn(7L);
+            fileService.upload(f, true);
+        }
+        verify(fileMapper).insert(argThat((SysFile sf) -> Boolean.TRUE.equals(sf.getIsPublic())));
     }
 
     // ===== getFull =====

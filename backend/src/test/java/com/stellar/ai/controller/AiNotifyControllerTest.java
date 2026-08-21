@@ -50,6 +50,7 @@ class AiNotifyControllerTest {
 
     @Test
     void subscribe_游客_按IP注册() throws Exception {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn("6.6.6.6");
         SseEmitter emitter = new SseEmitter();
         when(sseEmitterManager.register("ip:6.6.6.6")).thenReturn(emitter);
@@ -62,15 +63,15 @@ class AiNotifyControllerTest {
 
     @Test
     void subscribe_游客_无代理头_回退remoteAddr() throws Exception {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn(null);
         when(request.getHeader("X-Real-IP")).thenReturn(null);
-        when(request.getRemoteAddr()).thenReturn("3.3.3.3");
         SseEmitter emitter = new SseEmitter();
-        when(sseEmitterManager.register("ip:3.3.3.3")).thenReturn(emitter);
+        when(sseEmitterManager.register("ip:127.0.0.1")).thenReturn(emitter);
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(false);
             assertSame(emitter, controller.subscribe());
         }
-        verify(sseEmitterManager).register("ip:3.3.3.3");
+        verify(sseEmitterManager).register("ip:127.0.0.1");
     }
 }

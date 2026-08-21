@@ -253,6 +253,10 @@ COMMENT ON COLUMN sys_file.user_id IS '上传者用户ID(可空,历史数据/系
 CREATE INDEX IF NOT EXISTS idx_sys_file_user_id ON sys_file (user_id);
 CREATE INDEX IF NOT EXISTS idx_sys_file_create_time ON sys_file (create_time DESC);
 
+-- sys_file 扩展：游客可见性（默认私有，防匿名枚举 id 拖库；公开场景需显式标记）
+ALTER TABLE sys_file ADD COLUMN IF NOT EXISTS is_public SMALLINT DEFAULT 0;
+COMMENT ON COLUMN sys_file.is_public IS '游客可见: 0私有(仅上传者可读) 1公开';
+
 -- 神奇海螺预设回答表（管理员上传音频+文本，AI 按问题语义匹配）
 CREATE TABLE IF NOT EXISTS conch_answer (
     id                BIGSERIAL PRIMARY KEY,
@@ -274,6 +278,18 @@ COMMENT ON COLUMN conch_answer.sort_order IS '排序';
 COMMENT ON COLUMN conch_answer.create_time IS '创建时间';
 COMMENT ON COLUMN conch_answer.deleted IS '逻辑删除: 0未删 1已删';
 CREATE INDEX IF NOT EXISTS idx_conch_answer_enabled ON conch_answer (enabled, sort_order);
+
+-- 存量回填：落地页头像与海螺预设音频历史上对游客开放，保持兼容
+-- （幂等回填，本地 sql.init=always 每次启动重跑会覆盖手工改私有的记录，属预期取舍）
+UPDATE sys_file f SET is_public = 1
+WHERE f.is_public = 0
+  AND (
+      EXISTS (SELECT 1 FROM sys_profile p WHERE p.avatar LIKE '/file/%'
+              AND substring(p.avatar FROM '^/file/([0-9]+)$') = f.id::text)
+      OR EXISTS (SELECT 1 FROM sys_user u WHERE u.avatar LIKE '/file/%'
+              AND substring(u.avatar FROM '^/file/([0-9]+)$') = f.id::text)
+      OR EXISTS (SELECT 1 FROM conch_answer c WHERE c.deleted = 0 AND c.file_id = f.id)
+  );
 
 -- 神奇海螺提问历史表（记录用户问题与命中的预设，不记 IP）
 CREATE TABLE IF NOT EXISTS conch_record (

@@ -34,7 +34,7 @@ public class AiTemplateController {
     @PublicAccess
     @GetMapping("/page")
     @Log(title = "AI模板", type = OperationType.QUERY)
-    public Result<Page<SysAiTemplate>> page(@ModelAttribute AiTemplateQueryDTO query) {
+    public Result<Page<SysAiTemplate>> page(@Valid @ModelAttribute AiTemplateQueryDTO query) {
         return Result.success(aiTemplateService.page(query));
     }
 

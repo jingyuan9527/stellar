@@ -40,6 +40,7 @@ class GameControllerTest {
         dto.setScore(20);
         dto.setTotalTime(100);
         dto.setAccuracy(66.6);
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn("9.9.9.9, 10.0.0.1");
         GameScoreVO vo = new GameScoreVO();
         vo.setScore(20);
@@ -56,13 +57,13 @@ class GameControllerTest {
         dto.setScore(10);
         dto.setTotalTime(50);
         dto.setAccuracy(33.3);
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn(null);
         when(request.getHeader("X-Real-IP")).thenReturn(null);
-        when(request.getRemoteAddr()).thenReturn("1.2.3.4");
 
         controller.submit(dto, request);
 
-        verify(gameScoreService).submit(dto, "1.2.3.4");
+        verify(gameScoreService).submit(dto, "127.0.0.1");
     }
 
     @Test

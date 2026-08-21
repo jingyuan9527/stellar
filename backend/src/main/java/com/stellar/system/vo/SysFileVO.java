@@ -25,5 +25,8 @@ public class SysFileVO {
     /** 上传者用户名（sys_user.username，历史/系统文件为 null） */
     private String uploaderName;
 
+    /** 是否游客可见（true 时 /file/{id} 无需登录可读） */
+    private Boolean isPublic;
+
     private LocalDateTime createTime;
 }

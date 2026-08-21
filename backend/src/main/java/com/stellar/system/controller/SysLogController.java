@@ -10,6 +10,7 @@ import com.stellar.enums.OperationType;
 import com.stellar.system.service.SysLogService;
 import com.stellar.system.vo.SysLogExportVO;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,7 +34,7 @@ public class SysLogController {
 
     @GetMapping("/page")
     @Log(title = "日志管理", type = OperationType.QUERY)
-    public Result<Page<SysLog>> page(@ModelAttribute SysLogQueryDTO query) {
+    public Result<Page<SysLog>> page(@Valid @ModelAttribute SysLogQueryDTO query) {
         return Result.success(sysLogService.page(query));
     }
 
@@ -45,7 +46,7 @@ public class SysLogController {
 
     @GetMapping("/export")
     @Log(title = "日志管理", type = OperationType.EXPORT)
-    public void export(@ModelAttribute SysLogQueryDTO query, HttpServletResponse response) {
+    public void export(@Valid @ModelAttribute SysLogQueryDTO query, HttpServletResponse response) {
         try {
             List<SysLog> list = sysLogService.list(query);
             List<SysLogExportVO> exportList = list.stream().map(SysLogExportVO::of).collect(Collectors.toList());

@@ -1,5 +1,6 @@
 package com.stellar.memos.dto;
 
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 /**
@@ -9,5 +10,6 @@ import lombok.Data;
 public class MemosWebhookConfigDTO {
 
     /** 签名密钥，为空不修改 */
+    @Size(max = 300, message = "签名密钥过长")
     private String secret;
 }

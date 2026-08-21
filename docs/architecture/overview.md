@@ -10,7 +10,7 @@ Stellar 是**个人知识/实验沉淀池**，非纯后台。游客免登录浏�
 - `/about`：简历式主页（Hero/富文本/技能/项目卡片/联系方式），后台 `system/profile` 编辑
 - 公开菜单可配置：`sys_menu_visibility` + `GET /public/menu-config` 动态过滤
 - `@PublicAccess` 放行游客接口，方法内 `StpUtil.isLogin()` 区分游客/登录
-- IP 限流：Redis INCR + 当日过期，429，阈值配置化，多实例共享
+- 限流：Redis INCR + 当日过期，429，游客按 IP / 登录用户按 userId 双档配额，多实例共享；IP 取自可信代理白名单校验后的解析（防 XFF 伪造）
 - 计费/统计：`sys_ai_usage`（account/ip + provider_id/model_type）+ `@RateLimit`，仪表盘展示环比
 - 游戏/海螺/TTS/备忘等见 `backend.md`
 

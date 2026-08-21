@@ -6,6 +6,7 @@ import com.stellar.system.dto.ProfileDTO;
 import com.stellar.system.entity.SysProfile;
 import com.stellar.enums.OperationType;
 import com.stellar.system.service.ProfileService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -31,7 +32,7 @@ public class ProfileController {
 
     @PutMapping
     @Log(title = "个人介绍", type = OperationType.UPDATE)
-    public Result<Void> update(@RequestBody ProfileDTO dto) {
+    public Result<Void> update(@Valid @RequestBody ProfileDTO dto) {
         profileService.update(dto);
         return Result.success();
     }

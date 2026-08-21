@@ -56,7 +56,7 @@ public class MemosController {
 
     @PutMapping("/config")
     @Log(title = "备忘同步", type = OperationType.UPDATE)
-    public Result<Void> saveConfig(@RequestBody MemosConfigDTO dto) {
+    public Result<Void> saveConfig(@Valid @RequestBody MemosConfigDTO dto) {
         memosService.saveConfig(dto);
         return Result.success();
     }
@@ -113,7 +113,7 @@ public class MemosController {
 
     @PutMapping("/webhook/config")
     @Log(title = "备忘同步", type = OperationType.UPDATE)
-    public Result<Void> saveWebhookSecret(@RequestBody MemosWebhookConfigDTO dto) {
+    public Result<Void> saveWebhookSecret(@Valid @RequestBody MemosWebhookConfigDTO dto) {
         memosService.saveWebhookSecret(dto.getSecret());
         return Result.success();
     }

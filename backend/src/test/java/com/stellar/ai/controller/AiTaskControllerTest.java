@@ -46,6 +46,7 @@ class AiTaskControllerTest {
 
     @Test
     void page_游客_按IP查() {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn("7.7.7.7");
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(false);
@@ -66,6 +67,7 @@ class AiTaskControllerTest {
 
     @Test
     void clear_游客() {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn("7.7.7.7");
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(false);

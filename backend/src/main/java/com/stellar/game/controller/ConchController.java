@@ -75,7 +75,7 @@ public class ConchController {
      */
     @GetMapping("/answer/page")
     @Log(title = "海螺预设", type = OperationType.QUERY)
-    public Result<Page<ConchAnswerVO>> answerPage(@ModelAttribute ConchAnswerQueryDTO query) {
+    public Result<Page<ConchAnswerVO>> answerPage(@Valid @ModelAttribute ConchAnswerQueryDTO query) {
         return Result.success(conchService.answerPage(query));
     }
 

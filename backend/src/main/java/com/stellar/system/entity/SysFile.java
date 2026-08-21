@@ -37,6 +37,9 @@ public class SysFile {
     /** 上传者用户ID（可空，历史数据/系统生成为 NULL） */
     private Long userId;
 
+    /** 游客可见：true 时 /file/{id} 免登录可读；默认私有仅上传者本人可读（防 IDOR 枚举下载） */
+    private Boolean isPublic;
+
     /** 上传时间 */
     private LocalDateTime createTime;
 }

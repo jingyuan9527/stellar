@@ -262,10 +262,8 @@ class AiChatSessionServiceTest {
 
     @Test
     void streamChat_游客_先建Emitter并走纯文本流() {
-        // 游客主体按 IP：补一个 mock request 让 getClientIp() 命中 1.2.3.4
+        // 游客主体按 IP：补一个 mock request 让 getClientIp() 命中 1.2.3.4（不可信直连，直接取 remoteAddr）
         HttpServletRequest req = mock(HttpServletRequest.class);
-        when(req.getHeader("X-Forwarded-For")).thenReturn(null);
-        when(req.getHeader("X-Real-IP")).thenReturn(null);
         when(req.getRemoteAddr()).thenReturn("1.2.3.4");
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(req));
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {

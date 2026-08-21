@@ -46,6 +46,7 @@ class AiChatRecordControllerTest {
 
     @Test
     void page_游客() {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn("4.4.4.4");
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(false);
@@ -56,6 +57,7 @@ class AiChatRecordControllerTest {
 
     @Test
     void delete_游客() {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn("4.4.4.4");
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(false);

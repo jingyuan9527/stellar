@@ -6,6 +6,7 @@ import com.stellar.system.dto.MenuVisibilityItemDTO;
 import com.stellar.system.entity.SysMenuVisibility;
 import com.stellar.enums.OperationType;
 import com.stellar.system.service.MenuVisibilityService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,7 +34,7 @@ public class MenuVisibilityController {
 
     @PostMapping("/batch")
     @Log(title = "菜单可见性", type = OperationType.UPDATE)
-    public Result<Void> batchUpdate(@RequestBody List<MenuVisibilityItemDTO> items) {
+    public Result<Void> batchUpdate(@Valid @RequestBody List<@Valid MenuVisibilityItemDTO> items) {
         menuVisibilityService.batchUpsert(items);
         return Result.success();
     }

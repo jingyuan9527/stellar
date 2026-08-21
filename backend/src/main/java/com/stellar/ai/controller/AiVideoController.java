@@ -64,7 +64,7 @@ public class AiVideoController {
      */
     @GetMapping("/page")
     @Log(title = "AI视频历史", type = OperationType.QUERY)
-    public Result<Page<AiVideoHistoryVO>> page(@ModelAttribute AiVideoHistoryQueryDTO query) {
+    public Result<Page<AiVideoHistoryVO>> page(@Valid @ModelAttribute AiVideoHistoryQueryDTO query) {
         String subjectId = StpUtil.getLoginIdAsString();
         return Result.success(aiVideoService.pageHistory(query, "account", subjectId));
     }

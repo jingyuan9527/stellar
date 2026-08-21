@@ -47,7 +47,7 @@ public class AiChatSessionController {
     @PublicAccess
     @PostMapping("/session")
     @Log(title = "AI聊天会话", type = OperationType.INSERT)
-    public Result<AiChatSession> createSession(@RequestBody AiChatSessionCreateDTO dto) {
+    public Result<AiChatSession> createSession(@Valid @RequestBody AiChatSessionCreateDTO dto) {
         return Result.success(sessionService.createSession(
                 dto.getPersonaId(), dto.getKbId(), dto.getTitle()));
     }

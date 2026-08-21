@@ -51,7 +51,8 @@ async function customUpload({ file, onFinish, onError }: UploadCustomRequestOpti
     return
   }
   try {
-    form.value.avatar = await uploadFile(f)
+    // 头像在落地页对游客展示，需标记公开
+    form.value.avatar = await uploadFile(f, true)
     message.success('头像上传成功')
     onFinish()
   } catch {

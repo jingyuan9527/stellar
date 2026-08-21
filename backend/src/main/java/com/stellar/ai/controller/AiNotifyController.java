@@ -36,6 +36,8 @@ public class AiNotifyController {
                     .name("connected")
                     .data(Map.of("subject", subject), MediaType.APPLICATION_JSON));
         } catch (Exception e) {
+            // 降级：连接握手即失败（客户端已断开），completeWithError 触发清理，但需留排查痕迹
+            log.warn("[AI通知] SSE connected 事件发送失败 subject={}: {}", subject, e.getMessage(), e);
             emitter.completeWithError(e);
         }
         return emitter;

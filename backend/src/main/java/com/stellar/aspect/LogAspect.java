@@ -37,7 +37,7 @@ public class LogAspect {
     private final ObjectMapper objectMapper;
 
     private static final Pattern SENSITIVE_PATTERN = Pattern.compile(
-            "(\"(?:password|oldPassword|confirmPassword|token|secretKey|apiKey)\"\\s*:\\s*)\"[^\"]*\"",
+            "(\"(?:password|oldPassword|newPassword|confirmPassword|token|secretKey|apiKey)\"\\s*:\\s*)\"[^\"]*\"",
             Pattern.CASE_INSENSITIVE);
 
     private static final int MAX_FIELD_LENGTH = 2000;

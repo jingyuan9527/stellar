@@ -301,7 +301,8 @@ public class AiChatService {
                 emitter.send(SseEmitter.event().data(Map.of("status", status), MediaType.APPLICATION_JSON));
             }
         } catch (Exception e) {
-            log.warn("SSE 状态事件发送失败 status={}: {}", status, e.getMessage());
+            // 降级：状态进度推送失败不影响主流程，多为连接已断
+            log.warn("SSE 状态事件发送失败 status={}: {}", status, e.getMessage(), e);
         }
     }
 
@@ -376,7 +377,9 @@ public class AiChatService {
                                 try {
                                     onComplete.accept(sr.content());
                                 } catch (Exception ce) {
-                                    log.warn("多轮流式 onComplete 回调失败（不影响流式）: {}", ce.getMessage());
+                                    // 降级：回调仅负责落消息表等收尾，失败不影响流式输出，但必须可查
+                                    log.warn("多轮流式 onComplete 回调失败（不影响流式）operator={}: {}",
+                                            operator, ce.getMessage(), ce);
                                 }
                             }
                             externalCallLogger.success("LLM多轮流式", url, callParams + ", resultLen=" + sr.content().length(),

@@ -68,6 +68,7 @@ class TtsControllerTest {
         req.setText("hi");
         req.setVoice("v");
         when(ttsService.synthesize("hi", "v", 1.0, 1.0, 1.0)).thenReturn(new byte[]{9});
+        when(servletRequest.getRemoteAddr()).thenReturn("127.0.0.1");
         when(servletRequest.getHeader("X-Forwarded-For")).thenReturn("8.8.8.8");
         doThrow(new RuntimeException("db down")).when(ttsRecordService)
                 .save(eq(req), eq(new byte[]{9}), eq("ip"), eq("8.8.8.8"));
@@ -93,6 +94,7 @@ class TtsControllerTest {
         req.setVoice("冰糖");
         req.setStyle("温柔");
         when(aiTtsService.synthesize(2L, "你好", "冰糖", "温柔")).thenReturn(new byte[]{1});
+        when(servletRequest.getRemoteAddr()).thenReturn("127.0.0.1");
         when(servletRequest.getHeader("X-Forwarded-For")).thenReturn("8.8.8.8");
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(false);

@@ -72,6 +72,7 @@ class AiImageControllerTest {
 
     @Test
     void page_游客_按IP查_代理头优先() {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn("9.9.9.9, 10.0.0.1");
         AiImageHistoryQueryDTO query = new AiImageHistoryQueryDTO();
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
@@ -83,19 +84,20 @@ class AiImageControllerTest {
 
     @Test
     void page_游客_无代理头_回退remoteAddr() {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn(null);
         when(request.getHeader("X-Real-IP")).thenReturn(null);
-        when(request.getRemoteAddr()).thenReturn("1.2.3.4");
         AiImageHistoryQueryDTO query = new AiImageHistoryQueryDTO();
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(false);
             controller.page(query, request);
         }
-        verify(aiImageService).pageHistory(query, "ip", "1.2.3.4");
+        verify(aiImageService).pageHistory(query, "ip", "127.0.0.1");
     }
 
     @Test
     void page_游客_仅XRealIP() {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn("  ");
         when(request.getHeader("X-Real-IP")).thenReturn("8.8.8.8");
         AiImageHistoryQueryDTO query = new AiImageHistoryQueryDTO();
@@ -118,6 +120,7 @@ class AiImageControllerTest {
 
     @Test
     void delete_游客_按IP删() {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeader("X-Forwarded-For")).thenReturn("5.5.5.5");
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::isLogin).thenReturn(false);

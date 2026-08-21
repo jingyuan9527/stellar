@@ -62,7 +62,7 @@ public class AiImageController {
     @PublicAccess
     @GetMapping("/page")
     @Log(title = "AI图片历史", type = OperationType.QUERY)
-    public Result<Page<AiImageTaskVO>> page(@ModelAttribute AiImageHistoryQueryDTO query, HttpServletRequest request) {
+    public Result<Page<AiImageTaskVO>> page(@Valid @ModelAttribute AiImageHistoryQueryDTO query, HttpServletRequest request) {
         String subjectType = StpUtil.isLogin() ? "account" : "ip";
         String subjectId = StpUtil.isLogin() ? StpUtil.getLoginIdAsString() : WebUtils.getClientIp(request);
         return Result.success(aiImageService.pageHistory(query, subjectType, subjectId));

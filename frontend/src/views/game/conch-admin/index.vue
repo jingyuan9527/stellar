@@ -207,7 +207,8 @@ async function customUpload({ file, onFinish, onError }: UploadCustomRequestOpti
     return
   }
   try {
-    const url = await uploadFile(f)
+    // 海螺预设音频游客可播放，需标记公开
+    const url = await uploadFile(f, true)
     editing.value!.fileId = parseFileId(url)
     message.success('音频上传成功')
     onFinish()
