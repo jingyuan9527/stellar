@@ -5,6 +5,15 @@ name: docker-build-push
 # 均不指定（push master 或手动留空）→ 推 commit sha。latest 始终跟随最新构建。
 # 首次推送后包默认为 private，需到 GitHub → Packages → stellar → Settings → Change visibility 设为 Public，
 # 服务器才可免登录 pull；或服务器用 read:packages PAT `docker login ghcr.io`。
+#
+# 构建提速方案（2026-08）：
+#   - 旧：单 buildx 一次 build 双平台，arm64 走 QEMU 模拟，QEMU 软件翻译比原生慢 3-5 倍，
+#     整个构建墙钟被 arm64 拖到十几分钟。
+#   - 新：matrix 拆两个 job，各自用「原生架构 runner」构建自己平台（amd64=ubuntu-latest、
+#     arm64=ubuntu-24.04-arm，public 仓库免费）——无需 QEMU，两 job 并行，墙钟≈max(单平台)。
+#     各 job 只推中间 tag `:latest-amd64`/`:latest-arm64`，末尾 merge job 用
+#     `docker buildx imagetools create` 合成公共 `latest`/版本号 的多平台 manifest。
+#   - 构建缓存 cache scope 按平台隔离（type=gha 默认共享键会互相顶掉，scope 分离后两平台独立命中）。
 
 on:
   push:
@@ -16,29 +25,22 @@ on:
         description: '镜像版本号（如 v1.0.0）。留空则用 git tag 名（tag 触发）或 commit sha'
         required: false
 
+# 防止连续 push 触发重复构建排队（同一分支/线程内取消旧的新跑）
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
 
 jobs:
-  build-and-push:
+  # 统一定版本号（供 build/merge 两处取同一值）
+  resolve-version:
     runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.version.outputs.value }}
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Resolve version tag
         id: version
         run: |
@@ -50,15 +52,67 @@ jobs:
             echo "value=${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
 
+  build:
+    needs: [resolve-version]
+    # 双平台各自原生架构 runner 并行构建，免疫 QEMU 模拟惩罚（arm64 是旧方案慢的主因）
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            suffix: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            suffix: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      IMG: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 各平台只推中间 tag（latest-{suffix}），公共 latest/版本号 由 merge job 合成
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
-          # 服务器为 arm64（booksy），x86 机器也支持，双平台构建
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.value }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ env.IMG }}:latest-${{ matrix.suffix }}
+          cache-from: type=gha,scope=stellar-${{ matrix.suffix }}
+          cache-to: type=gha,scope=stellar-${{ matrix.suffix }},mode=max
+
+  # 把两个平台的中间 tag 合成多平台 manifest（服务器 pull 自动选所属架构层）
+  merge:
+    needs: [resolve-version, build]
+    runs-on: ubuntu-latest
+    env:
+      IMG: ghcr.io/${{ github.repository }}
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.IMG }}:latest \
+            -t ${{ env.IMG }}:${{ needs.resolve-version.outputs.value }} \
+            ${{ env.IMG }}:latest-amd64 \
+            ${{ env.IMG }}:latest-arm64
