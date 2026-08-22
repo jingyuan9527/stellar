@@ -38,6 +38,9 @@ public class MemosSyncLog {
     /** 拉取/写库失败条数 */
     private Integer errors;
 
+    /** 冲突待裁决条数（双向变更，自动同步跳过） */
+    private Integer conflicts;
+
     /** 同步耗时(毫秒) */
     private Long durationMs;
 

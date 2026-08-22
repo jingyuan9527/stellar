@@ -30,6 +30,6 @@ Lettuce + `sa-token-redis-jackson` + Spring Cache。`RedisConfig`：`RedisTempla
 - CORS：`stellar.cors.allowed-origins` 显式域名白名单（逗号分隔，凭据型跨域禁止通配，启动时校验）
 - 游戏/海螺/健康/备忘/Memos/Webhook/监控/TTS：见源码分包 `com.stellar.{ai,tts,game,system,memos,monitor,infra,dashboard}`，`ai_task` 统一历史，`WebUtils.getClientIp` 唯一 IP 解析
 - 模块依赖方向（单向，禁环）：`infra` 不依赖任何特性模块；特性模块间经 service/端口缝访问（如 `ai→tts` 走 `tts.port`、RAG 外部检索走 `ExternalRetriever` 缝），不直连他模块 Mapper；`dashboard` 为聚合包可依赖各特性模块；跨模块文件落库走 `FileService.create/deleteById`
-- Memos：验签在 infra `HmacWebhookVerifier` + `MemosWebhookGuard`（去重），同步互斥 `RedisMutex`，状态记录 `MemosSyncLogStore`，标签文本处理 `MemosTagCodec`；AI 打标签经 `AiAgentLoopService` + `WebPageFetchTool`（fetch_url）支持链接笔记先抓网页再打标，模型不支持 tools 自动降级纯文本
+- Memos：验签在 infra `HmacWebhookVerifier` + `MemosWebhookGuard`（去重），同步互斥 `RedisMutex`，状态记录 `MemosSyncLogStore`，标签文本处理 `MemosTagCodec`；AI 打标签经 `AiAgentLoopService` + `WebPageFetchTool`（fetch_url）支持链接笔记先抓网页再打标，模型不支持 tools 自动降级纯文本。冲突裁决：本地可编辑正文（`local_edited=1` 待同步，`PUT /memos/note/{id}/content`）；拉取合并时若远端也有更新 → 置 `conflict=1` 跳过自动覆盖（定时/webhook 同样跳过），用户经 `GET /memos/conflicts` + `POST /memos/conflict/resolve` 逐条/批量选「以本地为准」（正文+缺失标签写回覆盖远端）或「以远端为准」（GetMemo 拉取最新覆盖本地）后恢复同步；列表行对有分歧的笔记（待写回/本地编辑/冲突）另提供单条 `POST /memos/note/{id}/apply-remote` 以远端为准（丢弃全部本地标签与未同步编辑）
 
 DBX：`opencode.json` `dbx` MCP，改后重启 opencode 生效。

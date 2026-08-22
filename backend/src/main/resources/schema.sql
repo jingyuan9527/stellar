@@ -520,6 +520,12 @@ CREATE INDEX IF NOT EXISTS idx_memos_note_remote_deleted ON memos_note (remote_d
 -- 备忘笔记 RAG：笔记向量（JSON 数组文本 [v1,v2,...]），聊天时检索备份笔记注入问答，无 pgvector 依赖
 ALTER TABLE memos_note ADD COLUMN IF NOT EXISTS embedding TEXT;
 COMMENT ON COLUMN memos_note.embedding IS '笔记向量(JSON数组文本 [v1,v2,...]),备忘RAG内存余弦检索用,空=未向量化';
+-- 冲突裁决：本地可编辑正文后，双向变更（远端有更新 且 本地有未写回编辑）→ 置 conflict 待用户选方向
+ALTER TABLE memos_note ADD COLUMN IF NOT EXISTS local_edited SMALLINT DEFAULT 0;
+COMMENT ON COLUMN memos_note.local_edited IS '正文是否本地已编辑未同步: 0无 1有(待写回或冲突裁决)';
+ALTER TABLE memos_note ADD COLUMN IF NOT EXISTS conflict SMALLINT DEFAULT 0;
+COMMENT ON COLUMN memos_note.conflict IS '是否与远端冲突待裁决: 0否 1是(自动同步跳过,由用户选以远端/以本地为准)';
+CREATE INDEX IF NOT EXISTS idx_memos_note_conflict ON memos_note (conflict);
 
 -- 备忘同步状态：每次定时/手动「立即同步」落一条，用户可在备忘页查看；3 天前的记录由同步任务顺带清理
 CREATE TABLE IF NOT EXISTS memos_sync_log (
@@ -548,6 +554,9 @@ COMMENT ON COLUMN memos_sync_log.duration_ms IS '同步耗时(毫秒)';
 COMMENT ON COLUMN memos_sync_log.error_message IS '失败原因(status=failed 时)';
 COMMENT ON COLUMN memos_sync_log.create_time IS '同步开始时间(记录生成时间)';
 CREATE INDEX IF NOT EXISTS idx_memos_sync_log_create_time ON memos_sync_log (create_time);
+-- 冲突计数：本次同步检出双向变更待裁决的条数
+ALTER TABLE memos_sync_log ADD COLUMN IF NOT EXISTS conflicts INT NOT NULL DEFAULT 0;
+COMMENT ON COLUMN memos_sync_log.conflicts IS '冲突待裁决条数(双向变更,自动同步跳过)';
 
 -- sys_ai_usage 扩展：关联供应商与模型类型，便于按类型/供应商统计
 ALTER TABLE sys_ai_usage ADD COLUMN IF NOT EXISTS provider_id BIGINT;

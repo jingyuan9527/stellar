@@ -4,7 +4,7 @@ import MarkdownIt from 'markdown-it'
 import {
   NCard, NForm, NFormItem, NInput, NButton, NSpace, NDataTable, NTag,
   NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem, NIcon, NSelect,
-  NAlert, NDropdown, NModal, NPagination, NCheckbox, useMessage,
+  NAlert, NDropdown, NModal, NPagination, NCheckbox, NPopconfirm, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, SelectOption, DropdownOption } from 'naive-ui'
 import BrandEmpty from '@/components/BrandEmpty.vue'
@@ -12,9 +12,13 @@ import {
   getMemosConfig, saveMemosConfig, pullMemos, tagMemos, pushMemosTags,
   getMemosPage, getMemosStats, getMemosWebhookConfig, saveMemosWebhookSecret,
   rebuildMemosRag, getMemosRagStatus, getMemosSyncLogPage, getLatestMemosSyncLog,
+  updateMemosNoteContent, getMemosConflicts, resolveMemosConflicts, applyMemosNoteRemote,
 } from '@/api/memos'
 import { getAiModelsByType } from '@/api/ai'
-import type { MemosConfig, MemosNote, MemosStats, MemosSyncLog, AiModel } from '@/types/api'
+import type {
+  MemosConfig, MemosNote, MemosStats, MemosSyncLog, AiModel,
+  MemosConflictResolveItem, MemosResolveDirection,
+} from '@/types/api'
 import { iconMap } from '@/utils/icons'
 import { formatTime } from '@/utils/format'
 import { useIsMobile } from '@/composables/useBreakpoint'
@@ -246,10 +250,70 @@ async function handlePull() {
   pulling.value = true
   try {
     const r = await pullMemos()
-    message.success(`同步完成：新增 ${r.created}，更新 ${r.updated}，标记删除 ${r.markedDeleted}，失败 ${r.errors}`)
+    const base = `同步完成：新增 ${r.created}，更新 ${r.updated}，标记删除 ${r.markedDeleted}`
+    if (r.conflicts > 0) {
+      message.warning(`${base}，冲突 ${r.conflicts} 条待处理`)
+    } else {
+      message.success(`${base}，失败 ${r.errors}`)
+    }
     await Promise.all([loadData(), loadStats(), loadLatestSync(), loadSyncLogs()])
+    // 有冲突 → 弹出裁决弹窗，逐条/批量选方向后执行
+    if (r.conflicts > 0) {
+      await openConflictModal()
+    }
   } finally {
     pulling.value = false
+  }
+}
+
+// ===== 冲突裁决（双向变更：本地编辑未同步 且 远端有更新）=====
+
+interface ConflictRow {
+  note: MemosNote
+  direction: MemosResolveDirection | null
+}
+
+const conflictShow = ref(false)
+const conflictLoading = ref(false)
+const conflictResolving = ref(false)
+const conflictRows = ref<ConflictRow[]>([])
+
+/** 未选择方向的条数（全部选完才允许提交） */
+const conflictUnresolved = computed(() => conflictRows.value.filter((r) => !r.direction).length)
+
+async function openConflictModal() {
+  conflictShow.value = true
+  conflictLoading.value = true
+  try {
+    const notes = await getMemosConflicts()
+    conflictRows.value = notes.map((note) => ({ note, direction: null }))
+  } finally {
+    conflictLoading.value = false
+  }
+}
+
+function setAllDirections(direction: MemosResolveDirection) {
+  conflictRows.value.forEach((r) => (r.direction = direction))
+}
+
+const directionOptions: SelectOption[] = [
+  { label: '以本地为准（写回覆盖远端）', value: 'local' },
+  { label: '以远端为准（远端覆盖本地）', value: 'remote' },
+]
+
+async function confirmResolve() {
+  const items: MemosConflictResolveItem[] = conflictRows.value
+    .filter((r) => r.direction)
+    .map((r) => ({ id: r.note.id, direction: r.direction as MemosResolveDirection }))
+  if (!items.length) return
+  conflictResolving.value = true
+  try {
+    const r = await resolveMemosConflicts(items)
+    message.success(`冲突处理完成：成功 ${r.success}，跳过 ${r.skipped}，失败 ${r.failed}`)
+    conflictShow.value = false
+    await Promise.all([loadData(), loadStats()])
+  } finally {
+    conflictResolving.value = false
   }
 }
 
@@ -364,7 +428,7 @@ async function loadRagStatus() {
 
 // ===== 统计 =====
 
-const stats = ref<MemosStats>({ total: 0, active: 0, deleted: 0, untagged: 0, pendingPush: 0 })
+const stats = ref<MemosStats>({ total: 0, active: 0, deleted: 0, untagged: 0, pendingPush: 0, conflicts: 0 })
 
 async function loadStats() {
   stats.value = await getMemosStats()
@@ -376,6 +440,7 @@ const statTags = computed(() => [
   { label: '已删', value: stats.value.deleted },
   { label: '未打标', value: stats.value.untagged },
   { label: '待写回', value: stats.value.pendingPush },
+  { label: '冲突', value: stats.value.conflicts },
 ])
 
 // ===== 列表 =====
@@ -458,10 +523,14 @@ const columns: DataTableColumns<MemosNote> = [
     },
   },
   {
-    title: '标签同步', key: 'tagsSynced', width: 90,
-    render: (row) => row.tagsSynced === 1
-      ? h(NTag, { size: 'small', type: 'success' }, { default: () => '已同步' })
-      : h(NTag, { size: 'small', type: 'warning' }, { default: () => '待写回' }),
+    title: '同步状态', key: 'tagsSynced', width: 130,
+    render: (row) => {
+      const tags = [syncStateTag(row)]
+      tags.push(row.tagsSynced === 1
+        ? h(NTag, { size: 'small', type: 'success' }, { default: () => '已同步' })
+        : h(NTag, { size: 'small', type: 'warning' }, { default: () => '待写回' }))
+      return h(NSpace, { size: 4, wrap: true }, { default: () => tags })
+    },
   },
   {
     title: '远端状态', key: 'remoteDeleted', width: 90,
@@ -470,14 +539,60 @@ const columns: DataTableColumns<MemosNote> = [
       : h(NTag, { size: 'small', type: 'success' }, { default: () => '存活' }),
   },
   {
-    title: '操作', key: 'actions', width: 80, fixed: 'right',
-    render: (row) => h(NButton, { size: 'small', text: true, onClick: () => viewDetail(row) },
-      { icon: () => h(NIcon, null, { default: () => h(iconMap.eye) }), default: () => '查看' }),
+    title: '操作', key: 'actions', width: 150, fixed: 'right',
+    render: (row) => h(NSpace, { size: 8, wrap: false }, {
+      default: () => [
+        h(NButton, { size: 'small', text: true, onClick: () => viewDetail(row) },
+          { icon: () => h(NIcon, null, { default: () => h(iconMap.eye) }), default: () => '查看' }),
+        hasLocalDivergence(row)
+          ? h(NPopconfirm, { onPositiveClick: () => handleApplyRemote(row) }, {
+              default: () => '将丢弃全部本地标签与未同步编辑，用远端最新覆盖该笔记，确认？',
+              trigger: () => h(NButton,
+                { size: 'small', loading: applyingRemoteId.value === row.id },
+                { default: () => '以远端为准' }),
+            })
+          : null,
+      ],
+    }),
   },
 ]
 
 /** 已删除行置灰 + 删除线（视觉区分备份与存活笔记，桌面表格行用） */
 const rowProps = (row: MemosNote) => (row.remoteDeleted === 1 ? { class: 'row-deleted' } : {})
+
+/** 同步状态标签：冲突待裁决 > 本地编辑未同步 > 无 */
+function syncStateTag(row: MemosNote) {
+  if (row.conflict === 1) {
+    return h(NTag, { size: 'small', type: 'error' }, { default: () => '冲突' })
+  }
+  if (row.localEdited === 1) {
+    return h(NTag, { size: 'small', type: 'warning' }, { default: () => '本地编辑' })
+  }
+  return h('span')
+}
+
+/** 是否存在本地与远端的分歧（待写回标签/本地编辑/冲突），有才展示「以远端为准」 */
+function hasLocalDivergence(row: MemosNote) {
+  return row.tagsSynced !== 1 || row.conflict === 1 || row.localEdited === 1
+}
+
+const applyingRemoteId = ref<number | null>(null)
+
+/** 单条以远端为准：丢弃全部本地标签与未同步编辑，用远端最新覆盖该条 */
+async function handleApplyRemote(row: MemosNote) {
+  applyingRemoteId.value = row.id
+  try {
+    const fresh = await applyMemosNoteRemote(row.id)
+    message.success('已以远端最新覆盖该笔记')
+    const idx = tableData.value.findIndex((n) => n.id === row.id)
+    if (idx >= 0) tableData.value[idx] = fresh
+    // 详情抽屉开着时同步刷新
+    if (current.value?.id === row.id) current.value = fresh
+    await loadStats()
+  } finally {
+    applyingRemoteId.value = null
+  }
+}
 
 /** 移动端卡片勾选（AI 打标签用） */
 function toggleCheck(id: number, checked: boolean) {
@@ -536,9 +651,40 @@ function handleSearch() {
 const drawerOpen = ref(false)
 const current = ref<MemosNote | null>(null)
 
+// 本地编辑正文：仅更新本地备份，远端也有变更时下次同步转冲突裁决
+const editing = ref(false)
+const editContent = ref('')
+const savingContent = ref(false)
+
 function viewDetail(row: MemosNote) {
   current.value = row
+  editing.value = false
   drawerOpen.value = true
+}
+
+function startEdit() {
+  if (!current.value) return
+  editContent.value = current.value.content
+  editing.value = true
+}
+
+async function saveEdit() {
+  if (!current.value || !editContent.value.trim()) {
+    message.warning('正文不能为空')
+    return
+  }
+  savingContent.value = true
+  try {
+    await updateMemosNoteContent(current.value.id, editContent.value)
+    message.success('已保存，本地版本待同步到远端')
+    editing.value = false
+    await loadData()
+    // 从刷新后的列表取回最新状态（localEdited 等）
+    const fresh = tableData.value.find((n) => n.id === current.value?.id)
+    if (fresh) current.value = fresh
+  } finally {
+    savingContent.value = false
+  }
 }
 
 onMounted(() => {
@@ -589,6 +735,10 @@ onMounted(() => {
             <template v-if="isMobile">
               <NTag size="tiny" type="info" :bordered="false">总数 {{ stats.total }}</NTag>
               <NTag size="tiny" type="warning" :bordered="false">待写回 {{ stats.pendingPush }}</NTag>
+              <NTag v-if="stats.conflicts > 0" size="tiny" type="error" :bordered="false"
+                role="button" @click="openConflictModal">
+                冲突 {{ stats.conflicts }}
+              </NTag>
             </template>
             <template v-else>
               <NTag v-for="s in statTags" :key="s.label" size="tiny" type="info" :bordered="false">
@@ -681,12 +831,22 @@ onMounted(() => {
               <NTag v-if="row.tags.length > 3" size="tiny" type="default" :bordered="false">
                 +{{ row.tags.length - 3 }}
               </NTag>
+              <NTag v-if="row.conflict === 1" size="tiny" type="error" :bordered="false">冲突</NTag>
+              <NTag v-else-if="row.localEdited === 1" size="tiny" type="warning" :bordered="false">本地编辑</NTag>
               <NTag size="tiny" :type="row.tagsSynced === 1 ? 'success' : 'warning'" :bordered="false">
                 {{ row.tagsSynced === 1 ? '已同步' : '待写回' }}
               </NTag>
               <NTag size="tiny" :type="row.remoteDeleted === 1 ? 'error' : 'success'" :bordered="false">
                 {{ row.remoteDeleted === 1 ? '已删' : '存活' }}
               </NTag>
+              <NPopconfirm v-if="hasLocalDivergence(row)" @positive-click="handleApplyRemote(row)">
+                <template #trigger>
+                  <NButton size="tiny" quaternary type="warning" :loading="applyingRemoteId === row.id">
+                    以远端为准
+                  </NButton>
+                </template>
+                将丢弃全部本地标签与未同步编辑，用远端最新覆盖，确认？
+              </NPopconfirm>
               <span class="card-time">{{ formatTime(row.remoteUpdateTime || row.createTime) }}</span>
             </div>
           </div>
@@ -788,6 +948,48 @@ onMounted(() => {
       </template>
     </NModal>
 
+    <!-- 冲突裁决弹窗：同步检出双向变更后弹出，逐条选方向或批量统一方向 -->
+    <NModal v-model:show="conflictShow" preset="card" title="笔记与远端不一致"
+      :style="{ width: 'var(--modal-lg)', maxWidth: '94vw' }">
+      <NSpace vertical :size="12">
+        <NAlert type="warning" :bordered="false">
+          检出 <b>{{ conflictRows.length }}</b> 条笔记本地与远端都有变更，自动同步已跳过。
+          请为每条选择保留方向：「以本地为准」把本地版本写回远端；「以远端为准」用远端覆盖本地（丢弃本地修改）。
+        </NAlert>
+        <NSpace :size="8" align="center">
+          <span class="conflict-batch-label">批量设置：</span>
+          <NButton size="small" @click="setAllDirections('local')">全部以本地为准</NButton>
+          <NButton size="small" @click="setAllDirections('remote')">全部以远端为准</NButton>
+        </NSpace>
+        <div class="conflict-list">
+          <div v-for="row in conflictRows" :key="row.note.id" class="conflict-item">
+            <div class="conflict-content" :title="row.note.content">{{ row.note.content || '-' }}</div>
+            <div class="conflict-meta">
+              <NTag size="tiny" :bordered="false">#{{ row.note.uid }}</NTag>
+              <span class="conflict-time">{{ formatTime(row.note.updateTime) }}</span>
+            </div>
+            <NSelect v-model:value="row.direction" size="small" :options="directionOptions"
+              placeholder="选择处理方向" class="conflict-select" />
+          </div>
+        </div>
+        <div v-if="!conflictLoading && !conflictRows.length" style="text-align:center;color:var(--c-text-3);padding:12px 0">
+          暂无待处理的冲突
+        </div>
+      </NSpace>
+      <template #footer>
+        <NSpace justify="end" align="center">
+          <span v-if="conflictUnresolved > 0" class="conflict-unresolved">
+            还有 {{ conflictUnresolved }} 条未选择方向
+          </span>
+          <NButton @click="conflictShow = false">稍后处理</NButton>
+          <NButton type="primary" :loading="conflictResolving" :disabled="conflictUnresolved > 0 || !conflictRows.length"
+            @click="confirmResolve">
+            执行处理
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
     <NDrawer v-model:show="drawerOpen" :width="drawerWidth">
       <NDrawerContent title="笔记详情" closable>
         <template v-if="current">
@@ -800,9 +1002,13 @@ onMounted(() => {
               </NSpace>
             </NDescriptionsItem>
             <NDescriptionsItem label="标签同步">
-              <NTag size="small" :type="current.tagsSynced === 1 ? 'success' : 'warning'">
-                {{ current.tagsSynced === 1 ? '已同步' : '待写回' }}
-              </NTag>
+              <NSpace :size="4">
+                <NTag v-if="current.conflict === 1" size="small" type="error">冲突待裁决</NTag>
+                <NTag v-else-if="current.localEdited === 1" size="small" type="warning">本地编辑</NTag>
+                <NTag size="small" :type="current.tagsSynced === 1 ? 'success' : 'warning'">
+                  {{ current.tagsSynced === 1 ? '已同步' : '待写回' }}
+                </NTag>
+              </NSpace>
             </NDescriptionsItem>
             <NDescriptionsItem label="远端状态">
               <NTag size="small" :type="current.remoteDeleted === 1 ? 'error' : 'success'">
@@ -813,10 +1019,31 @@ onMounted(() => {
             <NDescriptionsItem label="远端更新">{{ formatTime(current.remoteUpdateTime) }}</NDescriptionsItem>
             <NDescriptionsItem label="本地入库">{{ formatTime(current.createTime) }}</NDescriptionsItem>
           </NDescriptions>
-<NCard title="原文" size="small" style="margin-top: 12px">
-            <div v-if="current.content" class="markdown-body" v-html="renderMarkdown(current.content)"></div>
-            <span v-else style="color:var(--c-text-3)">-</span>
-          </NCard>
+            <NCard size="small" style="margin-top: 12px">
+              <template #header>
+                <NSpace :size="8" align="center">
+                  原文
+                  <NTag v-if="current.conflict === 1" size="small" type="error">与远端冲突，请在同步后裁决</NTag>
+                </NSpace>
+              </template>
+              <template #header-extra>
+                <NButton v-if="!editing" size="tiny" quaternary :disabled="current.remoteDeleted === 1" @click="startEdit">
+                  编辑
+                </NButton>
+              </template>
+              <NInput v-if="editing" v-model:value="editContent" type="textarea" :autosize="{ minRows: 8, maxRows: 20 }"
+                placeholder="编辑正文（Markdown）" />
+              <template v-else>
+                <div v-if="current.content" class="markdown-body" v-html="renderMarkdown(current.content)"></div>
+                <span v-else style="color:var(--c-text-3)">-</span>
+              </template>
+              <template v-if="editing" #action>
+                <NSpace justify="end">
+                  <NButton size="small" @click="editing = false">取消</NButton>
+                  <NButton type="primary" size="small" :loading="savingContent" @click="saveEdit">保存</NButton>
+                </NSpace>
+              </template>
+            </NCard>
         </template>
       </NDrawerContent>
     </NDrawer>
@@ -1040,6 +1267,60 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* ===== 冲突裁决弹窗 ===== */
+
+.conflict-batch-label {
+  font-size: 13px;
+  color: var(--c-text-2);
+}
+
+.conflict-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.conflict-item {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  background: var(--c-fill-2);
+}
+
+.conflict-content {
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.conflict-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.conflict-time {
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+
+.conflict-select {
+  margin-top: 8px;
+  max-width: 320px;
+}
+
+.conflict-unresolved {
+  font-size: 12px;
+  color: var(--c-warning);
 }
 
 .tag-model-label {

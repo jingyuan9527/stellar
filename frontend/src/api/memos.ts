@@ -2,6 +2,7 @@ import { request } from './request'
 import type {
   MemosConfig,
   MemosConfigUpdate,
+  MemosConflictResolveItem,
   MemosJobResult,
   MemosNote,
   MemosQuery,
@@ -61,6 +62,26 @@ export function getMemosPage(params: MemosQuery) {
 /** 统计 */
 export function getMemosStats() {
   return request<MemosStats>({ url: '/memos/stats', method: 'get' })
+}
+
+/** 本地编辑笔记正文：仅更新本地备份，远端也有变更时下次同步转冲突 */
+export function updateMemosNoteContent(id: number, content: string) {
+  return request<void>({ url: `/memos/note/${id}/content`, method: 'put', data: { content } })
+}
+
+/** 单条以远端为准：拉取远端最新覆盖本地，丢弃全部本地标签与未同步编辑 */
+export function applyMemosNoteRemote(id: number) {
+  return request<MemosNote>({ url: `/memos/note/${id}/apply-remote`, method: 'post', timeout: 120000 })
+}
+
+/** 冲突待裁决列表（双向变更，自动同步已跳过） */
+export function getMemosConflicts() {
+  return request<MemosNote[]>({ url: '/memos/conflicts', method: 'get' })
+}
+
+/** 批量解决冲突：逐条指定以本地为准（写回覆盖远端）/ 以远端为准（远端覆盖本地） */
+export function resolveMemosConflicts(items: MemosConflictResolveItem[]) {
+  return request<MemosJobResult>({ url: '/memos/conflict/resolve', method: 'post', data: { items }, timeout: 600000 })
 }
 
 /** Webhook 配置：是否已配置签名密钥 */

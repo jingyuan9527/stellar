@@ -14,6 +14,7 @@ import com.stellar.infra.RedisMutex;
 import com.stellar.infra.SafeUrlValidator;
 import com.stellar.memos.client.MemosApiClient;
 import com.stellar.memos.dto.MemosConfigDTO;
+import com.stellar.memos.dto.MemosConflictResolveDTO;
 import com.stellar.memos.dto.MemosQueryDTO;
 import com.stellar.memos.entity.MemosNote;
 import com.stellar.memos.entity.MemosSyncLog;
@@ -43,7 +44,9 @@ import java.util.stream.Collectors;
 /**
  * 备忘同步编排：拉取 memo.booksy.cf 笔记备份到本地（远端删除 → 本地标记删除）、
  * 勾选笔记 AI 打标签并自动写回远端（content 末尾追加 #标签）、手动标签写回兜底、webhook 实时接收。
- * <p>动作互不影响、各自触发：{@link #syncPull} / {@link #aiTag} / {@link #pushTags}。
+ * <p>本地支持编辑正文（local_edited 标记）：拉取时若远端也有更新则置 conflict 待裁决并跳过自动覆盖，
+ * 由用户选「以本地为准」（写回覆盖远端）或「以远端为准」（远端覆盖本地）后恢复同步。
+ * <p>动作互不影响、各自触发：{@link #syncPull} / {@link #aiTag} / {@link #pushTags} / {@link #resolveConflicts}。
  * AI 打标签为勾选制，成功后自动写回，失败置待写回可手动重试。
  * <p>关注点拆分：签名校验与去重在 {@link MemosWebhookGuard}，同步互斥在 infra {@link RedisMutex}，
  * 状态记录存取在 {@link MemosSyncLogStore}，标签文本处理在 {@link MemosTagCodec}；本类只做流程编排与合并语义。
@@ -71,6 +74,10 @@ public class MemosService {
     static final String SYNC_STATUS_PARTIAL = "partial";
     static final String SYNC_STATUS_FAILED = "failed";
     static final String SYNC_STATUS_SKIPPED = "skipped";
+
+    /** 冲突裁决方向：以本地为准（写回覆盖远端）/ 以远端为准（远端覆盖本地） */
+    static final String RESOLVE_DIRECTION_LOCAL = "local";
+    static final String RESOLVE_DIRECTION_REMOTE = "remote";
 
     /** Memos 支持的活动类型 */
     private static final String TYPE_MEMO_CREATED = "memos.memo.created";
@@ -200,7 +207,12 @@ public class MemosService {
             insertMemo(rm, now);
             status = "created";
         } else {
-            status = mergeRemote(local, rm, now) ? "updated" : "unchanged";
+            MergeOutcome outcome = mergeRemote(local, rm, now);
+            status = switch (outcome) {
+                case UPDATED -> "updated";
+                case CONFLICTED -> "conflict";
+                default -> "unchanged";
+            };
         }
         log.info("[备忘同步] Webhook 事件处理完成 uid={} status={}", rm.uid(), status);
         return Map.of("status", status, "uid", rm.uid());
@@ -254,9 +266,10 @@ public class MemosService {
                     backfillStub(local, rm, now);
                     result.setCreated(result.getCreated() + 1);
                 } else {
-                    boolean changed = mergeRemote(local, rm, now);
-                    if (changed) {
-                        result.setUpdated(result.getUpdated() + 1);
+                    switch (mergeRemote(local, rm, now)) {
+                        case UPDATED -> result.setUpdated(result.getUpdated() + 1);
+                        case CONFLICTED -> result.setConflicts(result.getConflicts() + 1);
+                        default -> { }
                     }
                 }
             } catch (Exception e) {
@@ -281,8 +294,9 @@ public class MemosService {
             }
         }
         result.setMarkedDeleted(marked);
-        log.info("[备忘同步] 同步完成 fetched={} created={} updated={} markedDeleted={} errors={}",
-                result.getFetched(), result.getCreated(), result.getUpdated(), result.getMarkedDeleted(), result.getErrors());
+        log.info("[备忘同步] 同步完成 fetched={} created={} updated={} markedDeleted={} conflicts={} errors={}",
+                result.getFetched(), result.getCreated(), result.getUpdated(),
+                result.getMarkedDeleted(), result.getConflicts(), result.getErrors());
         return result;
     }
 
@@ -346,6 +360,7 @@ public class MemosService {
                 record.setUpdated(result.getUpdated());
                 record.setMarkedDeleted(result.getMarkedDeleted());
                 record.setErrors(result.getErrors());
+                record.setConflicts(result.getConflicts());
                 syncLogStore.persist(record, start);
                 return result;
             } catch (Exception e) {
@@ -374,6 +389,8 @@ public class MemosService {
         note.setTags(MemosTagCodec.joinTags(rm.tags()));
         note.setTagsSynced(1);
         note.setRemoteDeleted(0);
+        note.setLocalEdited(0);
+        note.setConflict(0);
         note.setRemoteCreateTime(rm.createTime());
         note.setRemoteUpdateTime(rm.updateTime());
         note.setCreateTime(now);
@@ -401,9 +418,15 @@ public class MemosService {
 
     /**
      * 合并远端到本地（内容/时间/标签以远端为源，但保留本地未写回的 AI 标签）。
-     * 返回是否有变化（需更新）。
+     * <p>冲突保护：本地正文已编辑未同步（local_edited=1）且远端也有更新 → 置 conflict 待裁决，
+     * 跳过自动覆盖；conflict=1 的笔记在用户裁决前一直跳过。返回合并结果供调用方分别计数。
      */
-    private boolean mergeRemote(MemosNote local, MemosApiClient.MemosRemoteMemo rm, LocalDateTime now) {
+    private MergeOutcome mergeRemote(MemosNote local, MemosApiClient.MemosRemoteMemo rm, LocalDateTime now) {
+        // 冲突待裁决：自动同步一律跳过，等用户选「以远端为准 / 以本地为准」
+        if (local.getConflict() != null && local.getConflict() == 1) {
+            log.debug("[备忘同步] 冲突待裁决，自动同步跳过 uid={}", local.getUid());
+            return MergeOutcome.SKIPPED_CONFLICT;
+        }
         String cleanContent = MemosTagCodec.stripTrailingTagBlock(rm.content());
         Set<String> remoteTags = new LinkedHashSet<>(rm.tags());
         // 本地已有标签（可能是 AI 生成未写回）与远端并集，避免同步丢失待写回标签
@@ -412,16 +435,33 @@ public class MemosService {
         merged.addAll(localTags);
         // 若本地存在远端没有的标签 → 仍未写回，tags_synced=0；否则远端已含全部 → 1
         boolean hasPending = localTags.stream().anyMatch(t -> !remoteTags.contains(t));
+        boolean localEdited = local.getLocalEdited() != null && local.getLocalEdited() == 1;
+
+        boolean remoteChanged = !cleanContent.equals(local.getContent())
+                || (local.getRemoteUpdateTime() == null ? rm.updateTime() != null
+                    : !local.getRemoteUpdateTime().equals(rm.updateTime()));
+        // 双向变更（远端有更新 且 本地正文已编辑未同步）→ 置冲突保留双方现状，由用户裁决方向
+        if (localEdited && remoteChanged) {
+            local.setConflict(1);
+            local.setUpdateTime(now);
+            memosNoteMapper.updateById(local);
+            log.info("[备忘同步] 检出双向变更置冲突 uid={} id={} remoteUpdateTime={}",
+                    local.getUid(), local.getId(), rm.updateTime());
+            return MergeOutcome.CONFLICTED;
+        }
 
         boolean changed = local.getRemoteDeleted() != null && local.getRemoteDeleted() == 1
-                || !cleanContent.equals(local.getContent())
+                || (!localEdited && !cleanContent.equals(local.getContent()))
                 || !MemosTagCodec.joinTags(merged).equals(local.getTags())
                 || (local.getRemoteUpdateTime() == null ? rm.updateTime() != null
                     : !local.getRemoteUpdateTime().equals(rm.updateTime()));
         if (!changed) {
-            return false;
+            return MergeOutcome.UNCHANGED;
         }
-        local.setContent(cleanContent);
+        boolean contentChanged = !localEdited && !cleanContent.equals(local.getContent());
+        if (contentChanged) {
+            local.setContent(cleanContent);
+        }
         local.setTags(MemosTagCodec.joinTags(merged));
         // 远端内容与本地一致、且远端已含全部标签时仍按远端状态（避免残留 pending）
         local.setTagsSynced(hasPending ? 0 : 1);
@@ -431,8 +471,140 @@ public class MemosService {
         local.setUpdateTime(now);
         memosNoteMapper.updateById(local);
         // 内容变更后异步重新向量化（失败不阻断合并，rebuild 兜底）
-        memosRagService.embedNoteAsync(local.getId(), cleanContent);
-        return true;
+        if (contentChanged) {
+            memosRagService.embedNoteAsync(local.getId(), cleanContent);
+        }
+        return MergeOutcome.UPDATED;
+    }
+
+    /** 合并结果：无变化 / 已按远端覆盖更新 / 双向变更置冲突待裁决 / 冲突中跳过 */
+    private enum MergeOutcome {
+        UNCHANGED, UPDATED, CONFLICTED, SKIPPED_CONFLICT
+    }
+
+    // ===== 本地编辑与冲突裁决 =====
+
+    /**
+     * 本地编辑笔记正文：仅更新本地备份并置 local_edited=1 待同步；
+     * 下次拉取若远端也有更新则转冲突由用户裁决，否则保持本地版本等待手动/批量写回。
+     */
+    public void updateLocalContent(Long id, String content) {
+        MemosNote note = memosNoteMapper.selectById(id);
+        if (note == null) {
+            throw new BusinessException("笔记不存在: id=" + id);
+        }
+        if (note.getRemoteDeleted() != null && note.getRemoteDeleted() == 1) {
+            throw new BusinessException("该笔记已在远端删除，不可编辑");
+        }
+        String cleaned = MemosTagCodec.stripTrailingTagBlock(content);
+        if (!StringUtils.hasText(cleaned)) {
+            throw new BusinessException("正文不能为空");
+        }
+        note.setContent(cleaned);
+        note.setLocalEdited(1);
+        note.setUpdateTime(LocalDateTime.now());
+        memosNoteMapper.updateById(note);
+        // 本地编辑后异步重新向量化（失败不阻断保存，rebuild 兜底）
+        memosRagService.embedNoteAsync(note.getId(), cleaned);
+        log.info("[备忘同步] 本地编辑已保存 id={} uid={} len={} operator={}", id, note.getUid(), cleaned.length(), operator());
+    }
+
+    /** 冲突待裁决列表（conflict=1，按更新时间倒序）。 */
+    public List<MemosNoteVO> listConflicts() {
+        return memosNoteMapper.selectList(new LambdaQueryWrapper<MemosNote>()
+                        .eq(MemosNote::getConflict, 1)
+                        .orderByDesc(MemosNote::getUpdateTime))
+                .stream().map(this::toVO).collect(Collectors.toList());
+    }
+
+    /**
+     * 批量解决冲突：
+     * <ul>
+     *   <li>local（以本地为准）：本地正文 + 缺失标签写回远端（UpdateMemo），成功后清除编辑/冲突标记；</li>
+     *   <li>remote（以远端为准）：拉取远端最新覆盖本地，成功后清除标记。</li>
+     * </ul>
+     * 单条失败不影响其余条目，结果按成功/失败计数返回。
+     */
+    public MemosJobResultVO resolveConflicts(List<MemosConflictResolveDTO.Item> items) {
+        CheckConfig cfg = loadConfig();
+        log.info("[备忘同步] 冲突裁决开始 count={} operator={}", items.size(), operator());
+
+        MemosJobResultVO result = new MemosJobResultVO();
+        result.setProcessed(items.size());
+        for (MemosConflictResolveDTO.Item item : items) {
+            MemosNote note = memosNoteMapper.selectById(item.getId());
+            if (note == null || note.getConflict() == null || note.getConflict() != 1) {
+                result.setSkipped(result.getSkipped() + 1);
+                log.warn("[备忘同步] 冲突裁决跳过（不存在或非冲突态） id={}", item.getId());
+                continue;
+            }
+            try {
+                if (RESOLVE_DIRECTION_LOCAL.equals(item.getDirection())) {
+                    resolveToLocal(cfg, note);
+                } else {
+                    resolveToRemote(cfg, note);
+                }
+                result.setSuccess(result.getSuccess() + 1);
+            } catch (Exception e) {
+                result.setFailed(result.getFailed() + 1);
+                log.error("[备忘同步] 冲突裁决失败 id={} uid={} direction={}: {}",
+                        item.getId(), note.getUid(), item.getDirection(), e.getMessage(), e);
+            }
+        }
+        log.info("[备忘同步] 冲突裁决完成 processed={} success={} skipped={} failed={}",
+                result.getProcessed(), result.getSuccess(), result.getSkipped(), result.getFailed());
+        return result;
+    }
+
+    /** 以本地为准：正文 + content 中缺失的 #标签 写回远端，成功后清编辑/冲突标记。 */
+    private void resolveToLocal(CheckConfig cfg, MemosNote note) {
+        Set<String> presentInContent = MemosTagCodec.collectTagsInContent(note.getContent());
+        List<String> toPush = MemosTagCodec.splitTags(note.getTags()).stream()
+                .filter(t -> !presentInContent.contains(t)).toList();
+        String newContent = toPush.isEmpty()
+                ? note.getContent()
+                : MemosTagCodec.buildContentWithTags(note.getContent(), toPush);
+        memosApiClient.updateContent(cfg.baseUrl(), cfg.token(), note.getUid(), newContent);
+        note.setContent(MemosTagCodec.stripTrailingTagBlock(newContent));
+        note.setLocalEdited(0);
+        note.setConflict(0);
+        note.setTagsSynced(1);
+        note.setUpdateTime(LocalDateTime.now());
+        memosNoteMapper.updateById(note);
+        memosRagService.embedNoteAsync(note.getId(), note.getContent());
+        log.info("[备忘同步] 冲突裁决以本地为准成功 uid={} id={} pushedTags={}", note.getUid(), note.getId(), toPush.size());
+    }
+
+    /** 以远端为准：GetMemo 拉取远端最新覆盖本地，成功后清编辑/冲突标记并刷新远端时间戳。 */
+    private void resolveToRemote(CheckConfig cfg, MemosNote note) {
+        MemosApiClient.MemosRemoteMemo rm = memosApiClient.getMemo(cfg.baseUrl(), cfg.token(), note.getUid());
+        String cleanContent = MemosTagCodec.stripTrailingTagBlock(rm.content());
+        note.setContent(cleanContent);
+        note.setTags(MemosTagCodec.joinTags(rm.tags()));
+        note.setTagsSynced(1);
+        note.setLocalEdited(0);
+        note.setConflict(0);
+        note.setRemoteCreateTime(rm.createTime());
+        note.setRemoteUpdateTime(rm.updateTime());
+        note.setUpdateTime(LocalDateTime.now());
+        memosNoteMapper.updateById(note);
+        memosRagService.embedNoteAsync(note.getId(), cleanContent);
+        log.info("[备忘同步] 冲突裁决以远端为准成功 uid={} id={} remoteUpdateTime={}",
+                note.getUid(), note.getId(), rm.updateTime());
+    }
+
+    /**
+     * 单条笔记以远端为准：拉取远端最新覆盖本地（丢弃全部本地标签与未同步编辑）。
+     * 适用于放弃待写回标签、或冲突笔记直接采用远端版本；成功返回更新后的视图。
+     */
+    public MemosNoteVO applyRemoteById(Long id) {
+        MemosNote note = memosNoteMapper.selectById(id);
+        if (note == null) {
+            throw new BusinessException("笔记不存在: id=" + id);
+        }
+        CheckConfig cfg = loadConfig();
+        resolveToRemote(cfg, note);
+        return toVO(note);
     }
 
     // ===== AI 打标签（勾选笔记）+ 自动写回 =====
@@ -612,6 +784,8 @@ public class MemosService {
                 .eq(MemosNote::getRemoteDeleted, 1)));
         vo.setUntagged(countActiveWithNoTags());
         vo.setPendingPush(countActivePendingPush());
+        vo.setConflicts(memosNoteMapper.selectCount(new LambdaQueryWrapper<MemosNote>()
+                .eq(MemosNote::getConflict, 1)));
         return vo;
     }
 
@@ -635,6 +809,8 @@ public class MemosService {
         vo.setTags(MemosTagCodec.splitTags(n.getTags()).stream().toList());
         vo.setTagsSynced(n.getTagsSynced());
         vo.setRemoteDeleted(n.getRemoteDeleted());
+        vo.setLocalEdited(n.getLocalEdited() == null ? 0 : n.getLocalEdited());
+        vo.setConflict(n.getConflict() == null ? 0 : n.getConflict());
         vo.setRemoteCreateTime(n.getRemoteCreateTime());
         vo.setRemoteUpdateTime(n.getRemoteUpdateTime());
         vo.setCreateTime(n.getCreateTime());

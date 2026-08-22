@@ -28,6 +28,9 @@ public class MemosSyncLogVO {
 
     private Integer errors;
 
+    /** 冲突待裁决条数（双向变更，自动同步跳过） */
+    private Integer conflicts;
+
     private Long durationMs;
 
     private String errorMessage;

@@ -7,6 +7,8 @@ import com.stellar.common.Result;
 import com.stellar.common.annotation.PublicAccess;
 import com.stellar.enums.OperationType;
 import com.stellar.memos.dto.MemosConfigDTO;
+import com.stellar.memos.dto.MemosContentUpdateDTO;
+import com.stellar.memos.dto.MemosConflictResolveDTO;
 import com.stellar.memos.dto.MemosQueryDTO;
 import com.stellar.memos.dto.MemosTagDTO;
 import com.stellar.memos.dto.MemosWebhookConfigDTO;
@@ -25,6 +27,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,12 +35,13 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 
 /**
  * 备忘同步接口（需登录）：
  * 配置（域名/Token/提示词模板）、立即同步（拉取备份+标记远端已删）、
- * AI 打标签、标签写回 Memos、笔记分页与统计。
+ * AI 打标签、标签写回 Memos、笔记分页与统计、本地编辑正文、冲突裁决（以远端/以本地为准）。
  * <p>同步/打标签/写回均为同步耗时操作，前端调用时加大超时。
  */
 @Slf4j
@@ -95,6 +99,37 @@ public class MemosController {
     @Log(title = "备忘同步", type = OperationType.QUERY)
     public Result<Page<MemosNoteVO>> page(@ModelAttribute @Valid MemosQueryDTO query) {
         return Result.success(memosService.page(query));
+    }
+
+    // ===== 本地编辑与冲突裁决 =====
+
+    /** 本地编辑笔记正文：仅更新本地备份，置待同步；远端也有变更时下次同步转冲突。 */
+    @PutMapping("/note/{id}/content")
+    @Log(title = "备忘同步", type = OperationType.UPDATE)
+    public Result<Void> updateContent(@PathVariable Long id, @Valid @RequestBody MemosContentUpdateDTO dto) {
+        memosService.updateLocalContent(id, dto.getContent());
+        return Result.success();
+    }
+
+    /** 单条以远端为准：拉取远端最新覆盖本地，丢弃全部本地标签与未同步编辑 */
+    @PostMapping("/note/{id}/apply-remote")
+    @Log(title = "备忘同步", type = OperationType.UPDATE)
+    public Result<MemosNoteVO> applyRemote(@PathVariable Long id) {
+        return Result.success(memosService.applyRemoteById(id));
+    }
+
+    /** 冲突待裁决列表（双向变更，自动同步已跳过） */
+    @GetMapping("/conflicts")
+    @Log(title = "备忘同步", type = OperationType.QUERY)
+    public Result<List<MemosNoteVO>> conflicts() {
+        return Result.success(memosService.listConflicts());
+    }
+
+    /** 批量解决冲突：逐条指定以本地为准（写回覆盖远端）/ 以远端为准（远端覆盖本地） */
+    @PostMapping("/conflict/resolve")
+    @Log(title = "备忘同步", type = OperationType.UPDATE)
+    public Result<MemosJobResultVO> resolveConflicts(@Valid @RequestBody MemosConflictResolveDTO dto) {
+        return Result.success(memosService.resolveConflicts(dto.getItems()));
     }
 
     @GetMapping("/stats")

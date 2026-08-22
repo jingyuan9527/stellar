@@ -565,6 +565,7 @@ export interface MemosSyncResult {
   created: number
   updated: number
   markedDeleted: number
+  conflicts: number
   errors: number
 }
 
@@ -577,6 +578,7 @@ export interface MemosSyncLog {
   updated: number
   markedDeleted: number
   errors: number
+  conflicts: number
   durationMs: number | null
   errorMessage: string | null
   createTime: string | null
@@ -599,6 +601,10 @@ export interface MemosNote {
   tags: string[]
   tagsSynced: number
   remoteDeleted: number
+  /** 正文是否本地已编辑未同步：0 无 1 有 */
+  localEdited: number
+  /** 是否与远端冲突待裁决：0 否 1 是 */
+  conflict: number
   remoteCreateTime: string | null
   remoteUpdateTime: string | null
   createTime: string | null
@@ -618,6 +624,15 @@ export interface MemosStats {
   deleted: number
   untagged: number
   pendingPush: number
+  conflicts: number
+}
+
+/** 冲突裁决方向：local 以本地为准（写回覆盖远端）/ remote 以远端为准（远端覆盖本地） */
+export type MemosResolveDirection = 'local' | 'remote'
+
+export interface MemosConflictResolveItem {
+  id: number
+  direction: MemosResolveDirection
 }
 
 export interface MonitorOverview {

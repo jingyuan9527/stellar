@@ -22,4 +22,7 @@ public class MemosStatsVO {
 
     /** 待写回标签（存活且 tags_synced=0） */
     private long pendingPush;
+
+    /** 与远端冲突待裁决（双向变更，自动同步跳过） */
+    private long conflicts;
 }

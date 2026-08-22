@@ -34,6 +34,12 @@ public class MemosNote {
     /** 远端是否已删除：0 存活 1 标记删除 */
     private Integer remoteDeleted;
 
+    /** 正文是否本地已编辑未同步：0 无 1 有（待写回或冲突裁决后清除） */
+    private Integer localEdited;
+
+    /** 是否与远端冲突待裁决：0 否 1 是（自动同步跳过，用户选以远端/以本地为准后清除） */
+    private Integer conflict;
+
     /** 远端创建时间 */
     private LocalDateTime remoteCreateTime;
 

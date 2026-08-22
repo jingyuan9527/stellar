@@ -120,6 +120,26 @@ public class MemosApiClient {
     }
 
     /**
+     * 拉取远端单条笔记（冲突裁决"以远端为准"时取最新内容覆盖本地）。
+     * <p>Connect GetMemo 优先，REST GET 兜底；两通道都失败抛异常由调用方统计。
+     */
+    public MemosRemoteMemo getMemo(String baseUrl, String token, String uid) {
+        JsonNode memo;
+        try {
+            memo = connectPost(baseUrl, token, "GetMemo", "{\"name\":\"memos/" + uid + "\"}");
+            log.debug("[备忘同步] GetMemo Connect 成功 uid={}", uid);
+        } catch (Exception e) {
+            log.warn("[备忘同步] GetMemo Connect 通道失败，改走 REST: {}", e.getMessage());
+            memo = restGet(baseUrl, token, uid);
+        }
+        MemosRemoteMemo rm = parseMemo(memo);
+        if (rm == null) {
+            throw new BusinessException("Memos 返回的笔记缺少 uid: " + uid);
+        }
+        return rm;
+    }
+
+    /**
      * 更新远端笔记 content（标签写回：content 末尾追加 #标签）。
      * <p>Connect UpdateMemo 优先，REST PATCH 兜底；两通道都失败抛异常由调用方统计失败数。
      */
@@ -183,6 +203,29 @@ public class MemosApiClient {
             throw e;
         } catch (Exception e) {
             throw new BusinessException("Memos 拉取失败: " + e.getMessage());
+        }
+    }
+
+    /** REST GET 单条 memo 兜底。 */
+    private JsonNode restGet(String baseUrl, String token, String uid) {
+        String url = baseUrl + "/api/v1/memos/" + encode(uid);
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofMinutes(2))
+                .header("Accept", "application/json")
+                .header("Authorization", "Bearer " + token)
+                .GET()
+                .build();
+        try {
+            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (resp.statusCode() != 200) {
+                throw new BusinessException("Memos REST 获取笔记失败: HTTP " + resp.statusCode());
+            }
+            return objectMapper.readTree(resp.body());
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException("Memos 获取笔记失败: " + e.getMessage());
         }
     }
 

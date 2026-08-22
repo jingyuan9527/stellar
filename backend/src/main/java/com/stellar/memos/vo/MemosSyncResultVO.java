@@ -20,6 +20,9 @@ public class MemosSyncResultVO {
     /** 标记为远端已删 */
     private int markedDeleted;
 
+    /** 冲突待裁决（双向变更，自动同步跳过） */
+    private int conflicts;
+
     /** 拉取/写库失败条数 */
     private int errors;
 }

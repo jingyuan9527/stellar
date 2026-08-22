@@ -86,6 +86,7 @@ public class MemosSyncLogStore {
         vo.setUpdated(l.getUpdated());
         vo.setMarkedDeleted(l.getMarkedDeleted());
         vo.setErrors(l.getErrors());
+        vo.setConflicts(l.getConflicts());
         vo.setDurationMs(l.getDurationMs());
         vo.setErrorMessage(l.getErrorMessage());
         vo.setCreateTime(l.getCreateTime());
