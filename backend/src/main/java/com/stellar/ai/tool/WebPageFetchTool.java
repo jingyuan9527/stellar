@@ -6,6 +6,7 @@ import com.stellar.ai.vo.ToolResult;
 import com.stellar.infra.SafeUrlValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,7 @@ import java.util.Map;
  * 获取网页内容，再结合笔记内容完成任务。独立于聊天模块的 {@code AiChatToolService}
  * （画图/TTS 面向游客聊天，本工具面向服务端任务）。
  * <p>安全：走 {@link SafeUrlValidator} 防 SSRF（仅公网 http/https、禁本机/私网地址）；
+ * 关闭 Jsoup 自动跳转，重定向手动跟随且每跳目标重新过校验，杜绝 30x 绕过；
  * 抓取失败不抛异常——错误信息作为 tool 结果回传，由 LLM 决定后续动作。
  */
 @Slf4j
@@ -37,6 +39,8 @@ public class WebPageFetchTool {
     private static final int MAX_BODY_BYTES = 2 * 1024 * 1024;
     /** 回传给 LLM 的正文文本上限（字符），防 token 爆炸 */
     private static final int MAX_TEXT_CHARS = 4000;
+    /** 重定向跟随上限，防跳转环；每跳目标都重新过 SafeUrlValidator，杜绝 30x 绕过 SSRF 校验 */
+    private static final int MAX_REDIRECTS = 5;
 
     /**
      * OpenAI 兼容 tools 定义。
@@ -92,11 +96,34 @@ public class WebPageFetchTool {
             return "抓取失败：" + e.getMessage();
         }
         try {
-            Document doc = Jsoup.connect(uri.toString())
-                    .timeout(TIMEOUT_MS)
-                    .maxBodySize(MAX_BODY_BYTES)
-                    .userAgent("Mozilla/5.0 (compatible; StellarBot/1.0; +https://booksy.cf)")
-                    .get();
+            // followRedirects(false)：Jsoup 默认自动跟随 30x 且不校验目标，
+            // 公网页可借跳转打到云元数据/内网，故手动逐跳校验
+            URI current = uri;
+            Document doc = null;
+            for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
+                Connection.Response response = Jsoup.connect(current.toString())
+                        .followRedirects(false)
+                        .timeout(TIMEOUT_MS)
+                        .maxBodySize(MAX_BODY_BYTES)
+                        .userAgent("Mozilla/5.0 (compatible; StellarBot/1.0; +https://booksy.cf)")
+                        .execute();
+                int status = response.statusCode();
+                if (status / 100 == 3) {
+                    String location = response.header("Location");
+                    if (location == null || location.isBlank()) {
+                        return "抓取失败：目标返回重定向但缺少 Location 头";
+                    }
+                    current = SafeUrlValidator.validatePublicHttpUrl(
+                            current.resolve(location).toString(), "网页抓取");
+                    continue;
+                }
+                doc = response.parse();
+                break;
+            }
+            if (doc == null) {
+                log.warn("[AI工具] fetch_url 重定向超过上限 url={} hops={}", url, MAX_REDIRECTS);
+                return "抓取失败：重定向次数超过 " + MAX_REDIRECTS + " 次，已终止";
+            }
             String title = doc.title() == null ? "" : doc.title().trim();
             String text = (doc.body() != null ? doc.body() : doc).text();
             if (text.length() > MAX_TEXT_CHARS) {
