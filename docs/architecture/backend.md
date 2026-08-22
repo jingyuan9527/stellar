@@ -6,7 +6,7 @@ Sa-Token `Authorization: Bearer`，`AuthInterceptor` 默认全拦仅 `@PublicAcc
 
 ## Redis
 
-Lettuce + `sa-token-redis-jackson` + Spring Cache。`RedisConfig`：`RedisTemplate` JSON + `RedisCacheManager` 前缀 `stellar:`，关 `defaultTyping`（防 gadget），存量旧条目 `RedisCacheBootstrap` 启动清理。pub/sub：`stellar:ai:notify` / `stellar:cache:invalidate` 用类级 `Jackson2JsonRedisSerializer`。`CacheConstants` 统一前缀；`@Cacheable` 返回 `List` 需 `collect(Collectors.toList())`。落点：`dict / menu-visibility / profile-project / ai-model / ai-provider / setting`。
+Lettuce + `sa-token-redis-jackson` + Spring Cache。`RedisConfig`：`RedisTemplate` JSON + `RedisCacheManager` 前缀 `stellar:`，关 `defaultTyping`（防 gadget），旧格式存量条目已随 TTL 自然过期（一次性启动清理类已移除）。pub/sub：`stellar:ai:notify` / `stellar:cache:invalidate` 用类级 `Jackson2JsonRedisSerializer`。`CacheConstants` 统一前缀；`@Cacheable` 返回 `List` 需 `collect(Collectors.toList())`。落点：`dict / menu-visibility / profile-project / ai-model / ai-provider / setting`。
 
 ## 常规
 

@@ -63,8 +63,6 @@ public class RedisConfig {
      * 可信配置型数据且调用方只透传序列化或判空，不依赖强类型，可接受。
      * 注意：builder 传自定义 ObjectMapper 时 typing 默认即关闭，显式传入 {code ObjectMapper}
      * 仅为注册 JavaTimeModule 支持 {@link java.time.LocalDateTime} 序列化。
-     * <p>旧版本写入的带 {@code @class} 缓存条目无法按原形状读回，由 {@link RedisCacheBootstrap}
-     * 启动时统一清理迁移（详见该类）。
      */
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory factory) {
