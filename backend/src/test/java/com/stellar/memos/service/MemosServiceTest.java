@@ -5,7 +5,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stellar.ai.service.AiAgentLoopService;
 import com.stellar.ai.service.AiChatService;
+import com.stellar.ai.tool.WebPageFetchTool;
 import com.stellar.common.BusinessException;
 import com.stellar.infra.ExternalCallLogger;
 import com.stellar.memos.client.MemosApiClient;
@@ -66,6 +68,10 @@ class MemosServiceTest {
     @Mock
     private AiChatService aiChatService;
     @Mock
+    private AiAgentLoopService agentLoopService;
+    @Mock
+    private WebPageFetchTool webPageFetchTool;
+    @Mock
     private ExternalCallLogger externalCallLogger;
     @Mock
     private RedisTemplate<String, Object> redisTemplate;
@@ -88,7 +94,8 @@ class MemosServiceTest {
         com.stellar.infra.RedisMutex redisMutex = new com.stellar.infra.RedisMutex(redisTemplate);
         MemosSyncLogStore syncLogStore = new MemosSyncLogStore(memosSyncLogMapper);
         service = new MemosService(memosNoteMapper, memosApiClient, sysSettingService,
-                aiChatService, externalCallLogger, memosRagService, webhookGuard, redisMutex,
+                aiChatService, agentLoopService, webPageFetchTool, externalCallLogger,
+                memosRagService, webhookGuard, redisMutex,
                 syncLogStore, tagCodec, new ObjectMapper());
     }
 
@@ -476,7 +483,7 @@ class MemosServiceTest {
         n2.setContent("读书笔记");
         n2.setRemoteDeleted(0);
         when(memosNoteMapper.selectBatchIds(any())).thenReturn(List.of(n1, n2));
-        when(aiChatService.chatCompletionWithMessages(any(), eq(5L)))
+        when(agentLoopService.runWithDegrade(any(), any(), any(), eq(5L)))
                 .thenReturn("编程、后端")
                 .thenReturn("读书");
 
@@ -489,7 +496,7 @@ class MemosServiceTest {
         assertEquals(0, result.getPushFailed());
         assertEquals("编程,后端", n1.getTags());
         assertEquals(1, n1.getTagsSynced());
-        verify(aiChatService, times(2)).chatCompletionWithMessages(any(), eq(5L));
+        verify(agentLoopService, times(2)).runWithDegrade(any(), any(), any(), eq(5L));
         verify(memosApiClient).updateContent("https://memo.booksy.cf", "tok", "u1",
                 "关于 spring boot 的文章\n\n#编程 #后端");
         verify(memosApiClient).updateContent("https://memo.booksy.cf", "tok", "u2", "读书笔记\n\n#读书");
@@ -509,7 +516,7 @@ class MemosServiceTest {
         n.setRemoteDeleted(0);
         n.setTags("old,dup");
         when(memosNoteMapper.selectBatchIds(any())).thenReturn(List.of(n));
-        when(aiChatService.chatCompletionWithMessages(any(), eq(null))).thenReturn("new,dup");
+        when(agentLoopService.runWithDegrade(any(), any(), any(), eq(null))).thenReturn("new,dup");
 
         MemosJobResultVO result = service.aiTag(List.of(1L), null);
 
@@ -529,7 +536,7 @@ class MemosServiceTest {
         n.setContent("内容");
         n.setRemoteDeleted(0);
         when(memosNoteMapper.selectBatchIds(any())).thenReturn(List.of(n));
-        when(aiChatService.chatCompletionWithMessages(any(), eq(null))).thenReturn("标签a");
+        when(agentLoopService.runWithDegrade(any(), any(), any(), eq(null))).thenReturn("标签a");
         doThrow(new BusinessException("HTTP 500")).when(memosApiClient)
                 .updateContent(anyString(), anyString(), anyString(), anyString());
 
@@ -556,7 +563,7 @@ class MemosServiceTest {
 
         assertEquals(1, result.getSkipped());
         assertEquals(0, result.getSuccess());
-        verify(aiChatService, never()).chatCompletionWithMessages(anyList(), any());
+        verify(agentLoopService, never()).runWithDegrade(any(), any(), any(), any());
     }
 
     @Test
@@ -569,7 +576,7 @@ class MemosServiceTest {
         n.setContent("内容");
         n.setRemoteDeleted(0);
         when(memosNoteMapper.selectBatchIds(any())).thenReturn(List.of(n));
-        when(aiChatService.chatCompletionWithMessages(any(), eq(null))).thenReturn("  ");
+        when(agentLoopService.runWithDegrade(any(), any(), any(), eq(null))).thenReturn("  ");
 
         MemosJobResultVO result = service.aiTag(List.of(1L), null);
 
@@ -588,7 +595,7 @@ class MemosServiceTest {
         n.setContent("内容");
         n.setRemoteDeleted(0);
         when(memosNoteMapper.selectBatchIds(any())).thenReturn(List.of(n));
-        when(aiChatService.chatCompletionWithMessages(any(), eq(null)))
+        when(agentLoopService.runWithDegrade(any(), any(), any(), eq(null)))
                 .thenThrow(new RuntimeException("llm down"));
 
         MemosJobResultVO result = service.aiTag(List.of(1L), null);

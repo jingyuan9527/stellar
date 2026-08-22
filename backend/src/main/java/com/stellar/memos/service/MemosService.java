@@ -5,7 +5,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stellar.ai.service.AiAgentLoopService;
 import com.stellar.ai.service.AiChatService;
+import com.stellar.ai.tool.WebPageFetchTool;
 import com.stellar.common.BusinessException;
 import com.stellar.infra.ExternalCallLogger;
 import com.stellar.infra.RedisMutex;
@@ -82,10 +84,20 @@ public class MemosService {
                     + "要求：\n- 只输出标签本身，用顿号或逗号分隔，放在一行\n"
                     + "- 不要输出编号、解释或多余文字\n- 标签要精准概括笔记主题\n\n笔记内容：\n{{content}}";
 
+    /**
+     * 打标签 system 消息：告知 LLM 有 fetch_url 工具可用。
+     * 用户自定义提示词模板（memo_tag_prompt）保持不动，避免破坏既有配置语义。
+     */
+    private static final String TAG_SYSTEM_PROMPT =
+            "若笔记内容包含网页链接且链接内容影响标签判断，先调用 fetch_url 工具获取网页内容再打标签；"
+                    + "无法获取的链接直接跳过，基于笔记已有内容打标签。";
+
     private final MemosNoteMapper memosNoteMapper;
     private final MemosApiClient memosApiClient;
     private final SysSettingService sysSettingService;
     private final AiChatService aiChatService;
+    private final AiAgentLoopService agentLoopService;
+    private final WebPageFetchTool webPageFetchTool;
     private final ExternalCallLogger externalCallLogger;
     private final MemosRagService memosRagService;
     private final MemosWebhookGuard webhookGuard;
@@ -482,15 +494,21 @@ public class MemosService {
         return result;
     }
 
-    /** 单条笔记 AI 打标签：模板填充 → LLM 非流式（指定模型或 TEXT 默认）→ 解析标签列表。 */
+    /**
+     * 单条笔记 AI 打标签：模板填充 → agent 循环（LLM 可调 fetch_url 抓取笔记内链接
+     * 的网页内容后再打标，模型不支持 tools 自动降级纯文本）→ 解析标签列表。
+     */
     private List<String> tagWithAi(String template, MemosNote note, CheckConfig cfg, Long modelId) {
         String prompt = template.contains("{{content}}")
                 ? template.replace("{{content}}", note.getContent() == null ? "" : note.getContent())
                 : template + (template.endsWith("\n") ? "" : "\n") + (note.getContent() == null ? "" : note.getContent());
         String content = note.getContent() == null ? "" : note.getContent();
-        Map<String, String> msg = Map.of("role", "user", "content", prompt);
+        List<Map<String, String>> messages = List.of(
+                Map.of("role", "system", "content", TAG_SYSTEM_PROMPT),
+                Map.of("role", "user", "content", prompt));
         long start = System.currentTimeMillis();
-        String llmResult = aiChatService.chatCompletionWithMessages(List.of(msg), modelId);
+        String llmResult = agentLoopService.runWithDegrade(messages,
+                List.of(webPageFetchTool.definition()), webPageFetchTool::execute, modelId);
         externalCallLogger.success("备忘同步AI打标签", cfg.baseUrl(),
                 "uid=" + note.getUid() + ", contentLen=" + content.length() + ", modelId=" + modelId,
                 System.currentTimeMillis() - start);

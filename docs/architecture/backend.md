@@ -19,7 +19,7 @@ Lettuce + `sa-token-redis-jackson` + Spring Cache。`RedisConfig`：`RedisTempla
 ## AI / 文件 / 限流 / 其他
 
 - AI 多供应商多模型：`sys_ai_provider/model` + 字典 `model_type`，全局开关 `sys_setting`，`AiProviderService/AiModelService` + `AiResolvedConfig`，SSE `SseEmitter` 代理，`ai_task` 统一历史，内置模板 3 套
-- LLM 协议层：`ai.protocol.LlmChatClient` 缝（URL 形态/请求构建/发送/SSE 解析/usage 解析），当前实现 `OpenAiHttpChatClient`（OpenAI 兼容）；新增原生协议加实现类即可。`AiChatService` 只做编排，SSE 写通道在 `SseEmitterChannel`，token 计费/历史落库在 `AiUsageRecorder`
+- LLM 协议层：`ai.protocol.LlmChatClient` 缝（URL 形态/请求构建/发送/SSE 解析/usage 解析），当前实现 `OpenAiHttpChatClient`（OpenAI 兼容）；新增原生协议加实现类即可。`AiChatService` 只做编排，SSE 写通道在 `SseEmitterChannel`，token 计费/历史落库在 `AiUsageRecorder`；非流式 agent 循环在 `AiAgentLoopService`（工具定义与执行由调用方注入，上限 5 轮），首个工具 `ai.tool.WebPageFetchTool`（fetch_url，jsoup 抓正文，SafeUrlValidator 防 SSRF，超时 10s/正文 2MB/回传截断 4000 字符）
 - URL 安全：`SafeUrlValidator` 限公开 http/https，禁重定向，限长读取（图 20MB/视频 200MB）
 - 计费：`sys_ai_usage`，`stream_options.include_usage` 精确否则估算，仪表盘聚合
 - 任务通知：`SseEmitterManager` + `AiNotify` Redis pub/sub，30s 心跳，前端 `store/aiNotify` 重连
@@ -30,6 +30,6 @@ Lettuce + `sa-token-redis-jackson` + Spring Cache。`RedisConfig`：`RedisTempla
 - CORS：`stellar.cors.allowed-origins` 显式域名白名单（逗号分隔，凭据型跨域禁止通配，启动时校验）
 - 游戏/海螺/健康/备忘/Memos/Webhook/监控/TTS：见源码分包 `com.stellar.{ai,tts,game,system,memos,monitor,infra,dashboard}`，`ai_task` 统一历史，`WebUtils.getClientIp` 唯一 IP 解析
 - 模块依赖方向（单向，禁环）：`infra` 不依赖任何特性模块；特性模块间经 service/端口缝访问（如 `ai→tts` 走 `tts.port`、RAG 外部检索走 `ExternalRetriever` 缝），不直连他模块 Mapper；`dashboard` 为聚合包可依赖各特性模块；跨模块文件落库走 `FileService.create/deleteById`
-- Memos：验签在 infra `HmacWebhookVerifier` + `MemosWebhookGuard`（去重），同步互斥 `RedisMutex`，状态记录 `MemosSyncLogStore`，标签文本处理 `MemosTagCodec`
+- Memos：验签在 infra `HmacWebhookVerifier` + `MemosWebhookGuard`（去重），同步互斥 `RedisMutex`，状态记录 `MemosSyncLogStore`，标签文本处理 `MemosTagCodec`；AI 打标签经 `AiAgentLoopService` + `WebPageFetchTool`（fetch_url）支持链接笔记先抓网页再打标，模型不支持 tools 自动降级纯文本
 
 DBX：`opencode.json` `dbx` MCP，改后重启 opencode 生效。
