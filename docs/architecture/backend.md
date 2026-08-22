@@ -19,7 +19,7 @@ Lettuce + `sa-token-redis-jackson` + Spring Cache。`RedisConfig`：`RedisTempla
 ## AI / 文件 / 限流 / 其他
 
 - AI 多供应商多模型：`sys_ai_provider/model` + 字典 `model_type`，全局开关 `sys_setting`，`AiProviderService/AiModelService` + `AiResolvedConfig`，SSE `SseEmitter` 代理，`ai_task` 统一历史，内置模板 3 套
-- LLM 协议层：`ai.protocol.LlmChatClient` 缝（URL 形态/请求构建/发送/SSE 解析/usage 解析），当前实现 `OpenAiHttpChatClient`（OpenAI 兼容）；新增原生协议加实现类即可。`AiChatService` 只做编排，SSE 写通道在 `SseEmitterChannel`，token 计费/历史落库在 `AiUsageRecorder`；非流式 agent 循环在 `AiAgentLoopService`（工具定义与执行由调用方注入，上限 5 轮），首个工具 `ai.tool.WebPageFetchTool`（fetch_url，jsoup 抓正文，SafeUrlValidator 防 SSRF，超时 10s/正文 2MB/回传截断 4000 字符）
+- LLM 协议层：`ai.protocol.LlmChatClient` 缝（URL 形态/请求构建/发送/SSE 解析/usage 解析），当前实现 `OpenAiHttpChatClient`（OpenAI 兼容）；新增原生协议加实现类即可。`AiChatService` 只做编排（三条流式管线共用 `executeStreamPipeline` 模板 + `StreamFlow` 钩子注入变体动作），SSE 写通道在 `SseEmitterChannel`，token 计费/历史落库在 `AiUsageRecorder`；非流式 agent 循环在 `AiAgentLoopService`（工具定义与执行由调用方注入，上限 5 轮），首个工具 `ai.tool.WebPageFetchTool`（fetch_url，jsoup 抓正文，SafeUrlValidator 防 SSRF，关闭自动跳转、重定向手动跟随且每跳重新校验（上限 5 跳），超时 10s/正文 2MB/回传截断 4000 字符）
 - URL 安全：`SafeUrlValidator` 限公开 http/https，禁重定向，限长读取（图 20MB/视频 200MB）
 - 计费：`sys_ai_usage`，`stream_options.include_usage` 精确否则估算，仪表盘聚合
 - 任务通知：`SseEmitterManager` + `AiNotify` Redis pub/sub，30s 心跳，前端 `store/aiNotify` 重连

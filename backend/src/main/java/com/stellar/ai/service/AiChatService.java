@@ -41,6 +41,8 @@ import jakarta.annotation.Resource;
  * <p>关注点拆分：本类只做编排（配置解析/SSE 生命周期/流式循环/工具二段流）；
  * token 计费与历史落库在 {@link AiUsageRecorder}，SSE 写通道在 {@link SseEmitterChannel}，
  * 传输层（URL 拼接/HTTP 发送/流解析）在此，待 A7 协议抽象。
+ * <p>三条流式管线（单prompt/多轮/工具后二段）共用 {@link #executeStreamPipeline} 模板，
+ * 变体动作（计费/落历史/完成回调/失败收尾）经 {@link StreamFlow} 钩子注入。
  */
 @Slf4j
 @Service
@@ -132,67 +134,37 @@ public class AiChatService {
             log.info("AI 流式请求: model={}, type={}, providerId={}, promptLen={}, subject={}:{}",
                     model, cfg.modelType(), cfg.providerId(), prompt.length(), subject.type(), subject.id());
 
-            final String finalSubjectType = subject.type();
-            final String finalSubjectId = subject.id();
             // 历史落库用：请求时刻、供应商/模型（lambda 内 final 捕获）
             final LocalDateTime requestTime = LocalDateTime.now();
             final long requestTimeMillis = System.currentTimeMillis();
             final Long providerId = cfg.providerId();
             final String finalModel = model;
             final boolean[] recorded = {false};
-            final String operator = finalSubjectType + ":" + finalSubjectId;
+            final String operator = subject.type() + ":" + subject.id();
             final String callParams = "model=" + finalModel + ", providerId=" + providerId
                     + ", promptLen=" + prompt.length() + ", subject=" + operator;
 
-            llmClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
-                    .thenAccept(response -> {
-                        if (response.statusCode() != 200) {
-                            String errMsg = "LLM 返回错误: HTTP " + response.statusCode();
-                            aiUsageRecorder.recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
-                                    prompt, null, "failed", errMsg, requestTime, requestTimeMillis);
-                            externalCallLogger.failure("LLM流式", url, callParams, errMsg,
-                                    System.currentTimeMillis() - requestTimeMillis, operator);
-                            sendError(emitter, errMsg);
-                            return;
-                        }
-                        SseEmitterChannel sender = new SseEmitterChannel(emitter);
-                        try (InputStream is = response.body()) {
-                            LlmChatClient.ChatStreamReply sr = llmClient.parseStream(is,
-                                    delta -> sender.send(Map.of("content", delta)));
+            executeStreamPipeline(emitter, httpRequest, cfg, "LLM流式", url, callParams,
+                    requestTimeMillis, operator, new StreamFlow() {
+                        @Override
+                        public void onSuccess(LlmChatClient.ChatStreamReply sr) {
                             aiUsageRecorder.recordTokenUsage(cfg, finalModel, prompt, sr.content(),
-                                    sr.hasUsage(), sr.usage(), finalSubjectType, finalSubjectId);
-                            aiUsageRecorder.recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
+                                    sr.hasUsage(), sr.usage(), subject.type(), subject.id());
+                            aiUsageRecorder.recordHistory(recorded, subject.type(), subject.id(), providerId, finalModel,
                                     prompt, sr.content(), "success", null, requestTime, requestTimeMillis);
-                            externalCallLogger.success("LLM流式", url, callParams + ", resultLen=" + sr.content().length(),
-                                    System.currentTimeMillis() - requestTimeMillis, operator);
-                            sender.sendAndComplete(Map.of("done", true));
                             log.info("AI 流式响应完成 tokens={}/{}/{} source={}",
                                     sr.usage()[0], sr.usage()[1], sr.usage()[2],
                                     sr.hasUsage() ? "usage" : "estimate");
-                        } catch (Exception e) {
-                            if (isClientDisconnect(e)) {
-                                log.warn("AI 流式客户端断开 subject={}:{} msg={}", finalSubjectType, finalSubjectId, e.getMessage());
-                                return;
-                            }
-                            log.error("AI 流式响应中断 model={} subject={}:{}: {}",
-                                    finalModel, finalSubjectType, finalSubjectId, e.getMessage(), e);
-                            aiUsageRecorder.recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
-                                    prompt, null, "failed", e.getMessage(), requestTime, requestTimeMillis);
-                            externalCallLogger.failure("LLM流式", url, callParams, e.getMessage(),
-                                    System.currentTimeMillis() - requestTimeMillis, operator);
-                            sendError(emitter, e.getMessage());
-                        } finally {
-                            sender.shutdown();
                         }
-                    })
-                    .exceptionally(e -> {
-                        log.error("调用 LLM 失败: {}", e.getMessage(), e);
-                        aiUsageRecorder.recordHistory(recorded, finalSubjectType, finalSubjectId, providerId, finalModel,
-                                prompt, null, "failed", e.getMessage(), requestTime, requestTimeMillis);
-                        externalCallLogger.failure("LLM流式", url, callParams, e.getMessage(),
-                                System.currentTimeMillis() - requestTimeMillis, operator);
-                        sendError(emitter, e.getMessage());
-                        return null;
+
+                        @Override
+                        public void onFailure(String message) {
+                            aiUsageRecorder.recordHistory(recorded, subject.type(), subject.id(), providerId, finalModel,
+                                    prompt, null, "failed", message, requestTime, requestTimeMillis);
+                            externalCallLogger.failure("LLM流式", url, callParams, message,
+                                    System.currentTimeMillis() - requestTimeMillis, operator);
+                            sendError(emitter, message);
+                        }
                     });
         } catch (Exception e) {
             throw new BusinessException("构建 AI 请求失败: " + e.getMessage());
@@ -360,19 +332,10 @@ public class AiChatService {
             String callParams = "model=" + model + ", providerId=" + cfg.providerId()
                     + ", msgCount=" + messages.size() + ", subject=" + operator;
 
-            llmClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
-                    .thenAccept(response -> {
-                        if (response.statusCode() != 200) {
-                            String errMsg = "LLM 返回错误: HTTP " + response.statusCode();
-                            externalCallLogger.failure("LLM多轮流式", url, callParams, errMsg,
-                                    System.currentTimeMillis() - requestTimeMillis, operator);
-                            sendError(emitter, errMsg);
-                            return;
-                        }
-                        SseEmitterChannel sender = new SseEmitterChannel(emitter);
-                        try (InputStream is = response.body()) {
-                            LlmChatClient.ChatStreamReply sr = llmClient.parseStream(is,
-                                    delta -> sender.send(Map.of("content", delta)));
+            executeStreamPipeline(emitter, httpRequest, cfg, "LLM多轮流式", url, callParams,
+                    requestTimeMillis, operator, new StreamFlow() {
+                        @Override
+                        public void onSuccess(LlmChatClient.ChatStreamReply sr) {
                             aiUsageRecorder.recordTokenUsageForMessages(cfg, model, messages, sr.content(),
                                     sr.hasUsage(), sr.usage(), subject.type(), subject.id());
                             if (onComplete != null) {
@@ -384,29 +347,15 @@ public class AiChatService {
                                             operator, ce.getMessage(), ce);
                                 }
                             }
-                            externalCallLogger.success("LLM多轮流式", url, callParams + ", resultLen=" + sr.content().length(),
-                                    System.currentTimeMillis() - requestTimeMillis, operator);
-                            sender.sendAndComplete(Map.of("done", true));
                             log.info("AI 多轮流式完成 tokens={}/{}/{}", sr.usage()[0], sr.usage()[1], sr.usage()[2]);
-                        } catch (Exception e) {
-                            if (isClientDisconnect(e)) {
-                                log.warn("AI 多轮流式客户端断开 subject={} msg={}", operator, e.getMessage());
-                                return;
-                            }
-                            log.error("AI 多轮流式响应中断 model={} subject={}: {}", model, operator, e.getMessage(), e);
-                            externalCallLogger.failure("LLM多轮流式", url, callParams, e.getMessage(),
-                                    System.currentTimeMillis() - requestTimeMillis, operator);
-                            sendError(emitter, e.getMessage());
-                        } finally {
-                            sender.shutdown();
                         }
-                    })
-                    .exceptionally(e -> {
-                        log.error("调用 LLM 失败: {}", e.getMessage(), e);
-                        externalCallLogger.failure("LLM多轮流式", url, callParams, e.getMessage(),
-                                System.currentTimeMillis() - requestTimeMillis, operator);
-                        sendError(emitter, e.getMessage());
-                        return null;
+
+                        @Override
+                        public void onFailure(String message) {
+                            externalCallLogger.failure("LLM多轮流式", url, callParams, message,
+                                    System.currentTimeMillis() - requestTimeMillis, operator);
+                            sendError(emitter, message);
+                        }
                     });
         } catch (Exception e) {
             throw new BusinessException("构建 AI 请求失败: " + e.getMessage());
@@ -686,47 +635,24 @@ public class AiChatService {
             String callParams = "model=" + model + ", providerId=" + cfg.providerId()
                     + ", msgCount=" + messages.size() + ", subject=" + operator;
 
-            llmClient.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
-                    .thenAccept(response -> {
-                        if (response.statusCode() != 200) {
-                            log.error("AI 聊天第二次流式失败: HTTP {}", response.statusCode());
-                            externalCallLogger.failure("LLM工具后流式", url, callParams,
-                                    "HTTP " + response.statusCode(), System.currentTimeMillis() - start, operator);
-                            sendError(emitter, "LLM 返回错误: HTTP " + response.statusCode());
-                            safeOnComplete(onComplete, new AiChatResult(null, toolResult.attachmentType(), toolResult.attachmentFileId()));
-                            return;
-                        }
-                        SseEmitterChannel sender = new SseEmitterChannel(emitter);
-                        try (InputStream is = response.body()) {
-                            LlmChatClient.ChatStreamReply sr = llmClient.parseStream(is,
-                                    delta -> sender.send(Map.of("content", delta)));
+            executeStreamPipeline(emitter, request, cfg, "LLM工具后流式", url, callParams,
+                    start, operator, new StreamFlow() {
+                        @Override
+                        public void onSuccess(LlmChatClient.ChatStreamReply sr) {
                             aiUsageRecorder.recordTokenUsageForMessages(cfg, model, messages, sr.content(),
                                     sr.hasUsage(), sr.usage(), subjectType, subjectId);
-                            externalCallLogger.success("LLM工具后流式", url, callParams + ", resultLen=" + sr.content().length(),
-                                    System.currentTimeMillis() - start, operator);
-                            sender.sendAndComplete(Map.of("done", true));
-                            safeOnComplete(onComplete, new AiChatResult(sr.content(),
-                                    toolResult.attachmentType(), toolResult.attachmentFileId()));
                             log.info("AI 聊天第二次流式完成 tokens={}/{}/{}", sr.usage()[0], sr.usage()[1], sr.usage()[2]);
-                        } catch (Exception e) {
-                            if (isClientDisconnect(e)) {
-                                log.warn("AI 工具后流式客户端断开 subject={} msg={}", operator, e.getMessage());
-                                return;
-                            }
-                            log.error("AI 工具后流式响应中断 model={} subject={}: {}", model, operator, e.getMessage(), e);
-                            externalCallLogger.failure("LLM工具后流式", url, callParams, e.getMessage(),
-                                    System.currentTimeMillis() - start, operator);
-                            sendError(emitter, e.getMessage());
-                        } finally {
-                            sender.shutdown();
                         }
-                    })
-                    .exceptionally(e -> {
-                        log.error("AI 聊天第二次流式调用失败: {}", e.getMessage(), e);
-                        externalCallLogger.failure("LLM工具后流式", url, callParams, e.getMessage(),
-                                System.currentTimeMillis() - start, operator);
-                        sendError(emitter, e.getMessage());
-                        return null;
+
+                        @Override
+                        public void onFailure(String message) {
+                            // 与工具判定第一腿对齐：所有失败路径都收尾回调，避免助手消息漏落库
+                            safeOnComplete(onComplete, new AiChatResult(null,
+                                    toolResult.attachmentType(), toolResult.attachmentFileId()));
+                            externalCallLogger.failure("LLM工具后流式", url, callParams, message,
+                                    System.currentTimeMillis() - start, operator);
+                            sendError(emitter, message);
+                        }
                     });
         } catch (Exception e) {
             log.error("构建第二次流式请求失败: {}", e.getMessage(), e);
@@ -752,6 +678,63 @@ public class AiChatService {
         emitter.onTimeout(() -> log.warn("SSE 超时断开 subject={}:{}", subjectType, subjectId));
         emitter.onCompletion(() -> log.debug("SSE 连接关闭 subject={}:{}", subjectType, subjectId));
         emitter.onError((e) -> log.warn("SSE 传输错误 subject={}:{} msg={}", subjectType, subjectId, e.getMessage()));
+    }
+
+    /** 流式管线变体钩子：成功/失败后的差异化动作（计费、落历史、完成回调、sendError）由各入口注入。 */
+    private interface StreamFlow {
+
+        /** 流解析完成后、done 帧发送前执行。 */
+        void onSuccess(LlmChatClient.ChatStreamReply reply);
+
+        /** 非 200 / 流中断 / 传输失败统一入口，实现方负责失败收尾。 */
+        void onFailure(String message);
+    }
+
+    /**
+     * 流式聊天管线模板：异步发送 → 非 200 分流 → SSE 解析转发 → 成功钩子 → done 帧。
+     * 断连分流与异常收尾统一在此处理，三条流式管线共用。
+     * <p>构建请求留在调用方：主线程入口的同步异常转 BusinessException 上抛，
+     * 工具后二段流在异步线程内只能 sendError，两者策略不同不宜收进模板。
+     */
+    private void executeStreamPipeline(SseEmitter emitter, HttpRequest request, AiResolvedConfig cfg,
+                                       String callName, String url, String callParams,
+                                       long startMillis, String operator, StreamFlow flow) {
+        llmClient.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
+                .thenAccept(response -> {
+                    if (response.statusCode() != 200) {
+                        flow.onFailure("LLM 返回错误: HTTP " + response.statusCode());
+                        return;
+                    }
+                    SseEmitterChannel sender = new SseEmitterChannel(emitter);
+                    try (InputStream is = response.body()) {
+                        LlmChatClient.ChatStreamReply sr = llmClient.parseStream(is,
+                                delta -> sender.send(Map.of("content", delta)));
+                        flow.onSuccess(sr);
+                        externalCallLogger.success(callName, url, callParams + ", resultLen=" + sr.content().length(),
+                                System.currentTimeMillis() - startMillis, operator);
+                        sender.sendAndComplete(Map.of("done", true));
+                    } catch (Exception e) {
+                        handleStreamFailure(cfg, callName, operator, flow, e);
+                    } finally {
+                        sender.shutdown();
+                    }
+                })
+                .exceptionally(e -> {
+                    log.error("调用 LLM 失败({}): {}", callName, e.getMessage(), e);
+                    flow.onFailure(e.getMessage());
+                    return null;
+                });
+    }
+
+    /** 流中断收尾：客户端主动断开仅告警返回；其余记错误日志并交钩子做失败收尾。 */
+    private void handleStreamFailure(AiResolvedConfig cfg, String callName, String operator, StreamFlow flow,
+                                     Exception e) {
+        if (isClientDisconnect(e)) {
+            log.warn("{} 客户端断开 subject={} msg={}", callName, operator, e.getMessage());
+            return;
+        }
+        log.error("{} 响应中断 model={} subject={}: {}", callName, cfg.model(), operator, e.getMessage(), e);
+        flow.onFailure(e.getMessage());
     }
 
     /** 截断字符串用于日志（避免长响应体/用户内容进入日志）。 */
