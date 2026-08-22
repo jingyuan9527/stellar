@@ -261,6 +261,8 @@ public class AiChatService {
                     .data(Map.of("error", message == null ? "AI 服务异常" : message), MediaType.APPLICATION_JSON));
             emitter.complete();
         } catch (Exception e) {
+            // 降级：连接已断无法推送错误，completeWithError 触发清理
+            log.warn("SSE 错误事件发送失败（连接已断）: {}", e.getMessage(), e);
             emitter.completeWithError(e);
         }
     }
@@ -768,7 +770,8 @@ public class AiChatService {
         try {
             onComplete.accept(result);
         } catch (Exception e) {
-            log.warn("onComplete 回调失败（不影响流式）: {}", e.getMessage());
+            // 降级：回调仅负责落消息等收尾，失败不影响流式输出，但需可查
+            log.warn("onComplete 回调失败（不影响流式）: {}", e.getMessage(), e);
         }
     }
 

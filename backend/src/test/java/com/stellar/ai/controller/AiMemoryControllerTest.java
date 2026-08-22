@@ -9,7 +9,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Map;
+import com.stellar.ai.dto.AiMemoryCreateDTO;
+import com.stellar.ai.dto.AiMemoryUpdateDTO;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -44,7 +45,9 @@ class AiMemoryControllerTest {
 
     @Test
     void update_正常() {
-        controller.update(1L, Map.of("content", "新内容"));
+        AiMemoryUpdateDTO dto = new AiMemoryUpdateDTO();
+        dto.setContent("新内容");
+        controller.update(1L, dto);
         verify(memoryService).update(1L, "新内容");
     }
 
@@ -55,15 +58,12 @@ class AiMemoryControllerTest {
     }
 
     @Test
-    void create_userId为数字_正常() {
-        controller.create(Map.of("userId", 5, "content", "记忆内容"));
+    void create_正常() {
+        AiMemoryCreateDTO dto = new AiMemoryCreateDTO();
+        dto.setUserId(5L);
+        dto.setContent("记忆内容");
+        controller.create(dto);
         verify(memoryService).create(5L, "记忆内容");
-    }
-
-    @Test
-    void create_userId非数字_抛BusinessException() {
-        assertThrows(BusinessException.class, () -> controller.create(Map.of("userId", "abc", "content", "x")));
-        verify(memoryService, never()).create(anyLong(), anyString());
     }
 
     @Test

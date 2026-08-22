@@ -2,10 +2,12 @@ package com.stellar.ai.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.stellar.annotation.Log;
-import com.stellar.common.BusinessException;
 import com.stellar.common.Result;
+import com.stellar.ai.dto.AiMemoryCreateDTO;
+import com.stellar.ai.dto.AiMemoryUpdateDTO;
 import com.stellar.enums.OperationType;
 import com.stellar.ai.service.AiMemoryService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -49,8 +51,8 @@ public class AiMemoryController {
 
     @PutMapping("/{id}")
     @Log(title = "长期记忆", type = OperationType.UPDATE)
-    public Result<Void> update(@PathVariable Long id, @RequestBody Map<String, String> body) {
-        memoryService.update(id, body.get("content"));
+    public Result<Void> update(@PathVariable Long id, @Valid @RequestBody AiMemoryUpdateDTO body) {
+        memoryService.update(id, body.getContent());
         return Result.success();
     }
 
@@ -66,12 +68,8 @@ public class AiMemoryController {
      */
     @PostMapping
     @Log(title = "长期记忆", type = OperationType.INSERT)
-    public Result<Void> create(@RequestBody Map<String, Object> body) {
-        Object uid = body.get("userId");
-        if (!(uid instanceof Number)) {
-            throw new BusinessException("userId 不能为空");
-        }
-        memoryService.create(((Number) uid).longValue(), (String) body.get("content"));
+    public Result<Void> create(@Valid @RequestBody AiMemoryCreateDTO body) {
+        memoryService.create(body.getUserId(), body.getContent());
         return Result.success();
     }
 

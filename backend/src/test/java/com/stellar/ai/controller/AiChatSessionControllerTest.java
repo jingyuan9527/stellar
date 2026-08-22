@@ -2,6 +2,7 @@ package com.stellar.ai.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.stellar.ai.dto.AiChatSessionCreateDTO;
+import com.stellar.ai.dto.AiChatSessionUpdateDTO;
 import com.stellar.ai.dto.AiChatStreamDTO;
 import com.stellar.ai.entity.AiChatMessage;
 import com.stellar.ai.entity.AiChatSession;
@@ -14,7 +15,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -72,7 +72,9 @@ class AiChatSessionControllerTest {
 
     @Test
     void updateSession_正常() {
-        controller.updateSession(1L, Map.of("title", "新标题"));
+        AiChatSessionUpdateDTO dto = new AiChatSessionUpdateDTO();
+        dto.setTitle("新标题");
+        controller.updateSession(1L, dto);
         verify(sessionService).updateSession(1L, "新标题");
     }
 

@@ -7,6 +7,7 @@ import com.stellar.common.annotation.PublicAccess;
 import com.stellar.common.annotation.RateLimit;
 import com.stellar.ai.dto.AiChatFeedbackDTO;
 import com.stellar.ai.dto.AiChatSessionCreateDTO;
+import com.stellar.ai.dto.AiChatSessionUpdateDTO;
 import com.stellar.ai.dto.AiChatStreamDTO;
 import com.stellar.ai.entity.AiChatMessage;
 import com.stellar.ai.entity.AiChatSession;
@@ -86,8 +87,9 @@ public class AiChatSessionController {
     @PublicAccess
     @PutMapping("/session/{id}")
     @Log(title = "AI聊天会话", type = OperationType.UPDATE)
-    public Result<Void> updateSession(@PathVariable Long id, @RequestBody Map<String, String> body) {
-        sessionService.updateSession(id, body.get("title"));
+    public Result<Void> updateSession(@PathVariable Long id,
+                                      @Valid @RequestBody AiChatSessionUpdateDTO body) {
+        sessionService.updateSession(id, body.getTitle());
         return Result.success();
     }
 

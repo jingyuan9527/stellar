@@ -47,6 +47,18 @@ public class GlobalExceptionHandler {
         return Result.failed(ResultCode.PARAM_ERROR.getCode(), message);
     }
 
+    /** 类级 @Validated 触发的方法参数校验（如 List 元素/容器约束）失败 */
+    @ExceptionHandler(jakarta.validation.ConstraintViolationException.class)
+    public Result<Void> handleConstraintViolation(jakarta.validation.ConstraintViolationException e,
+                                                  HttpServletRequest request) {
+        String message = e.getConstraintViolations().stream()
+                .map(jakarta.validation.ConstraintViolation::getMessage)
+                .findFirst()
+                .orElse("参数错误");
+        log.warn("参数校验失败 {} {}: {}", request.getMethod(), request.getRequestURI(), message);
+        return Result.failed(ResultCode.PARAM_ERROR.getCode(), message);
+    }
+
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception e, HttpServletRequest request) {
         log.error("系统异常 {} {}: ", request.getMethod(), request.getRequestURI(), e);
